@@ -29,6 +29,7 @@ npm run format    # tự sửa format/lint
 OMI_LIVE=1 npm test  # thêm probe chạy agent thật (tốn token): canary rule pack, model quan sát được
 node bin/omi doctor  # kiểm tra môi trường, AGENTS.md, .omi/config.yaml, GitHub (thêm --output json)
 node bin/omi ticket validate <n>  # gate ticket-first cho Issue #n (chỉ đọc); `task start`/`task status` tạo/xem run + worktree
+node bin/omi pr create <n> --body-file <f>  # push branch task, tạo/dùng lại PR → develop, kiểm base/head/Issue chính, In Review
 ```
 
 - Runtime TypeScript chạy trực tiếp bằng Node ≥ 22.18 (type stripping) — không có bước build. Chỉ dùng cú pháp TS xoá được (`erasableSyntaxOnly`), import kèm đuôi `.ts`.

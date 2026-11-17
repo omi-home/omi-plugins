@@ -7,6 +7,14 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type GhRunner, spawnGh } from "../adapters/github/client.ts";
+import {
+  closingIssues,
+  createPr,
+  type PullRequest,
+  prBody,
+  repoFacts,
+  validatePr,
+} from "../adapters/github/pr.ts";
 import { markStarted, type StatusChange, setStatus } from "../adapters/github/project.ts";
 import { fetchTicket, type Ticket, validateTicket } from "../adapters/github/ticket.ts";
 import { loadConfig, type OmiConfig } from "../core/config.ts";
@@ -241,4 +249,106 @@ export function taskRun(
   } finally {
     db.close();
   }
+}
+
+export interface PrResult {
+  pr: PullRequest;
+  created: boolean;
+  checks: Check[];
+  status: StatusChange | null;
+}
+
+const gitOut = (cwd: string, args: string[]) =>
+  execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+
+/**
+ * `omi pr create <n>` (spec §8 gate 5): push the task branch from its owned, clean worktree,
+ * create or reuse its one PR → `develop`, and verify base, head and exactly one primary Issue.
+ * A Release Issue takes the separate `develop → main` path and owns no worktree. No workflow
+ * transition here: PR_PENDING is reached through QA.
+ */
+export function prCreate(
+  deps: TaskDeps & { title?: string; body?: string; sleep?: (ms: number) => void },
+  issue: number,
+): PrResult {
+  const gh = deps.gh ?? spawnGh;
+  const { config } = repo(deps.cwd);
+  const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
+  const primary = `${ref.repository}#${issue}`;
+  const ticket = fetchTicket(config, issue, gh);
+  const release = typeOf(ticket) === "release";
+  let head = config.git.baseBranch;
+  let base = config.git.releaseBranch;
+  let tip: string | undefined;
+  if (release) {
+    if (ticket.state !== "OPEN") throw new OmiError("TICKET_INVALID", `${primary} is closed`);
+  } else {
+    const bad = startGates(ticket, config).find((c) => c.status === "fail");
+    if (bad) throw new OmiError(bad.code ?? "TICKET_INVALID", `${bad.name}: ${bad.detail}`);
+    const db = openState(statePath(deps.cwd));
+    let worktree: string | undefined;
+    try {
+      const run = liveRun(db, ref);
+      if (!run) throw new OmiError("POLICY_VIOLATION", `no active run for ${primary}: task start`);
+      head = ownedRefs(db, run.id, "branch")[0] ?? "";
+      worktree = ownedRefs(db, run.id, "worktree")[0];
+    } finally {
+      db.close();
+    }
+    if (!head || !worktree || !existsSync(worktree)) {
+      throw new OmiError("OWNERSHIP_MISMATCH", `${primary} has no owned branch and worktree`);
+    }
+    base = config.git.baseBranch;
+    if (gitOut(worktree, ["rev-parse", "--abbrev-ref", "HEAD"]) !== head) {
+      throw new OmiError("OWNERSHIP_MISMATCH", `worktree is not on ${head}`, { path: worktree });
+    }
+    if (gitOut(worktree, ["status", "--porcelain"])) {
+      throw new OmiError("WORKTREE_DIRTY", "commit or discard changes first", { path: worktree });
+    }
+    gitOut(worktree, ["fetch", "--quiet", "origin", base]);
+    if (gitOut(worktree, ["rev-list", "--count", `origin/${base}..HEAD`]) === "0") {
+      throw new OmiError("POLICY_VIOLATION", `${head} has no commits ahead of origin/${base}`);
+    }
+    tip = gitOut(worktree, ["rev-parse", "HEAD"]);
+    gitOut(worktree, ["push", "--quiet", "-u", "origin", head]);
+  }
+
+  const facts = repoFacts(config, head, gh);
+  if (facts.open.length > 1) {
+    throw new OmiError("POLICY_VIOLATION", `${facts.open.length} open PRs from ${head}`);
+  }
+  const existing = facts.open[0];
+  const pr =
+    existing ??
+    createPr(
+      {
+        repositoryId: facts.id,
+        base,
+        head,
+        title: deps.title ?? ticket.title,
+        body: prBody(ref.repository, issue, deps.body),
+      },
+      gh,
+    );
+  const closing =
+    base === facts.defaultBranch ? closingIssues(pr.id, { run: gh, sleep: deps.sleep }) : null;
+  const checks = validatePr(pr, { primary, base, head, closing });
+  if (tip) {
+    checks.push(
+      pr.headRefOid === tip
+        ? { name: "pr-tip", status: "pass", detail: tip.slice(0, 12) }
+        : {
+            name: "pr-tip",
+            status: "fail",
+            code: "POLICY_VIOLATION",
+            detail: `PR head ${pr.headRefOid.slice(0, 12)} ≠ local ${tip.slice(0, 12)}`,
+          },
+    );
+  }
+  const bad = checks.find((c) => c.status === "fail");
+  if (bad) {
+    throw new OmiError("POLICY_VIOLATION", `${pr.url}: ${bad.name}: ${bad.detail}`, { checks });
+  }
+  const status = release ? null : setStatus(config, issue, "In Review", gh);
+  return { pr, created: !existing, checks, status };
 }

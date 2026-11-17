@@ -1,11 +1,12 @@
 // OMI CLI entry. Pure function of argv/cwd → {code, stdout, stderr}; bin/omi does the I/O.
 // Everything leaving the process goes through redact.
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { type Check, doctor } from "./doctor.ts";
-import { taskRun, taskStart, taskStatus, ticketValidate } from "./task.ts";
+import { prCreate, taskRun, taskStart, taskStatus, ticketValidate } from "./task.ts";
 
 export const HELP = `Usage: omi <command> [--output human|json]
 
@@ -17,6 +18,9 @@ Commands:
   task run <n>           Start Issue #n and drive Engineer → checks → Reviewer (→ Architect) until
                          it needs a person (In QA, Waiting PO, Blocked). Runs agents: spends tokens.
                          --from-source loads the agents from this checkout instead of the installed plugin
+  pr create <n>          Push Issue #n's task branch, create or reuse its PR → develop (Release: develop →
+                         main) and verify base, head and the one primary Issue; marks it In Review.
+                         --title <text> (default: Issue title), --body-file <path> (extra PR description)
   version                Print the OMI version
   help                   Show this help
 
@@ -51,7 +55,7 @@ const issueArg = (a: string | undefined) => {
 };
 
 /** Subcommands: <group> <action> <issue>. */
-const NESTED = new Set(["ticket validate", "task start", "task status", "task run"]);
+const NESTED = new Set(["ticket validate", "task start", "task status", "task run", "pr create"]);
 
 const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
 
@@ -90,7 +94,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
     if (!values.help && NESTED.has(`${command} ${rest[0]}`)) {
       command = `${command} ${rest[0]}`;
       rest = rest.slice(1);
-    } else if (command === "ticket" || command === "task") {
+    } else if (command === "ticket" || command === "task" || command === "pr") {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
     }
     const issue = NESTED.has(command) ? issueArg(rest.shift()) : 0;
@@ -141,6 +145,26 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         ];
         return ok(r, lines(human));
       }
+      case "pr create": {
+        const file = values["body-file"];
+        let body: string | undefined;
+        try {
+          body = file ? readFileSync(resolve(cwd, file), "utf8") : undefined;
+        } catch {
+          throw new OmiError("USAGE_INVALID", `cannot read --body-file ${file}`);
+        }
+        const r = prCreate({ cwd, title: values.title, body }, issue);
+        const human = [
+          `pr        ${r.pr.url}${r.created ? "" : " (existing)"}`,
+          ...r.checks.map(
+            (c) => `${c.status.toUpperCase().padEnd(5)} ${c.name.padEnd(10)} ${c.detail}`,
+          ),
+          ...(r.status
+            ? [`status    ${r.status.issue}: ${r.status.from ?? "unset"} → ${r.status.to}`]
+            : []),
+        ];
+        return ok(r, lines(human));
+      }
       case "":
         throw new OmiError("USAGE_INVALID", "missing command (see `omi help`)");
       default:
@@ -165,5 +189,7 @@ const parse = (args: string[]) =>
       output: { type: "string", default: "human" },
       help: { type: "boolean", short: "h" },
       "from-source": { type: "boolean" },
+      title: { type: "string" },
+      "body-file": { type: "string" },
     },
   });
