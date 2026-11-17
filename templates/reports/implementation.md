@@ -15,7 +15,10 @@
 ### Summary
 {{summary}}
 
-### Changes & evidence
+### Changed files
+{{changes}}
+
+### Evidence
 {{evidence}}
 
 ### Findings addressed / open

@@ -41,6 +41,7 @@ export function renderStepReport(c: StepComment): string {
     commit: c.commitSha ? c.commitSha.slice(0, 8) : "—",
     status: c.status,
     summary: block(c.summary),
+    changes: list(c.changedFiles.map((p) => `\`${p}\``)),
     evidence: list(c.evidencePaths.map((p) => `\`${p}\``)),
     findings: list(
       c.findings.map((f) =>

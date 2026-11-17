@@ -211,6 +211,21 @@ test("happy path: Dev → checks → Review PASSED → IN_QA, one report each, u
     /requested sonnet · actual claude-sonnet-5-5 \(observed\)/,
   );
   assert.match(s.gh.comments[1]?.body ?? "", /\| Model \| n\/a \(omi-cli\) \|/);
+  // G3-001: the implementation report lists the files the engineer changed.
+  assert.match(s.gh.comments[0]?.body ?? "", /### Changed files\n- `src\/implement-r1\.txt`/);
+  // G3-002: the reviewer gets the checks that already ran, the engineer gets none.
+  const [dev, review] = s.agents.packets;
+  assert.equal(dev?.checkResults, undefined);
+  assert.deepEqual(
+    review?.checkResults?.map((c) => [c.name, c.outcome]),
+    [
+      ["format", "skipped"],
+      ["lint", "skipped"],
+      ["build", "skipped"],
+      ["test", "pass"],
+      ["scan", "skipped"],
+    ],
+  );
   assert.deepEqual(repo.pendingReports(s.db, "run"), []);
   const stored = s.db.prepare("SELECT result FROM step_run WHERE step_id = 'implement'").get();
   assert.deepEqual(JSON.parse(String(stored?.result)).usage, {

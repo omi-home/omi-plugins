@@ -239,6 +239,19 @@ export const CarriedFinding = z.strictObject({
 });
 export type CarriedFinding = z.infer<typeof CarriedFinding>;
 
+export const CheckOutcome = z.enum(["pass", "fail", "timeout", "missing-tool", "skipped"]);
+export type CheckOutcome = z.infer<typeof CheckOutcome>;
+
+/** One deterministic check outcome as handed to an agent; `logPath` is the full local log. */
+export const CheckRun = z.strictObject({
+  name: GateCheck,
+  outcome: CheckOutcome,
+  exitCode: z.int().nullable(),
+  summary: z.string().max(4000),
+  logPath: z.string().nullable(),
+});
+export type CheckRun = z.infer<typeof CheckRun>;
+
 export const TaskPacket = z.strictObject({
   schemaVersion,
   workflowRunId: id,
@@ -256,6 +269,8 @@ export const TaskPacket = z.strictObject({
   openFindings: z.array(Finding).max(100),
   carriedFindings: z.array(CarriedFinding).max(50),
   readOnlyArtifacts: z.array(relPath).max(50),
+  /** Deterministic checks the runtime already ran on this worktree this round (review steps). */
+  checkResults: z.array(CheckRun).max(10).optional(),
   outputSchema: z.literal(STEP_RESULT_SCHEMA),
 });
 export type TaskPacket = z.infer<typeof TaskPacket>;
@@ -334,6 +349,7 @@ export const StepComment = z
     commitSha: sha.optional(),
     status: StepOutcome,
     summary: text(2000),
+    changedFiles: z.array(relPath).max(500).default([]),
     evidencePaths: z.array(relPath).max(100).default([]),
     findings: z.array(Finding).max(100).default([]),
     nextAction: text(500),

@@ -15,7 +15,10 @@
 ### Summary
 Two findings remain.
 
-### Changes & evidence
+### Changed files
+- `src/a.ts`
+
+### Evidence
 - `reports/test.log`
 
 ### Findings addressed / open

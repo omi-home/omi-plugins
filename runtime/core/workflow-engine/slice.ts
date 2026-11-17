@@ -25,6 +25,7 @@ import { publishPending } from "../../reporting/outbox.ts";
 import { renderStepReport } from "../../reporting/render.ts";
 import type { OmiConfig } from "../config.ts";
 import {
+  type CheckRun,
   commentMarker,
   type Finding,
   parseContract,
@@ -127,6 +128,7 @@ function agentStep(
   spec: StepSpec,
   ctx: WorkflowContext,
   openFindings: Finding[],
+  checkResults?: CheckRun[],
 ): StepResult | null {
   const { db, config } = d;
   const issue = { repository: t.run.repository, number: t.run.issue };
@@ -154,6 +156,7 @@ function agentStep(
         ...fetchIssueContext(config, t.run.issue, d.gh),
         openFindings,
         readOnlyArtifacts: [],
+        checkResults,
       });
       const file = join(d.evidenceDir, `${spec.stepId}-r${ctx.round}-a${attempt}.packet.json`);
       writeFileSync(file, JSON.stringify(packet, null, 2));
@@ -195,6 +198,7 @@ function agentStep(
           commitSha: result.commitSha,
           status: result.status,
           summary: result.summary,
+          changedFiles: result.changedFiles,
           evidencePaths: result.evidencePaths,
           findings: result.findings,
           nextAction: result.nextAction ?? "The OMI runtime decides the next step.",
@@ -234,7 +238,11 @@ function agentStep(
 }
 
 /** Deterministic checks as an omi-cli step with its own report; failures become findings. */
-function checksStep(d: SliceDeps, t: SliceTarget, ctx: WorkflowContext): Finding[] {
+function checksStep(
+  d: SliceDeps,
+  t: SliceTarget,
+  ctx: WorkflowContext,
+): { findings: Finding[]; results: CheckRun[] } {
   const n = ctx.validationFixes + 1;
   const { passed, results } = runChecks({
     worktree: t.worktree,
@@ -287,7 +295,8 @@ function checksStep(d: SliceDeps, t: SliceTarget, ctx: WorkflowContext): Finding
     body: renderStepReport(comment),
   });
   publishPending(d.db, t.run.id, { gh: d.gh });
-  return findings;
+  // Reviewers read-only: they get what already ran instead of re-running it (gate M3 G3-002).
+  return { findings, results: results.map(({ durationMs: _, ...r }) => r) };
 }
 
 /**
@@ -304,6 +313,7 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
   };
   const refresh = () => runContext(d.db, t.run.id);
   let findings: Finding[] = [];
+  let checks: CheckRun[] | undefined; // last checks of this run, for review and architect
   let needDev = true;
   if (ctx.state === "WORKSPACE_READY") advance({ type: "DEV_STARTED" });
   for (;;) {
@@ -324,14 +334,15 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
             return ctx;
           }
         }
-        const failed = checksStep(d, t, ctx);
-        if (failed.length) {
+        const gate = checksStep(d, t, ctx);
+        checks = gate.results;
+        if (gate.findings.length) {
           advance({ type: "CHECKS_FAILED" });
-          findings = failed;
+          findings = gate.findings;
           needDev = true;
           break;
         }
-        const review = agentStep(d, t, REVIEW, ctx, findings);
+        const review = agentStep(d, t, REVIEW, ctx, findings, checks);
         if (!review) return refresh();
         if (review.status !== "PASSED" && review.status !== "FAILED") {
           advance({ type: "BLOCK" });
@@ -343,7 +354,7 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
         break;
       }
       case "ARCHITECT_ESCALATION": {
-        const plan = agentStep(d, t, ARCHITECT, ctx, findings);
+        const plan = agentStep(d, t, ARCHITECT, ctx, findings, checks);
         if (!plan) return refresh();
         if (plan.status === "PASSED") {
           findings = plan.findings; // the correction plan is what round 3 addresses

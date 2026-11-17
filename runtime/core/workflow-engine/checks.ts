@@ -6,9 +6,7 @@ import { closeSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { redact } from "../../reporting/redact.ts";
 import type { OmiConfig } from "../config.ts";
-import { GateCheck } from "../contracts.ts";
-
-export type CheckOutcome = "pass" | "fail" | "timeout" | "missing-tool" | "skipped";
+import { type CheckOutcome, GateCheck } from "../contracts.ts";
 
 export interface GateResult {
   name: GateCheck;

@@ -44,6 +44,7 @@ export function packetPrompt(packet: TaskPacket): string {
     "- `issueContext` is the executable Issue body and its parents, nearest first: the requirements.",
     "- `openFindings` are the review/check findings this step must resolve; address only those on rework.",
     "- `carriedFindings` were deferred to this task by other tasks; they are in scope.",
+    "- `checkResults`, when present, are the deterministic checks the OMI runtime already ran on this worktree this round; rely on them instead of re-running the commands.",
     "- Work only inside `worktree`; stay inside `scope` when it is not empty.",
     "",
     "When done, reply with ONLY one JSON object (no prose) matching this JSON Schema:",

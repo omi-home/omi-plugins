@@ -25,6 +25,7 @@ const base = {
   commitSha: "abcdef1234567890",
   status: "FAILED",
   summary: "Two findings remain.",
+  changedFiles: ["src/a.ts"],
   evidencePaths: ["reports/test.log"],
   findings: [
     {
