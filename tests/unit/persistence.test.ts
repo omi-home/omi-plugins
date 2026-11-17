@@ -155,15 +155,16 @@ test("transitions are compare-and-set and audited", () => {
     runId: "r",
     from: "CREATED",
     to: "TICKET_VALIDATED",
-    event: "validate",
+    event: "TICKET_VALID",
   });
   assert.throws(
-    () => repo.transitionRun(db, { runId: "r", from: "CREATED", to: "RUNNING", event: "stale" }),
+    () =>
+      repo.transitionRun(db, { runId: "r", from: "CREATED", to: "RUNNING", event: "DEV_STARTED" }),
     code("INVALID_TRANSITION"),
   );
   assert.deepEqual(repo.transitions(db, "r"), [
     { from: null, to: "CREATED", event: "create" },
-    { from: "CREATED", to: "TICKET_VALIDATED", event: "validate" },
+    { from: "CREATED", to: "TICKET_VALIDATED", event: "TICKET_VALID" },
   ]);
 });
 
@@ -174,7 +175,7 @@ test("one live run per issue; a finished run frees the issue", () => {
     () => repo.createRun(db, { id: "b", issue, workflow: "dev-task" }),
     code("OWNERSHIP_MISMATCH"),
   );
-  repo.transitionRun(db, { runId: "a", from: "CREATED", to: "CANCELLED", event: "cancel" });
+  repo.transitionRun(db, { runId: "a", from: "CREATED", to: "CANCELLED", event: "CANCEL" });
   repo.createRun(db, { id: "b", issue, workflow: "dev-task" });
   assert.equal(repo.liveRun(db, issue)?.id, "b");
 });

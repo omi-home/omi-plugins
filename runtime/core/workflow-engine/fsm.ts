@@ -1,7 +1,13 @@
 // Workflow FSM (spec §10): pure (context, event, facts) → next context. No I/O; the caller
 // persists the result with a compare-and-set transition (runtime/persistence/repository.ts).
 // Review policy: 2 rounds → Architect once → 2 rounds → WAITING_PO. Never a fifth round.
-import type { WorkflowContext, WorkflowEventType, WorkflowState } from "../contracts.ts";
+import type { OmiConfig } from "../config.ts";
+import type {
+  ProjectStatus,
+  WorkflowContext,
+  WorkflowEventType,
+  WorkflowState,
+} from "../contracts.ts";
 import { ERROR_CODES, type ErrorCode, OmiError } from "../errors/errors.ts";
 
 export type WorkflowEvent =
@@ -14,7 +20,15 @@ export interface Facts {
   pendingReports: number;
 }
 
-export const POLICY = {
+export interface Policy {
+  maxRounds: number;
+  architectAfterFailedRounds: number;
+  maxAttempts: number;
+  maxValidationFixes: number;
+  maxQaReworks: number;
+}
+
+export const POLICY: Policy = {
   maxRounds: 4,
   architectAfterFailedRounds: 2,
   /** Technical retries per step before the run is BLOCKED. */
@@ -23,9 +37,31 @@ export const POLICY = {
   maxValidationFixes: 2,
   /** QA rework budget, separate from review rounds. */
   maxQaReworks: 2,
-} as const;
+};
 
-export type Policy = typeof POLICY;
+/** The run policy a repo configured (`review` in `.omi/config.yaml`). */
+export const policyFrom = (c: OmiConfig): Policy => ({ ...c.review });
+
+/** Project Status shown for an executable Issue in each workflow state (DocumentationTask-0007 #99). */
+export const PROJECT_STATUS: Record<WorkflowState, ProjectStatus> = {
+  CREATED: "Ready",
+  TICKET_VALIDATED: "Ready",
+  WORKSPACE_READY: "In Progress",
+  RUNNING: "In Progress",
+  REWORK: "Rework",
+  ARCHITECT_ESCALATION: "Rework",
+  PR_PENDING: "In Review",
+  IN_QA: "In QA",
+  WAITING_PO: "Waiting PO",
+  BLOCKED: "Blocked",
+  RECOVERY_REQUIRED: "Blocked",
+  CLEANUP_FAILED: "Blocked",
+  FAILED: "Blocked",
+  PR_MERGED: "In Review", // not Done until cleanup finished
+  CLEANUP_PENDING: "In Review",
+  COMPLETED: "Done",
+  CANCELLED: "Cancelled",
+};
 
 const PRE_MERGE: readonly WorkflowState[] = [
   "CREATED",
@@ -171,7 +207,8 @@ export function transition(
       if (is(...PRE_MERGE)) return hold("WAITING_PO", ctx.state);
       break;
     case "UNBLOCK":
-      if (is("BLOCKED")) return resume(ctx, to);
+      // A human cleared the block: the check-fix budget starts over (#25 CR-002).
+      if (is("BLOCKED")) return resume(ctx, (s, patch) => to(s, { validationFixes: 0, ...patch }));
       break;
     case "PO_RESUME":
       if (is("WAITING_PO")) return resume(ctx, to);

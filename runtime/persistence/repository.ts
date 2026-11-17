@@ -4,14 +4,24 @@ import {
   type ArtifactKind,
   type IssueRef,
   IssueType,
+  parseContract,
   type ResourceKind,
   type ReviewOutcome,
   type Role,
   type StepResult,
   StepState,
+  WorkflowContext,
+  WorkflowEventType,
   WorkflowState,
 } from "../core/contracts.ts";
 import { type ErrorCode, OmiError } from "../core/errors/errors.ts";
+import {
+  initialContext,
+  POLICY,
+  type Policy,
+  transition,
+  type WorkflowEvent,
+} from "../core/workflow-engine/fsm.ts";
 import { type Db, tx } from "./db.ts";
 
 const iso = () => new Date().toISOString();
@@ -70,7 +80,7 @@ export const liveRun = (db: Db, issue: IssueRef): RunRow | undefined =>
 /** Compare-and-set state change plus its audit row. Throws if the run is no longer in `from`. */
 export function transitionRun(
   db: Db,
-  o: { runId: string; from: WorkflowState; to: WorkflowState; event: string },
+  o: { runId: string; from: WorkflowState; to: WorkflowState; event: WorkflowEventType },
 ): RunRow {
   return tx(db, "transition run", () => {
     const now = iso();
@@ -96,8 +106,81 @@ export const transitions = (db: Db, runId: string) =>
     .map((r) => ({
       from: r.from_state === null ? null : WorkflowState.parse(r.from_state),
       to: WorkflowState.parse(r.to_state),
-      event: String(r.event),
+      event: r.event === "create" ? ("create" as const) : WorkflowEventType.parse(r.event),
     }));
+
+// ---- FSM-backed transitions (spec §10) ----
+
+const REVIEWERS: readonly Role[] = ["code-reviewer", "security-reviewer"];
+const REVIEW_REPORTED = ["REPORT_POSTED", "PASSED", "FAILED"] satisfies StepState[];
+
+/** Stored FSM context; runs created before migration 3 start from their state. */
+export function runContext(db: Db, runId: string): WorkflowContext {
+  const r = db.prepare("SELECT state, context FROM workflow_run WHERE id = ?").get(runId);
+  if (!r) throw new OmiError("INVALID_TRANSITION", `run ${runId} does not exist`);
+  const state = WorkflowState.parse(r.state);
+  if (r.context === null) return { ...initialContext(), state };
+  const ctx = parseContract(WorkflowContext, JSON.parse(String(r.context)), "workflow context");
+  if (ctx.state !== state) {
+    throw new OmiError("INVALID_TRANSITION", `run ${runId}: context ${ctx.state} ≠ state ${state}`);
+  }
+  return ctx;
+}
+
+/**
+ * The only way a run moves: FSM decides (with facts read in the same transaction), then state,
+ * context and audit row commit together, compare-and-set on the state read. A review verdict
+ * needs the reviewer's report for that round posted first (spec §12); it records the round.
+ */
+export function advanceRun(
+  db: Db,
+  runId: string,
+  event: WorkflowEvent,
+  policy: Policy = POLICY,
+): { run: RunRow; context: WorkflowContext } {
+  return tx(db, "advance run", () => {
+    const ctx = runContext(db, runId);
+    const pending = Number(
+      db
+        .prepare("SELECT count(*) AS n FROM outbox WHERE run_id = ? AND state = 'PENDING'")
+        .get(runId)?.n,
+    );
+    const verdict =
+      event.type === "REVIEW_PASSED" ? "PASSED" : event.type === "REVIEW_FAILED" ? "FAILED" : null;
+    if (verdict && ctx.state === "RUNNING") {
+      const reported = db
+        .prepare(
+          `SELECT 1 FROM step_run WHERE run_id = ? AND round = ? AND role IN (${REVIEWERS.map(() => "?").join(", ")}) AND state IN (${REVIEW_REPORTED.map(() => "?").join(", ")})`,
+        )
+        .get(runId, ctx.round, ...REVIEWERS, ...REVIEW_REPORTED);
+      if (!reported) {
+        throw new OmiError(
+          "POLICY_VIOLATION",
+          `review round ${ctx.round} has no posted reviewer report: verdict refused`,
+        );
+      }
+    }
+    const next = transition(ctx, event, { pendingReports: pending }, policy);
+    const now = iso();
+    const r = db
+      .prepare(
+        "UPDATE workflow_run SET state = ?, context = ?, updated_at = ? WHERE id = ? AND state = ?",
+      )
+      .run(next.state, JSON.stringify(next), now, runId, ctx.state);
+    if (r.changes !== 1) {
+      throw new OmiError("INVALID_TRANSITION", `run ${runId} is not in ${ctx.state}`);
+    }
+    db.prepare(
+      "INSERT INTO transition (run_id, from_state, to_state, event, at) VALUES (?, ?, ?, ?, ?)",
+    ).run(runId, ctx.state, next.state, event.type, now);
+    if (verdict && ctx.state === "RUNNING") {
+      db.prepare(
+        "INSERT INTO review_round (run_id, round, outcome, created_at) VALUES (?, ?, ?, ?)",
+      ).run(runId, ctx.round, verdict, now);
+    }
+    return { run: getRun(db, runId) as RunRow, context: next };
+  });
+}
 
 export function recordReviewRound(
   db: Db,

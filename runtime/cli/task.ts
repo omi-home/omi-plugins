@@ -11,18 +11,17 @@ import { fetchTicket, type Ticket, validateTicket } from "../adapters/github/tic
 import { loadConfig, type OmiConfig } from "../core/config.ts";
 import { type Check, IssueType, type WorkflowEventType } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
-import { initialContext, transition } from "../core/workflow-engine/fsm.ts";
 import { type Db, openState, statePath } from "../persistence/db.ts";
 import {
   acquireLease,
   adoptResources,
+  advanceRun,
   createRun,
   latestRun,
   liveRun,
   ownedRefs,
   type RunRow,
   releaseLease,
-  transitionRun,
   transitions,
 } from "../persistence/repository.ts";
 import { branchName, ensureWorktree, type Workspace } from "../resources/worktree.ts";
@@ -92,8 +91,7 @@ export function ticketValidate(deps: TaskDeps, issue: number): Check[] {
 }
 
 function step(db: Db, r: RunRow, type: Exclude<WorkflowEventType, "TECHNICAL_FAILURE">): RunRow {
-  const next = transition({ ...initialContext(), state: r.state }, { type });
-  return transitionRun(db, { runId: r.id, from: r.state, to: next.state, event: type });
+  return advanceRun(db, r.id, { type }).run;
 }
 
 export interface StartResult {

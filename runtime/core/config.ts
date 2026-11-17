@@ -56,6 +56,10 @@ export const OmiConfig = z.strictObject({
       // Fixed by policy (spec §10): 2 rounds, Architect, 2 more rounds.
       maxRounds: z.literal(4).default(4),
       architectAfterFailedRounds: z.literal(2).default(2),
+      // PO-accepted defaults (2026-11-17, spec §10).
+      maxAttempts: z.int().min(1).max(10).default(3),
+      maxValidationFixes: z.int().min(0).max(10).default(2),
+      maxQaReworks: z.int().min(0).max(10).default(2),
     })
     .prefault({}),
   agents: z

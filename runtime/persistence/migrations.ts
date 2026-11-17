@@ -108,6 +108,10 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE outbox ADD COLUMN repository TEXT;
   ALTER TABLE outbox ADD COLUMN issue INTEGER;
   `,
+  // 3 — durable FSM context (rounds, budgets, resume point) next to the state (T3.5, #25 CR-001)
+  `
+  ALTER TABLE workflow_run ADD COLUMN context TEXT;
+  `,
 ];
 
 export function migrate(db: DatabaseSync, migrations: readonly string[] = MIGRATIONS): number {
