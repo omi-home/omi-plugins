@@ -9,7 +9,7 @@ import {
   StepState,
   WorkflowState,
 } from "../core/contracts.ts";
-import { OmiError } from "../core/errors/errors.ts";
+import { type ErrorCode, OmiError } from "../core/errors/errors.ts";
 import { type Db, tx } from "./db.ts";
 
 const iso = () => new Date().toISOString();
@@ -195,7 +195,7 @@ function setStepState(db: Db, id: number, from: StepState[], to: StepState, now:
 /** Closes an attempt that failed technically: the step stays in its round (idea §10). */
 export function failAttempt(
   db: Db,
-  o: { stepRunId: number; attempt: number; errorCode: string },
+  o: { stepRunId: number; attempt: number; errorCode: ErrorCode },
 ): void {
   tx(db, "fail attempt", () => {
     const now = iso();
