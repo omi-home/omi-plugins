@@ -2,3 +2,7 @@ github:
   owner: omi-home
   repo: omi-plugins
   projectNumber: 2
+checks:
+  lint: { run: npm run lint }
+  build: { run: npm run typecheck }
+  test: { run: npm test }

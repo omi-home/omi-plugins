@@ -162,6 +162,10 @@ export type ResourceKind = z.infer<typeof ResourceKind>;
 export const ArtifactKind = z.enum(["task-packet", "step-result", "evidence", "log"]);
 export type ArtifactKind = z.infer<typeof ArtifactKind>;
 
+/** Deterministic gate commands run before each cognitive review (spec §10), in this order. */
+export const GateCheck = z.enum(["format", "lint", "build", "test", "scan"]);
+export type GateCheck = z.infer<typeof GateCheck>;
+
 /** `omi doctor` check outcome: only `fail` makes the command exit non-zero. */
 export const CheckStatus = z.enum(["pass", "warn", "fail"]);
 export type CheckStatus = z.infer<typeof CheckStatus>;

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-import { parseContract, Role } from "./contracts.ts";
+import { GateCheck, parseContract, Role } from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
 
 const ModelAlias = z.enum(["sonnet", "opus", "haiku"]);
@@ -20,6 +20,18 @@ const ModelRouting = z.strictObject(
     Role.options.map((r) => [r, route(OPUS_ROLES.has(r) ? "opus" : "sonnet")]),
   ) as {
     [K in Role]: ReturnType<typeof route>;
+  },
+);
+
+/** A repo command run through the platform shell in the task worktree. */
+const GateCommand = z.strictObject({
+  run: z.string().trim().min(1).max(500),
+  timeoutSec: z.int().min(1).max(3600).default(600),
+});
+
+const GateChecks = z.strictObject(
+  Object.fromEntries(GateCheck.options.map((c) => [c, GateCommand.optional()])) as {
+    [K in GateCheck]: z.ZodOptional<typeof GateCommand>;
   },
 );
 
@@ -52,6 +64,8 @@ export const OmiConfig = z.strictObject({
       routing: ModelRouting.prefault({}),
     })
     .prefault({}),
+  /** Unset checks are skipped; a repo with none configured has no deterministic gate. */
+  checks: GateChecks.prefault({}),
   cleanup: z
     .strictObject({
       // Remote branch deletion is never assumed safe (spec §14).
