@@ -33,5 +33,6 @@ npm run format    # tự sửa format/lint
 - **Cách ly kiến thức chuyên môn (ADR-0001 D3):** nội dung chuyên môn chỉ nằm trong `resources/role-rules/<role>/`, không đăng ký thành skill. `skills/` chỉ chứa entry point của Coordinator. Agent đặt `disallowedTools: Skill`.
 - **Adapter thực thi (D1):** OMI CLI khởi chạy agent bằng tiến trình riêng; cấm `isolation: 'worktree'`.
 - Không tạo thư mục gốc mới khi chưa có ADR; không tạo thư mục rỗng/placeholder cho tính năng tương lai.
+- **Contract có kiểu:** tên state/role/status chỉ lấy từ enum trong `runtime/core/contracts.ts` (zod), không viết chuỗi trần. Dữ liệu từ ngoài (agent, GitHub, config) phải qua `parseContract`; field lạ bị từ chối; lỗi dùng `OmiError` với mã trong `runtime/core/errors/`; mọi thứ ra ngoài process đi qua `redact`.
 - Không đoán API của Claude Code/GitHub: chỉ dùng những gì đã kiểm chứng (Phase 0) hoặc kiểm chứng trước khi dùng.
 - Không ghi token/secret vào log, comment hay file commit.

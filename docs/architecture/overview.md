@@ -41,4 +41,5 @@ Thư mục chỉ được tạo khi task đầu tiên cần nó — không tạo
 ## Công cụ
 
 - TypeScript chạy trực tiếp trên Node ≥ 22.18 (type stripping, không build); `tsc` chỉ typecheck.
+- Contract: zod là nguồn duy nhất cho TS type và validator runtime (`runtime/core/contracts.ts`, `config.ts`). Mọi tài liệu đều strict và có `schemaVersion`. Lỗi được phân loại trong `runtime/core/errors/errors.ts`: loại `transient` tính là attempt, không tính là round.
 - Test: `node:test`. Lint/format: Biome. Một lệnh: `npm run check`.
