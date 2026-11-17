@@ -7,6 +7,7 @@ import { test } from "node:test";
 const ALLOWED_ROOT_DIRS = new Set([
   ".claude-plugin",
   ".github",
+  ".omi", // per-repo OMI config contract (runtime/core/config.ts); this repo runs OMI on itself
   "agents",
   "bin",
   "config",
