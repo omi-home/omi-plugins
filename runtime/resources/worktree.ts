@@ -81,7 +81,10 @@ function git(args: string[], cwd: string): string {
     const err = e as { stderr?: string; code?: string };
     if (args[0] === "fetch") {
       if (/couldn't find remote ref/i.test(err.stderr ?? "")) {
-        throw new OmiError("CONFIG_INVALID", `origin has no branch ${args.at(-1)?.split(":")[0]?.replace("+refs/heads/", "")}`);
+        throw new OmiError(
+          "CONFIG_INVALID",
+          `origin has no branch ${args.at(-1)?.split(":")[0]?.replace("+refs/heads/", "")}`,
+        );
       }
       throw classify({ stderr: err.stderr ?? "", error: e as Error }, "git fetch");
     }
