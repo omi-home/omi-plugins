@@ -45,7 +45,7 @@ const EXECUTABLE: readonly IssueType[] = [
 ];
 const START_LEASE_MS = 10 * 60_000;
 
-function open(cwd: string): { root: string; config: OmiConfig; db: Db } {
+function repo(cwd: string): { root: string; config: OmiConfig } {
   let common: string;
   try {
     common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
@@ -58,7 +58,7 @@ function open(cwd: string): { root: string; config: OmiConfig; db: Db } {
   }
   // Main checkout, even when called from inside a task worktree.
   const root = dirname(resolve(common));
-  return { root, config: loadConfig(root), db: openState(statePath(cwd)) };
+  return { root, config: loadConfig(root) };
 }
 
 const typeOf = (t: Ticket) => {
@@ -86,8 +86,8 @@ export function startGates(t: Ticket, config: OmiConfig): Check[] {
 }
 
 export function ticketValidate(deps: TaskDeps, issue: number): Check[] {
-  const { config, db } = open(deps.cwd);
-  db.close();
+  // Read-only: no state database is opened or created.
+  const { config } = repo(deps.cwd);
   return startGates(fetchTicket(config, issue, deps.gh ?? spawnGh), config);
 }
 
@@ -105,7 +105,8 @@ export interface StartResult {
 
 export function taskStart(deps: TaskDeps, issue: number): StartResult {
   const gh = deps.gh ?? spawnGh;
-  const { root, config, db } = open(deps.cwd);
+  const { root, config } = repo(deps.cwd);
+  const db = openState(statePath(deps.cwd));
   const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
   const lease = `task:${ref.repository}#${issue}`;
   const session = deps.session ?? randomUUID();
@@ -159,7 +160,8 @@ export interface TaskStatus {
 
 /** Local state only: no GitHub call. */
 export function taskStatus(deps: TaskDeps, issue: number): TaskStatus {
-  const { config, db } = open(deps.cwd);
+  const { config } = repo(deps.cwd);
+  const db = openState(statePath(deps.cwd));
   try {
     const run = latestRun(db, {
       repository: `${config.github.owner}/${config.github.repo}`,

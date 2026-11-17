@@ -204,7 +204,10 @@ test("blocked dependency or non-executable type: nothing is created", () => {
   assert.equal(existsSync(join(base, ".omi-worktrees")), false);
   assert.deepEqual(gh.mutations, []);
 
-  const checks = ticketValidate({ cwd: root, gh: gh.run }, 6);
+  const fresh = repo();
+  const checks = ticketValidate({ cwd: fresh.root, gh: gh.run }, 6);
+  // Read-only command: no state database appears.
+  assert.equal(existsSync(statePath(fresh.root)), false);
   assert.equal(checks.find((c) => c.name === "executable")?.code, "POLICY_VIOLATION");
 });
 
