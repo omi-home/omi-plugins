@@ -580,7 +580,7 @@ Every arrow is a **validated transition**; each finished stage posts a unique Is
 
 Also verify: plugin component discovery/namespacing, native workflow API exact calling syntax and inability/ability to invoke CLI from workflow context, Bash PATH of `bin`, model/effort observability, Windows paths/process cleanup, branch source SHA. **Do not invent SDK method names or implement unsupported APIs as facts.** Record version/date, evidence links, constraints and ADR outcome for every spike. Phase 0 may discover a different native capability; adapt architecture without breaking invariants.
 
-### Phase 0 outcome (2026-11-17, Claude Code 2.1.325, GitHub Free org) — see [docs/spikes/](./docs/spikes/README.md) and ADR-0001
+### Phase 0 outcome (2026-11-17, Claude Code 2.1.325, GitHub Free org) — evidence on Spike Issues ([index on M0 #1](https://github.com/omi-home/omi-plugins/issues/1#issuecomment-6940598215), T0.x on #3–#12); decisions in [ADR-0001](./docs/decisions/ADR-0001-phase0-outcomes.md)
 
 | ID | Outcome |
 |---|---|
@@ -623,6 +623,7 @@ Exit criteria: all blockers in Section 17 proven or explicit agreed fallback; no
 - AGENTS.md preferred, resource-only specialist knowledge (no specialist skills; ADR-0001 D3), script-first.
 - Direct named-agent dispatch by the OMI CLI as primary execution path; native workflows optional and read-only (ADR-0001 D1).
 - `develop` as default branch (D4); public repositories preferred (D5); native Issue Types + `type:*` labels (D6).
+- GitHub Project + Issues are the single source for tasks, status and spike evidence; the repository holds no task tracking or spike reports (D7).
 - GitHub Project as work source, Issue hierarchy, two long-lived branches main/develop, task worktree and branch from origin/develop.
 - 2+Architect+2 review loop, comment after every step, cleanup mandatory after merge.
 

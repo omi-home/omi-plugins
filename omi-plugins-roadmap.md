@@ -1,6 +1,6 @@
 # OMI Engineering Plugin — Implementation Roadmap for Claude Code
 
-> Version: 2.1 · Updated: 2026-11-17 · Status: **Phase 0 complete** ([spike reports](./docs/spikes/README.md), [ADR-0001](./docs/decisions/ADR-0001-phase0-outcomes.md)); next: Phase 1  
+> Version: 2.1 · Updated: 2026-11-17 · Status: **Phase 0 complete** ([spike evidence](https://github.com/omi-home/omi-plugins/issues/1#issuecomment-6940598215), [ADR-0001](./docs/decisions/ADR-0001-phase0-outcomes.md)); next: Phase 1  
 > Source of truth: [`omi-plugins-idea.md`](./omi-plugins-idea.md)  
 > Preferred repository: `omi-plugins` · Target integration: GitHub Free / Projects Free
 
@@ -21,6 +21,7 @@ This is an **execution plan**, not a request to implement everything in one Clau
 - `AGENTS.md` is canonical (verified on 2.1.325); `omi doctor` still checks version ≥ 2.1.277 and warns about any CLAUDE.md/CLAUDE.local.md.
 - Specialist knowledge is resource-only (`resources/role-rules/`), never a skill; agents are launched by the OMI CLI, one process per agent, cwd = task worktree (ADR-0001 D1, D3).
 - Repository: `omi-home/omi-plugins` (public), `develop` as default branch (ADR-0001 D4).
+- GitHub Project [#2](https://github.com/orgs/omi-home/projects/2) is the single source for tasks, status and spike evidence (ADR-0001 D7).
 
 ## 2. Delivery milestones
 
@@ -89,9 +90,9 @@ OMI Product / GitHub Project
 │       └── T4.5 Crash recovery, outbox replay, startup reconciliation
 ├── M5 Full Specialist Squad
 │   ├── F5.1 Requirements and design roles
-│   │   ├── T5.1 BA + Architect + UI/UX agents and skills
+│   │   ├── T5.1 BA + Architect + UI/UX agents and resource packs
 │   ├── F5.2 Engineering roles
-│   │   ├── T5.2 Frontend + Backend + Database agents and skills
+│   │   ├── T5.2 Frontend + Backend + Database agents and resource packs
 │   ├── F5.3 Quality and operations roles
 │   │   ├── T5.3 Code + Security reviewers, Manual + Automation QA, DevOps
 │   └── F5.4 Composed workflows
@@ -116,7 +117,7 @@ OMI Product / GitHub Project
 
 ## 4. Phase 0 — Feasibility (MUST finish before large implementation)
 
-All spikes use disposable repositories/projects and minimal code. Produce a Markdown evidence report under `docs/spikes/` with: installed tool version, command/setup, actual observed outcome, logs/screenshots when helpful, conclusions, supported/unsupported, fallback and ADR reference. **No large framework implementation before this phase is complete.**
+All spikes use disposable repositories/projects and minimal code. Post the evidence report as a comment on the Spike Issue (marker `<!-- omi:evidence=<id> -->`; ADR-0001 D7 — no report files in the repository) with: installed tool version, command/setup, actual observed outcome, logs/screenshots when helpful, conclusions, supported/unsupported, fallback and ADR reference. **No large framework implementation before this phase is complete.**
 
 | Task | Acceptance criteria | Size | Blocked by |
 |---|---|---|---|
@@ -399,7 +400,7 @@ Act as the main OMI Coordinator (PM + Scrum Master), not a specialist.
 Execute ONLY Phase 0 feasibility tasks T0.1–T0.8, using minimal disposable fixtures.
 First inspect installed Claude Code, Git, gh, Node and GitHub permissions.
 Do not fabricate Claude Code workflow API syntax or model/effort override support.
-For each spike create docs/spikes/T0.x.md containing setup, actual commands,
+For each spike post an evidence comment on its Spike Issue with setup, actual commands,
 observed behavior, tests/evidence, limits, recommendation and fallback.
 Do not implement later-phase runtime or create empty agent/skill folders.
 Where Github access is unavailable, mark blocked; never claim verification.
