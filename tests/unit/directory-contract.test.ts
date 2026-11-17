@@ -1,4 +1,4 @@
-// Enforces the root layout contract from omi-plugins-idea.md §5 on tracked files.
+// Enforces the root layout contract (spec §5, docs/architecture/overview.md) on tracked files.
 // New root folders require an ADR first; update ALLOWED_ROOT_DIRS in the same PR.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

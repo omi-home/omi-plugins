@@ -1,4 +1,4 @@
-// Deterministic GitHub access through the authenticated `gh` CLI (idea §9, ADR-0001 D7).
+// Deterministic GitHub access through the authenticated `gh` CLI (spec §9, ADR-0001 D7).
 // Every failure is classified into an OmiError code so callers can tell retryable
 // (network, rate limit, 5xx) from actionable (auth, scopes) failures.
 import { spawnSync } from "node:child_process";

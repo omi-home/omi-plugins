@@ -1,4 +1,4 @@
-// Typed contracts for issue / workflow / step / comment / cleanup (idea §6, §10–§14).
+// Typed contracts for issue / workflow / step / comment / cleanup (spec §6, §10–§14).
 // Every document is strict (unknown fields rejected) and versioned via `schemaVersion`.
 import { z } from "zod";
 import { type ErrorCode, OmiError } from "./errors/errors.ts";
@@ -110,7 +110,7 @@ export type WorkflowEventType = z.infer<typeof WorkflowEventType>;
 
 /**
  * Durable FSM context. `round` = review round (domain), `attempt` = technical retry of the
- * current step: transport/tool errors only ever move `attempt` (idea §10).
+ * current step: transport/tool errors only ever move `attempt` (spec §10).
  */
 export const WorkflowContext = z.strictObject({
   state: WorkflowState,
@@ -145,15 +145,15 @@ export type StepState = z.infer<typeof StepState>;
 export const StepOutcome = StepState.extract(["PASSED", "FAILED", "BLOCKED", "SKIPPED"]);
 export type StepOutcome = z.infer<typeof StepOutcome>;
 
-/** Review round verdict (idea §10): only PASSED/FAILED count toward the 2 + Architect + 2 policy. */
+/** Review round verdict (spec §10): only PASSED/FAILED count toward the 2 + Architect + 2 policy. */
 export const ReviewOutcome = StepState.extract(["PASSED", "FAILED"]);
 export type ReviewOutcome = z.infer<typeof ReviewOutcome>;
 
-/** GitHub comment outbox (idea §12): pending until the comment id is stored. */
+/** GitHub comment outbox (spec §12): pending until the comment id is stored. */
 export const OutboxState = z.enum(["PENDING", "POSTED"]);
 export type OutboxState = z.infer<typeof OutboxState>;
 
-/** Resources a run may own and cleanup may release (idea §14). */
+/** Resources a run may own and cleanup may release (spec §14). */
 export const ResourceKind = z.enum(["worktree", "branch", "process", "container", "temp-dir"]);
 export type ResourceKind = z.infer<typeof ResourceKind>;
 
@@ -204,7 +204,7 @@ export const Finding = z.strictObject({
 });
 export type Finding = z.infer<typeof Finding>;
 
-// ---- Step result: agent → runtime (idea §11). A recommendation, never a transition. ----
+// ---- Step result: agent → runtime (spec §11). A recommendation, never a transition. ----
 
 export const StepResult = z
   .strictObject({
@@ -230,7 +230,7 @@ export const StepResult = z
   });
 export type StepResult = z.infer<typeof StepResult>;
 
-// ---- Step comment: runtime → GitHub (idea §12) ----
+// ---- Step comment: runtime → GitHub (spec §12) ----
 
 export const StepComment = z
   .strictObject({
@@ -269,11 +269,11 @@ export const StepComment = z
   );
 export type StepComment = z.infer<typeof StepComment>;
 
-/** Stable idempotency marker (repo+issue+run+step+round+attempt), idea §12. */
+/** Stable idempotency marker (repo+issue+run+step+round+attempt), spec §12. */
 export const commentMarker = (c: StepComment): string =>
   `<!-- omi:repo=${c.issue.repository};issue=${c.issue.number};run=${c.workflowRunId};step=${c.stepId};round=${c.round};attempt=${c.attempt} -->`;
 
-// ---- Cleanup result (idea §14) ----
+// ---- Cleanup result (spec §14) ----
 
 export const CleanupStepName = z.enum([
   "verify-merge",

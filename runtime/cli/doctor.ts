@@ -1,4 +1,4 @@
-// `omi doctor`: deterministic environment/repository checks (idea §15, ADR-0001 D4/D5, T0.4).
+// `omi doctor`: deterministic environment/repository checks (spec §15, ADR-0001 D4/D5, T0.4).
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";

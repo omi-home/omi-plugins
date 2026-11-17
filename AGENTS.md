@@ -4,7 +4,7 @@ File này là chỉ dẫn canonical cho mọi phiên Claude Code làm việc **t
 
 ## Nguồn sự thật
 
-- Spec: [omi-plugins-idea.md](./omi-plugins-idea.md) · Lộ trình: [omi-plugins-roadmap.md](./omi-plugins-roadmap.md) · Quyết định: [docs/decisions/](./docs/decisions/)
+- Spec và lộ trình: body các Issue trên Project #2 — gốc là [Epic-0001 #96](https://github.com/omi-home/omi-plugins/issues/96), section `spec §N` nằm trong Milestone tương ứng (chỉ mục: [docs/architecture/overview.md](./docs/architecture/overview.md)); phạm vi từng task nằm trong body Task. Quyết định: [docs/decisions/](./docs/decisions/)
 - Task, trạng thái, bằng chứng: GitHub Project [#2](https://github.com/orgs/omi-home/projects/2) + Issues (ADR-0001 D7). Repo không chứa báo cáo hay tracking task.
 - Body của Issue là tài liệu sống và context cho agent (yêu cầu, phạm vi, quyết định, kết quả as-built); `docs/` chỉ giữ overview, ADR, contract, runbook và link tới Issue — không chép lại chi tiết tính năng (spec §6 "Issue body as living documentation").
 - Kiến trúc và hợp đồng thư mục: [docs/architecture/overview.md](./docs/architecture/overview.md)
@@ -17,7 +17,8 @@ File này là chỉ dẫn canonical cho mọi phiên Claude Code làm việc **t
 4. Mỗi bước hoàn tất có một comment báo cáo trên Issue (role/model/effort/round/status; effort thực tế ghi `unknown`).
 5. Sau merge: dọn worktree và branch local an toàn, không `--force`, không xóa branch remote tự động.
 6. Status trên Project #2 không tự đổi: bắt đầu → In Progress, mở PR → In Review, merge + dọn → Done. Cập nhật luôn status cha: khi task con bắt đầu, Feature/Milestone cha đang Backlog/Ready → In Progress (`omi task start` tự làm theo chuỗi parent); Feature đóng + Done khi task con cuối cùng đóng; Milestone In Review trong lúc chạy gate, chỉ Done khi PO chấp nhận.
-7. Finding hoặc giới hạn được hoãn sang task khác phải comment ngay lên Issue đích (marker `<!-- omi:carried-findings=<T-id> -->`, bảng nguồn · finding · việc cần làm), kiểm tra số task theo roadmap trước khi ghi. Khi bắt đầu task, đọc các comment này và đưa vào phạm vi.
+7. Finding hoặc giới hạn được hoãn sang task khác phải comment ngay lên Issue đích (marker `<!-- omi:carried-findings=<T-id> -->`, bảng nguồn · finding · việc cần làm), kiểm tra Issue đích trên cây Issue của Project #2 trước khi ghi. Khi bắt đầu task, đọc các comment này và đưa vào phạm vi.
+8. Issue mới: title `<IssueType>-<NNNN>-<Tiêu đề>` — type viết đầy đủ dạng PascalCase, khớp label `type:*` (`Feature`, `DevTask`, `DocumentationTask`, `ChangeRequest`, `FunctionalRequirement`…), `NNNN` là số thứ tự 4 chữ số riêng theo type (lớn nhất hiện có + 1). Title và body viết tiếng Việt, thuật ngữ kỹ thuật/quy trình giữ tiếng Anh (Business, Definition of Done, Acceptance Criteria, reproduce…); heading section và marker `<!-- omi:… -->` giữ nguyên (spec §6).
 
 ## Lệnh
 

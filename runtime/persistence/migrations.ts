@@ -5,7 +5,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { OmiError } from "../core/errors/errors.ts";
 
 export const MIGRATIONS: readonly string[] = [
-  // 1 — initial state model (idea §10, §12, §13, §14)
+  // 1 — initial state model (spec §10, §12, §13, §14)
   `
   CREATE TABLE workflow_run (
     id          TEXT PRIMARY KEY,

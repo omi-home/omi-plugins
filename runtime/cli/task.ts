@@ -1,4 +1,4 @@
-// `omi ticket validate`, `omi task start`, `omi task status` (idea §7–§8): ticket gates →
+// `omi ticket validate`, `omi task start`, `omi task status` (spec §7–§8): ticket gates →
 // run (FSM CREATED → TICKET_VALIDATED → WORKSPACE_READY) → owned worktree → Project status.
 // No LLM call anywhere in setup.
 import { execFileSync } from "node:child_process";
@@ -66,7 +66,7 @@ const typeOf = (t: Ticket) => {
   return labels.length === 1 ? IssueType.safeParse(labels[0]).data : undefined;
 };
 
-/** Ticket gates plus "may this Issue own a worktree" (idea §6: work happens on terminal tasks). */
+/** Ticket gates plus "may this Issue own a worktree" (spec §6: work happens on terminal tasks). */
 export function startGates(t: Ticket, config: OmiConfig): Check[] {
   const checks = validateTicket(t, config);
   const type = typeOf(t);

@@ -1,4 +1,4 @@
-// Local transactional state (idea §13) on the built-in node:sqlite driver.
+// Local transactional state (spec §13) on the built-in node:sqlite driver.
 // One database per repository, inside the git common dir: shared by every worktree, never committed.
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";

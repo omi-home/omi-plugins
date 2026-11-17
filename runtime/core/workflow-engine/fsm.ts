@@ -1,4 +1,4 @@
-// Workflow FSM (idea §10): pure (context, event, facts) → next context. No I/O; the caller
+// Workflow FSM (spec §10): pure (context, event, facts) → next context. No I/O; the caller
 // persists the result with a compare-and-set transition (runtime/persistence/repository.ts).
 // Review policy: 2 rounds → Architect once → 2 rounds → WAITING_PO. Never a fifth round.
 import type { WorkflowContext, WorkflowEventType, WorkflowState } from "../contracts.ts";
@@ -10,7 +10,7 @@ export type WorkflowEvent =
 
 /** Observed facts the caller reads from state before asking for a transition. */
 export interface Facts {
-  /** Outbox reports not yet confirmed on GitHub: forward progress waits for them (idea §5). */
+  /** Outbox reports not yet confirmed on GitHub: forward progress waits for them (spec §5). */
   pendingReports: number;
 }
 

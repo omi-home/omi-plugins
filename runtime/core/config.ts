@@ -1,4 +1,4 @@
-// OMI configuration contract with safe defaults (idea §3, §7, §9, §14, §20).
+// OMI configuration contract with safe defaults (spec §3, §7, §9, §14, §20).
 // Project config lives in <repo>/.omi/config.yaml; plugin config/ holds only default policies.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -41,7 +41,7 @@ export const OmiConfig = z.strictObject({
     .prefault({}),
   review: z
     .strictObject({
-      // Fixed by policy (idea §10): 2 rounds, Architect, 2 more rounds.
+      // Fixed by policy (spec §10): 2 rounds, Architect, 2 more rounds.
       maxRounds: z.literal(4).default(4),
       architectAfterFailedRounds: z.literal(2).default(2),
     })
@@ -54,7 +54,7 @@ export const OmiConfig = z.strictObject({
     .prefault({}),
   cleanup: z
     .strictObject({
-      // Remote branch deletion is never assumed safe (idea §14).
+      // Remote branch deletion is never assumed safe (spec §14).
       deleteRemoteBranch: z.boolean().default(false),
       logRetentionDays: z.int().min(1).default(14),
     })

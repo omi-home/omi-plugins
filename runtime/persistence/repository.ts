@@ -192,7 +192,7 @@ function setStepState(db: Db, id: number, from: StepState[], to: StepState, now:
   }
 }
 
-/** Closes an attempt that failed technically: the step stays in its round (idea §10). */
+/** Closes an attempt that failed technically: the step stays in its round (spec §10). */
 export function failAttempt(
   db: Db,
   o: { stepRunId: number; attempt: number; errorCode: ErrorCode },
@@ -212,7 +212,7 @@ export function failAttempt(
 }
 
 /**
- * Dispatch invariant, first half (idea §5): the result and its pending report commit together.
+ * Dispatch invariant, first half (spec §5): the result and its pending report commit together.
  * Either both exist afterwards or neither does.
  */
 export function persistStepResult(
@@ -328,7 +328,7 @@ export const resourceOwner = (db: Db, kind: ResourceKind, ref: string): string |
 };
 
 /**
- * Exclusive lease with expiry (idea §13). Acquire succeeds when free, expired, or already ours
+ * Exclusive lease with expiry (spec §13). Acquire succeeds when free, expired, or already ours
  * (which renews it). A crashed holder stops blocking once its lease expires.
  */
 export function acquireLease(

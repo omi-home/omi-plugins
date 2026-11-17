@@ -1,4 +1,4 @@
-// Project Status sync (idea §6, §16): read → diff → write; only ever moves an item forward
+// Project Status sync (spec §6, §16): read → diff → write; only ever moves an item forward
 // from Backlog/Ready, and rolls the same move up the native parent chain so a parent never
 // shows less progress than its children. Built-in Project automation does not do this.
 import { z } from "zod";

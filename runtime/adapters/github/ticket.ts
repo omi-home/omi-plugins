@@ -1,4 +1,4 @@
-// Ticket lookup and ticket-first gates 1–2 (idea §8): exists, open, in the configured
+// Ticket lookup and ticket-first gates 1–2 (spec §8): exists, open, in the configured
 // Project, valid OMI type, terminal, open parent, acceptance criteria, no open blockers.
 import { z } from "zod";
 import type { OmiConfig } from "../../core/config.ts";

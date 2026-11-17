@@ -1,4 +1,4 @@
-// Task worktree manager (idea §7): one owned branch + worktree per Issue, cut from a freshly
+// Task worktree manager (spec §7): one owned branch + worktree per Issue, cut from a freshly
 // fetched origin/<base>, outside the main checkout, reused on repeated starts.
 //
 // Ownership is recorded twice: SQLite `resource_owner` (claimed BEFORE any git mutation, so a
@@ -57,7 +57,7 @@ const PREFIX: Partial<Record<IssueType, string>> = {
   "devops-task": "chore",
 };
 
-/** `<prefix>/<issue>-<slug>` (idea §7); slug is ASCII, at most 40 chars. */
+/** `<prefix>/<issue>-<slug>` (spec §7); slug is ASCII, at most 40 chars. */
 export function branchName(type: IssueType, issue: number, title: string): string {
   const slug = title
     .normalize("NFKD")

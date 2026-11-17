@@ -8,7 +8,7 @@
 
 ## Bối cảnh
 
-Spec ([omi-plugins-idea.md](../../omi-plugins-idea.md) §17) yêu cầu 8 spike GO/NO-GO trước khi xây dựng. Các spike đã chạy trên fixture dùng một lần; kết quả và giới hạn nằm trong từng báo cáo. ADR này chốt các lựa chọn mà spec để mở hoặc mà kết quả spike buộc phải đổi.
+Spec §17 (nay ở [Milestone-0001 #1](https://github.com/omi-home/omi-plugins/issues/1)) yêu cầu 8 spike GO/NO-GO trước khi xây dựng. Các spike đã chạy trên fixture dùng một lần; kết quả và giới hạn nằm trong từng báo cáo. ADR này chốt các lựa chọn mà spec để mở hoặc mà kết quả spike buộc phải đổi.
 
 ## Quyết định
 
@@ -32,7 +32,7 @@ Các quy tắc kỹ thuật bắt buộc rút ra từ spike (không cần PO ch�
 
 ## Hệ quả
 
-- **Thay đổi so với spec:** D3 thay thế phần "Specialist skills are native plugin skills preloaded into named subagents via `skills:`" (idea §0 mục 5, §4, bảng role-skill map §4, cây `skills/` §5) và deliverable "one preloaded skill" của T1.4 trong roadmap. Spec cần được cập nhật theo ADR này: thư mục `skills/` chỉ còn các entry skill của Coordinator; nội dung chuyên môn chuyển sang `resources/`.
+- **Thay đổi so với spec:** D3 thay thế phần "Specialist skills are native plugin skills preloaded into named subagents via `skills:`" (spec §0 mục 5, §4, bảng role-skill map §4, cây `skills/` §5) và deliverable "one preloaded skill" của T1.4 trong roadmap. Spec cần được cập nhật theo ADR này: thư mục `skills/` chỉ còn các entry skill của Coordinator; nội dung chuyên môn chuyển sang `resources/`.
 - **Quyền đọc:** plugin khi cài nằm ngoài thư mục project, nên Read vào `resources/` cần allow rule `Read(//<plugin-root>/resources/**)` hoặc `--add-dir <plugin-root>/resources` — CLI phải truyền khi khởi chạy agent (đã xác minh cả hai cách).
 - **Giới hạn của D3:** đây là cách ly *khỏi context main theo mặc định*, không phải ranh giới bảo mật — main vẫn có thể chủ động `Read` file trong `resources/` nếu có quyền.
 - **Workflow tùy chọn:** phụ thuộc `"enableWorkflows": true` trong user settings; `omi doctor` phát hiện và tắt adapter khi không có.
@@ -41,7 +41,7 @@ Các quy tắc kỹ thuật bắt buộc rút ra từ spike (không cần PO ch�
 
 - **Repo:** `omi-home/omi-plugins`, public (đã tồn tại, rỗng, default `main`).
 - **Fixture GitHub:** giữ lại `omi-home/omi-spike-p0-20261117`, `omi-home/omi-spike-p0-private-20261117` và org Project #1 cho integration test M2; xóa khi không còn cần.
-- **Spec:** `omi-plugins-idea.md` và `omi-plugins-roadmap.md` đã được cập nhật lên v2.1 cho khớp với ADR này.
+- **Spec:** `omi-plugins-idea.md` và `omi-plugins-roadmap.md` đã được cập nhật lên v2.1 cho khớp với ADR này; từ D6.3 #94 nội dung spec/roadmap chuyển vào body Issue, xem chỉ mục trong [overview](../architecture/overview.md).
 - **Project:** org Project [#2](https://github.com/orgs/omi-home/projects/2) với 71 issue sinh từ roadmap §3; `develop` là default branch, `main`/`develop` được bảo vệ (bắt buộc PR, `enforce_admins`).
 - **D7:** báo cáo spike chuyển từ repo sang comment trên Spike Issue; thư mục báo cáo trong repo đã bị xóa (#72).
 

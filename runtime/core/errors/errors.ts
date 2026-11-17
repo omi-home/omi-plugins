@@ -2,7 +2,7 @@ import { redact, redactDeep } from "../../reporting/redact.ts";
 
 /**
  * Error taxonomy. `transient` errors are retried as a new technical attempt and
- * MUST NOT count as a review round (idea §10).
+ * MUST NOT count as a review round (spec §10).
  */
 export const ERROR_CODES = {
   USAGE_INVALID: { transient: false },
