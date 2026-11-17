@@ -21,7 +21,7 @@ const worktree = () => mkdtempSync(join(tmpdir(), "omi-t14-"));
 test("rule pack declares a Pack-ID canary", () =>
   assert.match(PACK_ID, /^omi-backend-rules\/v\d+$/));
 
-test("main /context: agent listed by name/description only, no rule pack, no plugin skill", {
+test("main /context: agent listed by name/description only, no rule pack, only entry skills", {
   skip: !hasClaude && "claude CLI not on PATH",
 }, () => {
   const r = spawnSync(
@@ -41,8 +41,9 @@ test("main /context: agent listed by name/description only, no rule pack, no plu
   assert.match(r.stdout, /omi-engineering:backend-engineer \| Plugin/);
   assert.ok(!r.stdout.includes(PACK_ID), "rule pack leaked into main context");
   assert.ok(!r.stdout.includes("role-rules"));
+  // D3: the only plugin skills are Coordinator entry points.
   const skills = r.stdout.split("### Skills")[1] ?? "";
-  assert.ok(!skills.includes("omi-engineering:"), "plugin registers a skill");
+  assert.deepEqual(skills.match(/omi-engineering:[\w-]+/g), ["omi-engineering:omi-task"]);
 });
 
 const runAgent = (grant: boolean) => {

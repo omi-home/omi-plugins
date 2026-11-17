@@ -37,3 +37,9 @@ test("canonical instructions file is AGENTS.md, no CLAUDE.md shim", () => {
   assert.ok(tracked.includes("AGENTS.md"));
   assert.ok(!tracked.includes("CLAUDE.md"), "CLAUDE.md needs an approved compatibility decision");
 });
+
+test("skills/ holds only Coordinator entry skills (ADR-0001 D3)", () => {
+  const skills = tracked.filter((p) => p.startsWith("skills/"));
+  assert.ok(skills.length > 0);
+  for (const p of skills) assert.match(p, /^skills\/omi-[a-z-]+\/SKILL\.md$/);
+});
