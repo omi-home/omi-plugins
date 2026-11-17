@@ -8,7 +8,10 @@ import { redact } from "./redact.ts";
 const TEMPLATES = new URL("../../templates/reports/", import.meta.url);
 
 /** Agent text must not forge an `omi:` marker or break out of its section. */
-const block = (s: string) => s.replace(/<!--/g, "&lt;!--").replace(/-->/g, "--&gt;");
+const block = (s: string) => {
+  const t = s.replace(/<!--/g, "&lt;!--").replace(/-->/g, "--&gt;");
+  return (t.match(/```/g)?.length ?? 0) % 2 ? `${t}\n\`\`\`` : t; // close a dangling fence
+};
 /** Table cells: one line, no column breaks. */
 const cell = (s: string) => block(s).replace(/\r?\n/g, " ").replace(/\|/g, "\\|");
 const list = (items: string[]) => (items.length ? items.map((i) => `- ${i}`).join("\n") : "_None_");

@@ -85,4 +85,6 @@ test("sanitization: secrets redacted, forged markers and table breaks neutralize
   assert.equal(out.match(/<!-- omi:/g)?.length, 1, "only the real marker");
   assert.match(out, /Review \\\| injected/);
   assert.match(out, /a \\\| b c/);
+  const fenced = renderStepReport(comment({ category: "review", summary: "log:\n```\nboom" }));
+  assert.equal(fenced.match(/```/g)?.length, 2, "dangling fence closed");
 });
