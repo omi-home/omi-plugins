@@ -47,6 +47,10 @@ Commands:
                          Issue, tip, conflicts, CI, reviews, merge method, protection, risk
   pr merge <n>           Merge Issue #n's task PR when every gate passes (configured method, pinned
                          to the validated head); risk:high goes to Waiting PO and is not merged
+  cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
+                         reports, attempts left open by a crash, orphan and prunable worktrees
+  cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
+                         prune missing worktrees; orphans are reported, never removed
   version                Print the OMI version
   help                   Show this help
 

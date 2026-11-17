@@ -531,3 +531,64 @@ export const claimedRefs = (db: Db, runId: string, kind: ResourceKind): string[]
     .prepare("SELECT ref FROM resource_owner WHERE run_id = ? AND kind = ? ORDER BY id")
     .all(runId, kind)
     .map((r) => String(r.ref));
+
+/** Runs that are not finished for good: candidates for startup reconciliation. */
+export const openRuns = (db: Db): RunRow[] =>
+  db
+    .prepare(
+      "SELECT * FROM workflow_run WHERE state NOT IN ('COMPLETED', 'CANCELLED', 'FAILED') ORDER BY created_at, rowid",
+    )
+    .all()
+    .map((r) => toRun(r) as RunRow);
+
+export const pendingCount = (db: Db, runId: string): number =>
+  Number(
+    db.prepare("SELECT count(*) AS n FROM outbox WHERE run_id = ? AND state = 'PENDING'").get(runId)
+      ?.n,
+  );
+
+/** True while someone holds an unexpired lease on `key`. */
+export const leaseActive = (db: Db, key: string, now = Date.now()): boolean =>
+  db.prepare("SELECT 1 FROM lease WHERE key = ? AND expires_at > ?").get(key, now) !== undefined;
+
+/** Open attempts of a run's steps (a crash leaves them open). */
+export const openAttempts = (db: Db, runId: string): { stepRunId: number; attempt: number }[] =>
+  db
+    .prepare(
+      "SELECT a.step_run_id, a.attempt FROM step_attempt a JOIN step_run s ON s.id = a.step_run_id WHERE s.run_id = ? AND a.finished_at IS NULL",
+    )
+    .all(runId)
+    .map((r) => ({ stepRunId: Number(r.step_run_id), attempt: Number(r.attempt) }));
+
+/**
+ * Crash recovery (#24 CR-003): closes the run's open attempts with CRASH_RECOVERED and puts their
+ * steps back to PENDING so `beginAttempt` can retry, but only while nobody holds `leaseKey`
+ * (the run lease of a live `omi task run`). Checked and written in one transaction, so a
+ * session that starts meanwhile is never cut off. Returns the number of attempts closed.
+ */
+export function recoverAttempts(
+  db: Db,
+  o: { runId: string; leaseKey: string; now?: number },
+): number {
+  return tx(db, "recover attempts", () => {
+    if (leaseActive(db, o.leaseKey, o.now)) return 0;
+    const open = openAttempts(db, o.runId);
+    const at = iso();
+    for (const a of open) {
+      db.prepare(
+        "UPDATE step_attempt SET finished_at = ?, error_code = 'CRASH_RECOVERED' WHERE step_run_id = ? AND attempt = ? AND finished_at IS NULL",
+      ).run(at, a.stepRunId, a.attempt);
+      db.prepare(
+        "UPDATE step_run SET state = 'PENDING', updated_at = ? WHERE id = ? AND state = 'RUNNING'",
+      ).run(at, a.stepRunId);
+    }
+    return open.length;
+  });
+}
+
+/** Every live ref of one kind, whoever owns it. */
+export const liveRefs = (db: Db, kind: ResourceKind): string[] =>
+  db
+    .prepare("SELECT ref FROM resource_owner WHERE kind = ? AND released_at IS NULL")
+    .all(kind)
+    .map((r) => String(r.ref));

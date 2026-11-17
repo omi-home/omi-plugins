@@ -23,6 +23,8 @@ export const ERROR_CODES = {
   NETWORK: { transient: true },
   LOCK_HELD: { transient: true },
   REPORT_NOT_POSTED: { transient: true },
+  // An attempt left open by a crashed process, closed by startup reconciliation: retry it.
+  CRASH_RECOVERED: { transient: true },
   INTERNAL: { transient: false },
 } as const satisfies Record<string, { transient: boolean }>;
 

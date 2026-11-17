@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
+import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { type Check, doctor } from "./doctor.ts";
 import {
   prCreate,
@@ -16,6 +17,23 @@ import {
   taskStatus,
   ticketValidate,
 } from "./task.ts";
+
+const humanScan = (s: ScanResult) => [
+  ...s.runs.map(
+    (r) =>
+      `#${String(r.issue).padEnd(5)} ${r.state.padEnd(16)} ${[
+        r.mergedPr ? `merged PR #${r.mergedPr}` : "not merged",
+        r.worktree ? `worktree${r.worktree.exists ? "" : " (missing)"}` : "no worktree",
+        r.pendingReports ? `${r.pendingReports} pending report(s)` : "",
+        r.openAttempts ? `${r.openAttempts} open attempt(s)` : "",
+        r.leased ? "leased (running)" : "",
+      ]
+        .filter(Boolean)
+        .join(", ")}`,
+  ),
+  ...s.orphans.map((p) => `orphan    ${p} (not owned: left alone)`),
+  ...s.prunable.map((p) => `prunable  ${p}`),
+];
 
 export const HELP = `Usage: omi <command> [--output human|json]
 
@@ -37,6 +55,10 @@ Commands:
                          Issue, tip, conflicts, CI, reviews, merge method, protection, risk
   pr merge <n>           Merge Issue #n's task PR when every gate passes (configured method, pinned
                          to the validated head); risk:high goes to Waiting PO and is not merged
+  cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
+                         reports, attempts left open by a crash, orphan and prunable worktrees
+  cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
+                         prune missing worktrees; orphans are reported, never removed
   version                Print the OMI version
   help                   Show this help
 
@@ -81,6 +103,8 @@ const NESTED = new Set([
   "pr validate",
   "pr merge",
 ]);
+/** Subcommands without an issue: <group> <action>. */
+const REPO_WIDE = new Set(["cleanup scan", "cleanup apply"]);
 
 const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
 
@@ -116,10 +140,13 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
     }
     command = values.help ? "help" : (positionals[0] ?? "");
     let rest = positionals.slice(1);
-    if (!values.help && NESTED.has(`${command} ${rest[0]}`)) {
+    if (
+      !values.help &&
+      (NESTED.has(`${command} ${rest[0]}`) || REPO_WIDE.has(`${command} ${rest[0]}`))
+    ) {
       command = `${command} ${rest[0]}`;
       rest = rest.slice(1);
-    } else if (command === "ticket" || command === "task" || command === "pr") {
+    } else if (["ticket", "task", "pr", "cleanup"].includes(command)) {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
     }
     const issue = NESTED.has(command) ? issueArg(rest.shift()) : 0;
@@ -201,6 +228,22 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         ];
         return ok(r, lines(human), r.cleanup?.state === "CLEANUP_FAILED" ? EXIT.failed : EXIT.ok);
       }
+      case "cleanup scan": {
+        const r = cleanupScan({ cwd });
+        return ok(r, lines(humanScan(r)));
+      }
+      case "cleanup apply": {
+        const r = cleanupApply({ cwd, safe: values.safe });
+        const human = [
+          ...r.outcomes.map(
+            (o) =>
+              `#${String(o.issue).padEnd(5)} ${o.error ? `FAIL ${o.error.code}: ${o.error.message}` : o.actions.join("; ")}`,
+          ),
+          ...(r.pruned ? ["git worktree prune"] : []),
+          ...r.scan.orphans.map((p) => `orphan    ${p} (not owned: left alone)`),
+        ];
+        return ok(r, lines(human), r.outcomes.some((o) => o.error) ? EXIT.failed : EXIT.ok);
+      }
       case "pr validate": {
         const r = prValidate({ cwd }, issue);
         return ok(r, `pr        ${r.pr ?? "none"}\n${humanChecks(r.checks)}`, checksExit(r.checks));
@@ -239,5 +282,6 @@ const parse = (args: string[]) =>
       title: { type: "string" },
       "body-file": { type: "string" },
       "dry-run": { type: "boolean" },
+      safe: { type: "boolean" },
     },
   });

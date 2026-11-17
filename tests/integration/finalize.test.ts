@@ -3,16 +3,33 @@
 // status write failed) never shows Done, and a rerun resumes to exactly one cleanup comment.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { prBody } from "../../runtime/adapters/github/pr.ts";
+import { cleanupApply, cleanupScan } from "../../runtime/cli/cleanup.ts";
 import { taskFinalize, taskStatus } from "../../runtime/cli/task.ts";
 import { parseConfig } from "../../runtime/core/config.ts";
 import { openState, statePath } from "../../runtime/persistence/db.ts";
-import { advanceRun, createRun } from "../../runtime/persistence/repository.ts";
+import {
+  acquireLease,
+  advanceRun,
+  beginAttempt,
+  createRun,
+  enqueueReport,
+  releaseLease,
+  startStep,
+} from "../../runtime/persistence/repository.ts";
 import { ensureWorktree } from "../../runtime/resources/worktree.ts";
 
 const git = (cwd: string, ...args: string[]) =>
@@ -284,4 +301,89 @@ test("dry run changes nothing", () => {
   assert.equal(state(s.repo), "WORKSPACE_READY");
   assert.equal(existsSync(s.wt), true);
   assert.equal(s.f.comments.length, 0);
+});
+
+// ---- T4.5 crash recovery: `omi cleanup scan` / `apply --safe` ----
+
+const db5 = (repo: string) => openState(statePath(repo));
+
+test("apply --safe: merged-but-uncleaned run is finalized once; a second apply has nothing to do", () => {
+  const s = merged();
+  const scan = cleanupScan({ cwd: s.repo, gh: s.gh });
+  assert.equal(scan.runs[0]?.mergedPr, 9);
+  const r = cleanupApply({ cwd: s.repo, gh: s.gh, safe: true });
+  assert.match(r.outcomes[0]?.actions.join() ?? "", /finalized after PR #9: COMPLETED/);
+  assert.equal(existsSync(s.wt), false);
+  assert.equal(s.f.comments.length, 1);
+  assert.deepEqual(cleanupApply({ cwd: s.repo, gh: s.gh, safe: true }).outcomes, []);
+  assert.throws(() => cleanupApply({ cwd: s.repo, gh: s.gh }), { code: "USAGE_INVALID" });
+});
+
+test("crash mid-cleanup (worktree gone, branch left, CLEANUP_PENDING): apply finishes it", () => {
+  const s = merged();
+  const db = db5(s.repo);
+  advanceRun(db, "run5", { type: "MERGE_VERIFIED" });
+  advanceRun(db, "run5", { type: "CLEANUP_STARTED" });
+  db.close();
+  git(s.repo, "worktree", "remove", s.wt);
+  const r = cleanupApply({ cwd: s.repo, gh: s.gh, safe: true });
+  assert.equal(r.outcomes[0]?.error, null);
+  assert.equal(state(s.repo), "COMPLETED");
+  assert.equal(git(s.repo, "branch", "--list", "feature/5-x"), "");
+});
+
+test("report persisted but crash before/after POST: replay leaves exactly one comment", () => {
+  const s = merged();
+  s.f.merged = false;
+  const marker = "<!-- omi:test-report -->";
+  const db = db5(s.repo);
+  enqueueReport(db, { runId: "run5", marker, body: `${marker}\nhello` });
+  db.close();
+  s.f.comments.push({ id: 7, body: `${marker}\nhello` }); // the POST landed, the id was lost
+  const r = cleanupApply({ cwd: s.repo, gh: s.gh, safe: true });
+  assert.match(r.outcomes[0]?.actions.join() ?? "", /posted 1 pending report/);
+  assert.equal(s.f.comments.length, 1);
+  assert.equal(cleanupScan({ cwd: s.repo, gh: s.gh }).runs[0]?.pendingReports, 0);
+});
+
+test("attempt left open by a crash: closed as CRASH_RECOVERED and retryable; a live lease is never cut off", () => {
+  const s = merged();
+  s.f.merged = false;
+  const db = db5(s.repo);
+  const step = startStep(db, { runId: "run5", stepId: "dev", round: 1, role: "backend-engineer" });
+  beginAttempt(db, step.id);
+  acquireLease(db, { key: "task:o/repo#5", holder: "live-session", ttlMs: 60_000 });
+  db.close();
+  const busy = cleanupApply({ cwd: s.repo, gh: s.gh, safe: true });
+  assert.deepEqual(busy.outcomes, []); // leased: someone is driving it, hands off
+  assert.equal(cleanupScan({ cwd: s.repo, gh: s.gh }).runs[0]?.leased, true);
+  const db2 = db5(s.repo);
+  releaseLease(db2, { key: "task:o/repo#5", holder: "live-session" });
+  db2.close();
+  const r = cleanupApply({ cwd: s.repo, gh: s.gh, safe: true });
+  assert.match(r.outcomes[0]?.actions.join() ?? "", /recovered 1 open attempt/);
+  const db3 = db5(s.repo);
+  assert.equal(beginAttempt(db3, step.id), 2);
+  db3.close();
+});
+
+test("orphan worktree under the OMI root is reported and left alone", () => {
+  const s = merged();
+  s.f.merged = false;
+  const orphan = join(dirname(s.wt), "77");
+  git(s.repo, "worktree", "add", "-q", "-b", "feature/77-foreign", orphan, "origin/develop");
+  const scan = cleanupScan({ cwd: s.repo, gh: s.gh });
+  assert.equal(scan.orphans.length, 1);
+  cleanupApply({ cwd: s.repo, gh: s.gh, safe: true });
+  assert.equal(existsSync(orphan), true);
+});
+
+test("no runtime code passes --force (or -f) to git", () => {
+  const root = new URL("../../runtime/", import.meta.url);
+  const files = readdirSync(root, { recursive: true }).filter((f) => String(f).endsWith(".ts"));
+  for (const f of files) {
+    const src = readFileSync(new URL(String(f).replaceAll("\\", "/"), root), "utf8");
+    // Every git call goes through git()/tryGit()/gitOut() or execFileSync("git", [...]).
+    assert.doesNotMatch(src, /(?:[gG]it\w*\(|"git",\s*)\[[^\]]*"(?:--force|-f|-ff)"/, String(f));
+  }
 });

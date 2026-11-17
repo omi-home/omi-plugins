@@ -91,7 +91,7 @@ const START_LEASE_MS = 10 * 60_000;
 const RUN_LEASE_MS = 6 * 60 * 60_000;
 const PLUGIN_ROOT = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 
-function repo(cwd: string): { root: string; config: OmiConfig } {
+export function repo(cwd: string): { root: string; config: OmiConfig } {
   let common: string;
   try {
     common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
