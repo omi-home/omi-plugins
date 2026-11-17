@@ -35,3 +35,7 @@ Thử plugin từ source cục bộ không cần cài: `claude --plugin-dir .`. 
 - [ADR](./docs/decisions/)
 - Hướng dẫn đóng góp cho agent và người: [AGENTS.md](./AGENTS.md)
 - Quản lý task: [GitHub Project #2](https://github.com/orgs/omi-home/projects/2)
+
+## License
+
+[MIT](./LICENSE)

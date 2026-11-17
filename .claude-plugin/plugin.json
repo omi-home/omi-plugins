@@ -8,5 +8,6 @@
   },
   "homepage": "https://github.com/omi-home/omi-plugins",
   "repository": "https://github.com/omi-home/omi-plugins",
+  "license": "MIT",
   "keywords": ["agile", "github-projects", "worktree", "code-review", "workflow"]
 }

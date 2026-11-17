@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "OMI Engineering Plugin: Claude Code plugin + deterministic local runtime",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22.18"
