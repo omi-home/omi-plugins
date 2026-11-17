@@ -69,7 +69,7 @@ export function branchName(type: IssueType, issue: number, title: string): strin
   return `${PREFIX[type] ?? "feature"}/${issue}${slug ? `-${slug}` : ""}`;
 }
 
-function git(args: string[], cwd: string): string {
+export function git(args: string[], cwd: string): string {
   try {
     return execFileSync("git", args, {
       cwd,
@@ -92,7 +92,7 @@ function git(args: string[], cwd: string): string {
     throw new OmiError("INTERNAL", `git ${args[0]} failed: ${first}`);
   }
 }
-const tryGit = (args: string[], cwd: string) => {
+export const tryGit = (args: string[], cwd: string) => {
   try {
     return git(args, cwd);
   } catch {
@@ -105,15 +105,16 @@ const canon = (p: string) => {
   const r = resolve(p);
   return process.platform === "win32" ? r.toLowerCase() : r;
 };
-const same = (a: string, b: string) => canon(a) === canon(b);
+export const same = (a: string, b: string) => canon(a) === canon(b);
 
-interface Listed {
+export interface Listed {
   path: string;
   branch?: string;
   prunable: boolean;
+  locked: boolean;
 }
 
-function listWorktrees(repoRoot: string): Listed[] {
+export function listWorktrees(repoRoot: string): Listed[] {
   return git(["worktree", "list", "--porcelain"], repoRoot)
     .split(/\r?\n\r?\n/)
     .filter(Boolean)
@@ -125,6 +126,7 @@ function listWorktrees(repoRoot: string): Listed[] {
         path: resolve(val("worktree") ?? ""),
         branch: val("branch")?.replace(/^refs\/heads\//, ""),
         prunable: lines.some((l) => l === "prunable" || l.startsWith("prunable ")),
+        locked: lines.some((l) => l === "locked" || l.startsWith("locked ")),
       };
     });
 }
@@ -162,7 +164,7 @@ const markerFile = (wt: string) => {
   return join(resolve(wt, gitDir), MARKER);
 };
 
-function readMarker(wt: string): OwnerMarker | undefined {
+export function readMarker(wt: string): OwnerMarker | undefined {
   const file = markerFile(wt);
   if (!existsSync(file)) return undefined;
   let data: unknown;

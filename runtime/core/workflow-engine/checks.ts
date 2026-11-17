@@ -4,6 +4,7 @@
 import { spawnSync } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { redact } from "../../reporting/redact.ts";
 import type { OmiConfig } from "../config.ts";
 import { type CheckOutcome, GateCheck } from "../contracts.ts";
@@ -25,6 +26,12 @@ const TAIL_BYTES = 16 * 1024;
 
 /** 127: POSIX sh "command not found"; 9009: cmd.exe "is not recognized". */
 const MISSING_TOOL = new Set([127, 9009]);
+const SUPERVISOR = fileURLToPath(new URL("./supervise.ts", import.meta.url));
+/** supervise.ts exit code after it killed the command's process tree. */
+const TIMEOUT_EXIT = 124;
+/** Grace for the supervisor itself on top of the check's own timeout. */
+const SUPERVISOR_GRACE_MS = 15_000;
+
 /** cmd.exe /c exits 1 for an unknown command; only its own message tells. */
 const NOT_FOUND = /^'[^']+' is not recognized as an internal or external command/m;
 
@@ -46,8 +53,8 @@ function tail(file: string): string {
 /**
  * Runs every configured check in GateCheck order; a failure does not stop later checks, so the
  * Engineer gets every problem in one validation-fix round.
- * ponytail: on timeout only the shell is killed; a grandchild it spawned may outlive it until
- * the cleanup step (spec §14 stop-processes) owns process trees.
+ * Each command runs under supervise.ts, which kills the whole process tree on timeout
+ * (taskkill /T on Windows, the process group on POSIX), so no grandchild outlives its check.
  */
 export function runChecks(o: { worktree: string; checks: OmiConfig["checks"]; logDir: string }): {
   passed: boolean;
@@ -71,17 +78,19 @@ export function runChecks(o: { worktree: string; checks: OmiConfig["checks"]; lo
     const started = Date.now();
     let r: ReturnType<typeof spawnSync>;
     try {
-      r = spawnSync(cmd.run, {
+      r = spawnSync(process.execPath, [SUPERVISOR, String(cmd.timeoutSec * 1000), cmd.run], {
         cwd: o.worktree,
-        shell: true,
         stdio: ["ignore", fd, fd], // to disk, not memory: output size never hits maxBuffer
-        timeout: cmd.timeoutSec * 1000,
+        timeout: cmd.timeoutSec * 1000 + SUPERVISOR_GRACE_MS,
         windowsHide: true,
       });
     } finally {
       closeSync(fd);
     }
-    const timedOut = (r.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT";
+    const durationMs = Date.now() - started;
+    const timedOut =
+      (r.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT" ||
+      (r.status === TIMEOUT_EXIT && durationMs >= cmd.timeoutSec * 1000);
     const summary = !timedOut && r.status === 0 ? "" : tail(logPath);
     const outcome: CheckOutcome = timedOut
       ? "timeout"
@@ -94,7 +103,7 @@ export function runChecks(o: { worktree: string; checks: OmiConfig["checks"]; lo
       name,
       outcome,
       exitCode: r.status,
-      durationMs: Date.now() - started,
+      durationMs,
       summary,
       logPath,
     };

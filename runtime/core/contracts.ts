@@ -392,13 +392,16 @@ export const CleanupResult = z
   .strictObject({
     schemaVersion,
     issue: IssueRef,
-    pr: z.strictObject({
-      number: z.int().positive(),
-      merged: z.boolean(),
-      baseRef: z.string().min(1),
-      headRef: z.string().min(1),
-      headSha: sha,
-    }),
+    /** Merge receipt; null when no merged PR was found (nothing destructive ran). */
+    pr: z
+      .strictObject({
+        number: z.int().positive(),
+        merged: z.boolean(),
+        baseRef: z.string().min(1),
+        headRef: z.string().min(1),
+        headSha: sha,
+      })
+      .nullable(),
     steps: z
       .array(
         z.strictObject({
@@ -410,7 +413,7 @@ export const CleanupResult = z
       .min(1),
     state: WorkflowState.extract(["COMPLETED", "CLEANUP_FAILED"]),
   })
-  .refine((r) => r.state !== "COMPLETED" || r.pr.merged, {
+  .refine((r) => r.state !== "COMPLETED" || r.pr?.merged, {
     message: "COMPLETED requires a verified merge",
     path: ["pr", "merged"],
   })

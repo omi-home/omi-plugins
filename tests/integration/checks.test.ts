@@ -1,7 +1,7 @@
 // T3.4 deterministic gate: pass/skip, failed command, timeout, missing tool, huge output
 // bounded, redacted summary, full log retained. Real processes, no network.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -67,6 +67,39 @@ test("timeout is its own outcome", () => {
   assert.equal(t?.outcome, "timeout");
   assert.equal(r.passed, false);
   assert.ok((t?.durationMs ?? 0) < 3500);
+});
+
+test("timeout kills the whole process tree: no grandchild outlives its check (#36)", () => {
+  const work = dir();
+  const pidFile = join(work, "pid");
+  const script = join(work, "spawn.cjs");
+  writeFileSync(
+    script,
+    [
+      'const c = require("node:child_process").spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)"], { stdio: "ignore" });',
+      `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(c.pid));`,
+      "setTimeout(() => {}, 60000);",
+    ].join("\n"),
+  );
+  const r = runChecks({
+    worktree: work,
+    logDir: dir(),
+    checks: checks({ test: { run: `node "${script}"`, timeoutSec: 2 } }),
+  });
+  assert.equal(r.results.find((x) => x.name === "test")?.outcome, "timeout");
+  const pid = Number(readFileSync(pidFile, "utf8"));
+  const alive = () => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (alive())
+    process.kill(pid); // never leak the sleeper, even when the assertion fails
+  else return;
+  assert.fail(`grandchild ${pid} survived the timeout`);
 });
 
 test("missing tool is reported as such", () => {
