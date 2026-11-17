@@ -21,7 +21,7 @@ export const spawnGh: GhRunner = (args) =>
 const RULES: [RegExp, ErrorCode][] = [
   [/rate limit|RATE_LIMITED|HTTP 429/i, "GITHUB_RATE_LIMITED"],
   [
-    /HTTP 401|Bad credentials|not logged in|gh auth login|INSUFFICIENT_SCOPES|HTTP 403/i,
+    /HTTP 401|Bad credentials|not logged in|gh auth login|INSUFFICIENT_SCOPES|FORBIDDEN|HTTP 403/i,
     "GITHUB_AUTH",
   ],
   [/HTTP 5\d\d|SERVICE_UNAVAILABLE|Something went wrong/i, "GITHUB_UNAVAILABLE"],

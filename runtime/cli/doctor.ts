@@ -155,7 +155,7 @@ export function github(config: OmiConfig | undefined, run: GhRunner = spawnGh): 
       ? {
           name: "github-project",
           status: "fail",
-          code: "TICKET_NOT_IN_PROJECT",
+          code: "CONFIG_INVALID",
           detail: `${owner} Project #${projectNumber} not found or not accessible (token needs the project scope)`,
         }
       : p.closed

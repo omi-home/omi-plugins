@@ -26,6 +26,7 @@ test("classify: gh stderr → error code (CR-001)", () => {
     ["gh: API rate limit exceeded for user (HTTP 403)", "GITHUB_RATE_LIMITED"],
     ["You have exceeded a secondary rate limit", "GITHUB_RATE_LIMITED"],
     ["gh: Bad credentials (HTTP 401)", "GITHUB_AUTH"],
+    ["FORBIDDEN Resource not accessible by integration", "GITHUB_AUTH"],
     ["To get started with GitHub CLI, please run:  gh auth login", "GITHUB_AUTH"],
     ["gh: Server Error (HTTP 502)", "GITHUB_UNAVAILABLE"],
     [
@@ -229,7 +230,7 @@ test("doctor github: permission, project, rate-limit diagnostics", () => {
     ),
   );
   assert.equal(bad["github-rate-limit"], "warn");
-  assert.equal(bad["github-project"], "fail:TICKET_NOT_IN_PROJECT");
+  assert.equal(bad["github-project"], "fail:CONFIG_INVALID");
   assert.equal(bad["github-permission"], "fail:GITHUB_AUTH");
   assert.equal(bad["github-visibility"], "warn");
   assert.equal(bad["default-branch"], "warn");
