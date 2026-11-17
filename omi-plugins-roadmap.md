@@ -33,7 +33,7 @@ This is an **execution plan**, not a request to implement everything in one Clau
 | M3 — Auditable Loop | structured handoff, reporter, 2+architect+2 loop | exact transitions and comments under failure simulation |
 | M4 — Pull Request and Cleanup | PR checks, merge receipts, cleanup/recovery | merged issue has no orphan owned worktree |
 | M5 — Full Agile Squad | 11 agents, skill/rule isolation, composing workflows | role/task matrix and acceptance evidence |
-| M6 — GitHub Project as Code | hierarchy, fields, status, views, onboarding | disposable Project reconciles desired state |
+| M6 — GitHub Project as Code | governance for any target repo: hierarchy, forms, labels, fields, status, views, branch protection, risk policy | disposable repo + Project reconcile desired state |
 | M7 — Release & Hardening | CI, deployment package, evals, docs | end-to-end fixture, repeatable clean install |
 
 ## 3. GitHub Project hierarchy to create
@@ -105,6 +105,9 @@ OMI Product / GitHub Project
 │   ├── F6.2 Project config
 │   │   ├── T6.3 Project Fields/Status/Iteration desired-state diff/apply
 │   │   └── T6.4 Views, dashboard, Project init/validate
+│   ├── F6.3 Repository governance
+│   │   ├── D6.1 Governance as product capability in spec/roadmap
+│   │   └── T6.5 Labels, branch protection, merge settings, risk policy desired-state
 ├── M7 Release and Productionization
 │   ├── F7.1 Integration and security
 │   │   ├── T7.1 Security, rate-limit, failure injection tests
@@ -190,7 +193,7 @@ Fetch `origin/develop`, create issue branch/worktree, ownership manifest, reusin
 
 ### T3.1 Task packet and handoff validator
 
-Inputs: ticket scope, worktree, approved artifacts, open finding IDs, step/round, output schema. Outputs: status, artifacts/paths, evidence, findings, token metadata if available, next-action suggestion (not authority). **Tests:** missing role, fake path, invalid status, oversized output. **Depends:** T1.3, T2.3. **Size:** M.
+Inputs: ticket scope, Issue body + ancestor chain as context (size-bounded; idea §6 "Issue body as living documentation"), worktree, approved artifacts, open finding IDs, step/round, output schema. Outputs: status, artifacts/paths, evidence, findings, token metadata if available, next-action suggestion (not authority). **Tests:** missing role, fake path, invalid status, oversized output. **Depends:** T1.3, T2.3. **Size:** M.
 
 ### T3.2 Reports and sanitizer
 
@@ -264,9 +267,11 @@ QA verification and release readiness workflows, role-selection matrix, cost/lat
 
 ## 10. Phase 6 — GitHub Project as Code
 
+Everything in M6 is an OMI product capability applied to **any target repository/Project** (idea §6 "Governance as a product capability"), verified on disposable fixtures — not a manual setup of `omi-home/omi-plugins`.
+
 ### T6.1 Issue Types/Templates/Hierarchy
 
-Create/read native multi-level tree; native Issue Types where they exist (`Task/Bug/Feature`) plus authoritative `type:<OMI type>` labels (ADR-0001 D6); strict terminal executable ticket policy; template bodies and parent mapping; read-before-write for every relation (duplicates fail). **Tests:** 6-level hierarchy, prevention of cycle, invalid parent, cross-repo project membership, idempotency. **Depends:** T2.4, T0.5. **Size:** L.
+Create/read native multi-level tree; native Issue Types where they exist (`Task/Bug/Feature`) plus authoritative `type:<OMI type>` labels (ADR-0001 D6); strict terminal executable ticket policy; parent → child matrix (`issue-hierarchy.yaml`); Issue Forms per OMI type defining the body's documentation sections (`<!-- omi:section=… -->` markers, read/update one section via CLI) + `config.yml` + PR template rendered from `templates/github/` into the target repo through a ticketed PR, with post-creation content validation and Definition of Ready check; read-before-write for every relation (duplicates fail). **Tests:** 6-level hierarchy, prevention of cycle, invalid parent, cross-repo project membership, idempotency. **Depends:** T2.4, T0.5. **Size:** L.
 
 ### T6.2 Issue dependency/roll-up
 
@@ -274,13 +279,17 @@ Manage `blocked by`, compute non-destructive roll-up; do not close parent before
 
 ### T6.3 Desired-state Project fields
 
-Configuration desired-state, plan/diff/apply, field mapping, permissions and no destructive default; iteration, priority/status, acceptance. **Tests:** reconcile twice results no second write, unknown field, duplicate field, permissions denied. **Depends:** T6.1. **Size:** L.
+Configuration desired-state, plan/diff/apply, field mapping, permissions and no destructive default; iteration, priority/status, acceptance; `status-transitions.yaml` matrix with drift report; field/option IDs read from GitHub, never hard-coded. **Tests:** reconcile twice results no second write, unknown field, duplicate field, permissions denied. **Depends:** T6.1. **Size:** L.
 
 ### T6.4 Views and onboarding
 
-WBS, Board, Backlog, Review & QA, Roadmap created by name + layout via API (verified; duplicates are created silently, so check existing views first); filters/grouping via generated manual setup instructions (not settable via API); Project bootstrap `omi github project init/plan/apply/validate`. **Tests:** disposable Project and explicit unsupported capability report. **Depends:** T6.3. **Size:** L.
+WBS, Board, Backlog, Review & QA, Blockers/Risks, Roadmap created by name + layout via API (verified; duplicates are created silently, so check existing views first); filters/grouping via generated manual setup instructions (not settable via API); Insights and built-in Project workflows reported as manual/unsupported capabilities; Project bootstrap `omi github project init/plan/apply/validate`. **Tests:** disposable Project and explicit unsupported capability report. **Depends:** T6.3. **Size:** L.
 
-**M6 Gate:** A new empty test Project can be bootstrapped predictably; Issue hierarchy works; config can be reapplied without duplicate Issues/fields; unsupported Free capabilities surfaced.
+### T6.5 Repository governance desired-state
+
+For any configured target repo: labels (`type:*`, `risk:*`, `flag:*`; foreign labels reported, never deleted), branch protection for `main`/`develop` (PR required, no force push, `enforce_admins`, conversation resolution, per-branch linear history; never loosened without PO), merge methods, `risk-policy.yaml` consumed by T4.2; `omi github repo plan`/`apply --approved-plan`/`validate`; governance apply is High risk (PO-approved plan); private Free repo reported as unsupported enforcement (D5). **Tests:** reapply = zero writes, stricter existing protection kept, private Free 403, permission denied, unknown config key. **Depends:** T2.4, T6.1. **Size:** L.
+
+**M6 Gate:** A new empty test repository + Project can be bootstrapped predictably (labels, forms, protection, fields, views); Issue hierarchy works; config can be reapplied without duplicate Issues/fields; unsupported Free capabilities surfaced.
 
 ## 11. Phase 7 — Quality, distribution and release
 

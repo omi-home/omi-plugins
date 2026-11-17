@@ -219,12 +219,16 @@ omi-plugins/
 │   ├── workflow-policy.yaml
 │   ├── branching-policy.yaml
 │   ├── resource-policy.yaml
-│   └── github/
+│   ├── risk-policy.yaml                # Low/Medium/High merge tiers (§6 Governance)
+│   └── github/                         # governance defaults; target repo overrides in .omi/config.yaml
 │       ├── project.yaml
 │       ├── issue-types.yaml
-│       ├── issue-hierarchy.yaml
+│       ├── issue-hierarchy.yaml        # allowed parent → child matrix
+│       ├── labels.yaml                 # type:*, risk:*, flag:*
 │       ├── fields.yaml
-│       └── views.yaml
+│       ├── status-transitions.yaml
+│       ├── views.yaml
+│       └── repository.yaml             # branch protection, merge methods
 ├── schemas/
 │   ├── workflow-state.schema.json
 │   ├── step-result.schema.json
@@ -234,8 +238,8 @@ omi-plugins/
 │   └── cleanup-result.schema.json
 ├── templates/
 │   ├── project/AGENTS.md
-│   ├── github/issues/
-│   ├── github/pull-request.md
+│   ├── github/issues/                  # one Issue Form per OMI type + config.yml, rendered into target repo
+│   ├── github/pull-request.md          # rendered to target repo .github/PULL_REQUEST_TEMPLATE.md
 │   └── reports/
 │       ├── analysis.md
 │       ├── architecture.md
@@ -318,6 +322,36 @@ Views: WBS Table, Backlog Table, Sprint Board, Review & QA, Blockers/Risks, Rele
 
 **API idempotency (verified):** `addSubIssue`, `addBlockedBy` and `createProjectV2Field` fail on duplicates; `createProjectV2View` silently creates duplicates; `addProjectV2ItemById` is idempotent. Therefore every GitHub mutation follows **read → diff → write** against desired state.
 
+### Governance as a product capability
+
+Everything in this section is a feature OMI applies to **any target repository and Project**, not a one-off setup of the OMI repository itself (PO, 2026-11-17, F6.3). Defaults ship in `config/github/` and `config/risk-policy.yaml`; a target repository overrides them in its `.omi/config.yaml`. GitHub never reads these files: they are inputs for `omi github project …` and `omi github repo …`, which follow **discover → plan (dry-run diff) → PO-approved apply → validate (read back)**, reapply with zero writes, and report drift instead of overwriting it.
+
+| Area | Desired state | Enforced by |
+|---|---|---|
+| Issue type | native type where it matches + `type:<OMI type>` label (D6) | script (validator) |
+| Hierarchy | allowed parent → child matrix per OMI type; cycles and depth/width limits rejected | script; GitHub only stores the links |
+| Issue Forms | one form per OMI type (required sections: e.g. Bug repro/expected/actual/severity, NFR threshold + verification, Change Request current/proposed/impact/decision, Spike question/timebox/output) + `config.yml` disabling blank issues; PR template with `Closes #<issue>` and evidence checklist | GitHub renders forms; script re-validates content and metadata after creation (forms cannot set Project fields) |
+| Labels | `type:*`, `risk:low\|medium\|high`, `flag:needs-po\|blocked\|security`; idempotent create/update; duplicate-meaning or foreign labels reported, never deleted | script |
+| Fields, Status, views | §6 Project fields; one source of truth per attribute; field/option IDs read from GitHub, never hard-coded | script; views partly manual (API limits) |
+| Status transitions | allowed `ProjectStatus` transition matrix; Status ≠ Open/Closed, synchronised conditionally, parents never auto-closed | script checks its own moves and reports external drift |
+| Branch protection | `main` + `develop`: PR required, no force push/deletion, `enforce_admins`, conversation resolution; linear history per branch (release `develop → main` may need a merge commit); never loosened without PO | GitHub (public repos on Free, D5) |
+| Merge settings | allowed merge methods (task PR = squash), branch auto-delete per `cleanup` policy | GitHub settings + script |
+| Risk tiers | Low (docs, small tests, simple refactor), Medium (normal Feature/Bug) → OMI may merge after gates; **High** (auth, security, destructive migration, breaking API, governance config) → `WAITING_PO`, PO verifies and merges | script only |
+
+Governance changes are themselves **High risk**: an apply needs an explicit PO-approved plan, and OMI never asks for or stores a PO token (separate PO and agent credentials; doctor warns when the agent token has admin rights).
+
+**Trust limit:** local checks and commit statuses published by the agent are not an independent control against that agent, and GitHub has no native per-PR risk-based approval. Only server-side branch protection is a real barrier; High-risk PRs therefore stop for a human merge by default, and OMI reports this limit instead of claiming enforcement.
+
+### Issue body as living documentation
+
+The Issue body is the **project documentation and the agent context** for what it describes (PO, 2026-11-17). Requirements, scope, acceptance, design decisions and the as-built result of a Feature/FR/NFR/Change Request live in its body, not in parallel files under `docs/`.
+
+- **Structure:** each Issue Form defines the documentation sections for its OMI type (e.g. Objective, Context, Scope, Acceptance, Design/Decisions, As-built). Sections are bounded by markers (`<!-- omi:section=<name> -->`) so the CLI can read and update one section without rewriting the rest.
+- **Living, not a log:** the body holds the current truth; history stays in comments (step reports, evidence) and in GitHub's edit history. When a task changes what its parent describes (decision taken, behaviour as built), the CLI updates the parent's section and posts a comment linking the change. Agents propose the text in their step result; they never edit Issues directly (script first).
+- **Agent context:** the task packet (§11) carries the executable Issue's body plus its ancestor chain (parent Feature/FR/Epic…) with a size budget; agents read Issues, not chat or copied files.
+- **`docs/` = overview + references only:** architecture overview, ADRs, contracts and runbooks that must be versioned with the code; feature-level detail links to the Issue instead of duplicating it.
+- **Limits:** body edits are not reviewed through a PR, so changes to an accepted section by anyone but the PO/CLI are reported as drift; a body has a size cap (verify on the actual API before relying on it) — split into child Issues rather than growing one body.
+
 ### Native GitHub Free caveat
 
 GitHub Free branch protection works for **public** repositories (Phase 0: classic protection and rulesets both blocked a direct push to `develop` by a repo admin with `enforce_admins`). On **private** Free repositories both APIs return 403 "Upgrade to GitHub Pro or make this repository public", and a direct push succeeded. OMI local checks and CI reporting may detect violations but cannot prevent bypass there. **ADR-0001 D5:** prefer public repositories; a private Free repository requires a recorded PO risk acceptance and an `omi doctor` warning, or a plan upgrade if strict enforcement is mandatory.
@@ -351,6 +385,9 @@ omi doctor
 omi github project plan
 omi github project apply --approved-plan <path>
 omi github project validate
+omi github repo plan
+omi github repo apply --approved-plan <path>
+omi github repo validate
 omi issue tree <issue-number>
 omi ticket validate <issue-number>
 omi task start <issue-number> --output json
@@ -460,13 +497,15 @@ Every agent receives a **task packet** (not full chat):
   "scope": ["services/identity/"],
   "worktree": "/absolute/validated/task/worktree",
   "baseSha": "abcdef123456",
-  "inputs": ["docs/requirements/registration.md"],
+  "issueContext": ["org/repo#102 (Dev Task)", "org/repo#13 (FR)", "org/repo#12 (Feature)"],
   "openFindingIds": ["CR-001"],
   "carriedFindings": [{"source": "org/repo#98", "id": "CR-002", "action": "classify gh network errors as transient"}],
   "readOnlyArtifacts": ["docs/architecture/auth-adr.md"],
   "outputSchema": "step-result.schema.json"
 }
 ```
+
+`issueContext` is the Issue body chain from the executable Issue up its parents (§6 "Issue body as living documentation"), fetched and size-bounded by the CLI; requirement documents are Issues, not repository files.
 
 Output requires: issue/step/run/round/attempt/role, status, summary, actual changed files, commit SHA, evidence paths, finding IDs, blocker reason, next-step recommendation. **The agent's recommendation does not perform state transition.** Runtime validates schema/ownership and decides action. Specialist cannot redefine scope, call arbitrary other agents or alter ticket status through its prompt.
 

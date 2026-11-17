@@ -6,6 +6,7 @@ File này là chỉ dẫn canonical cho mọi phiên Claude Code làm việc **t
 
 - Spec: [omi-plugins-idea.md](./omi-plugins-idea.md) · Lộ trình: [omi-plugins-roadmap.md](./omi-plugins-roadmap.md) · Quyết định: [docs/decisions/](./docs/decisions/)
 - Task, trạng thái, bằng chứng: GitHub Project [#2](https://github.com/orgs/omi-home/projects/2) + Issues (ADR-0001 D7). Repo không chứa báo cáo hay tracking task.
+- Body của Issue là tài liệu sống và context cho agent (yêu cầu, phạm vi, quyết định, kết quả as-built); `docs/` chỉ giữ overview, ADR, contract, runbook và link tới Issue — không chép lại chi tiết tính năng (spec §6 "Issue body as living documentation").
 - Kiến trúc và hợp đồng thư mục: [docs/architecture/overview.md](./docs/architecture/overview.md)
 
 ## Quy trình bắt buộc
