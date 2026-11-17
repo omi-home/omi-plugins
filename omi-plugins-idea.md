@@ -593,7 +593,7 @@ Also verify: plugin component discovery/namespacing, native workflow API exact c
 | SP-07 | GO for public repos; NO-GO (no server enforcement) for private Free repos |
 | SP-08 | GO: crash-injected cleanup replay and marker-based comment reconciliation verified |
 
-Not yet verified (carried into later tasks): `bin/omi` on PATH inside agent Bash (T1.2/T2.1), process/container cleanup on Windows (T4.3/T7.3), concurrent outbox runners (T3.3), rebase merges and release PR `develop → main` (T4.1), interactive `/context` inspection (T1.4).
+Verified in T2.1: the plugin `bin/` directory is on PATH inside the Bash tool of a session that loads the plugin (`omi` runs from any cwd). Not yet verified (carried into later tasks): process/container cleanup on Windows (T4.3/T7.3), concurrent outbox runners (T3.3), rebase merges and release PR `develop → main` (T4.1), interactive `/context` inspection (T1.4).
 
 ## 18. Testing strategy
 

@@ -97,6 +97,10 @@ export type StepState = z.infer<typeof StepState>;
 export const StepOutcome = StepState.extract(["PASSED", "FAILED", "BLOCKED", "SKIPPED"]);
 export type StepOutcome = z.infer<typeof StepOutcome>;
 
+/** `omi doctor` check outcome: only `fail` makes the command exit non-zero. */
+export const CheckStatus = z.enum(["pass", "warn", "fail"]);
+export type CheckStatus = z.infer<typeof CheckStatus>;
+
 export const Severity = z.enum(["critical", "high", "medium", "low", "info"]);
 
 // ---- Shared primitives ----

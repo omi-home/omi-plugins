@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+// OMI CLI launcher. Resolves runtime relative to this file: no machine-specific paths.
+import { main } from "../runtime/cli/main.ts";
+
+const r = main(process.argv.slice(2));
+process.stdout.write(r.stdout);
+process.stderr.write(r.stderr);
+process.exitCode = r.code;

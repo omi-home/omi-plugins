@@ -5,6 +5,7 @@ import { redact, redactDeep } from "../../reporting/redact.ts";
  * MUST NOT count as a review round (idea §10).
  */
 export const ERROR_CODES = {
+  USAGE_INVALID: { transient: false },
   CONFIG_INVALID: { transient: false },
   CONTRACT_INVALID: { transient: false },
   SCHEMA_VERSION_UNSUPPORTED: { transient: false },

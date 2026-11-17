@@ -1,7 +1,11 @@
 // OMI configuration contract with safe defaults (idea §3, §7, §9, §14, §20).
-// Loading from config/*.yaml arrives with the CLI (T2.1); this is the typed shape.
+// Project config lives in <repo>/.omi/config.yaml; plugin config/ holds only default policies.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { parse } from "yaml";
 import { z } from "zod";
 import { parseContract, Role } from "./contracts.ts";
+import { OmiError } from "./errors/errors.ts";
 
 const ModelAlias = z.enum(["sonnet", "opus", "haiku"]);
 const Effort = z.enum(["low", "medium", "high"]);
@@ -60,3 +64,23 @@ export type OmiConfig = z.infer<typeof OmiConfig>;
 
 export const parseConfig = (input: unknown): OmiConfig =>
   parseContract(OmiConfig, input, "config", "CONFIG_INVALID");
+
+export const CONFIG_PATH = ".omi/config.yaml";
+
+/** Reads and validates `<repoRoot>/.omi/config.yaml`. Errors never echo config values. */
+export function loadConfig(repoRoot: string): OmiConfig {
+  let text: string;
+  try {
+    text = readFileSync(join(repoRoot, CONFIG_PATH), "utf8");
+  } catch {
+    throw new OmiError("CONFIG_INVALID", `${CONFIG_PATH} not found`);
+  }
+  let data: unknown;
+  try {
+    data = parse(text);
+  } catch (e) {
+    const line = (e as { linePos?: { line: number }[] }).linePos?.[0]?.line;
+    throw new OmiError("CONFIG_INVALID", `${CONFIG_PATH}: invalid YAML`, { line });
+  }
+  return parseConfig(data);
+}
