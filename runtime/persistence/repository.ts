@@ -1,7 +1,9 @@
 // Run/step repository. Every write is one transaction; state changes are compare-and-set so a
 // stale writer fails instead of overwriting. Which transitions are legal is the FSM's job (T2.3).
 import {
+  type ArtifactKind,
   type IssueRef,
+  IssueType,
   type ResourceKind,
   type ReviewOutcome,
   type Role,
@@ -19,7 +21,8 @@ export interface RunRow {
   id: string;
   repository: string;
   issue: number;
-  workflow: string;
+  /** ponytail: the run's workflow is its OMI Issue type until the workflow catalogue (spec §10) composes stages. */
+  workflow: IssueType;
   state: WorkflowState;
 }
 
@@ -28,11 +31,11 @@ const toRun = (r: Record<string, unknown> | undefined): RunRow | undefined =>
     id: String(r.id),
     repository: String(r.repository),
     issue: Number(r.issue),
-    workflow: String(r.workflow),
+    workflow: IssueType.parse(r.workflow),
     state: WorkflowState.parse(r.state),
   };
 
-export function createRun(db: Db, o: { id: string; issue: IssueRef; workflow: string }): RunRow {
+export function createRun(db: Db, o: { id: string; issue: IssueRef; workflow: IssueType }): RunRow {
   return tx(db, "create run", () => {
     const now = iso();
     try {
@@ -278,7 +281,7 @@ export function markReported(
 
 export function addArtifact(
   db: Db,
-  o: { runId: string; stepRunId?: number; kind: string; path: string; sha256?: string },
+  o: { runId: string; stepRunId?: number; kind: ArtifactKind; path: string; sha256?: string },
 ): void {
   tx(db, "add artifact", () => {
     db.prepare(

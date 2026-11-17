@@ -38,7 +38,7 @@ function fixture(withDevelop = true) {
   if (withDevelop) git(repo, "push", "-q", "origin", "main:develop");
   const db = openState(":memory:");
   const run = (id: string, issue: number) =>
-    createRun(db, { id, issue: { repository: "o/repo", number: issue }, workflow: "dev" }).id;
+    createRun(db, { id, issue: { repository: "o/repo", number: issue }, workflow: "dev-task" }).id;
   return { base, repo, db, run };
 }
 

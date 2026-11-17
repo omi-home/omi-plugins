@@ -1,5 +1,6 @@
 // Typed contracts for issue / workflow / step / comment / cleanup (spec §6, §10–§14).
 // Every document is strict (unknown fields rejected) and versioned via `schemaVersion`.
+import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { type ErrorCode, OmiError } from "./errors/errors.ts";
 
@@ -157,6 +158,10 @@ export type OutboxState = z.infer<typeof OutboxState>;
 export const ResourceKind = z.enum(["worktree", "branch", "process", "container", "temp-dir"]);
 export type ResourceKind = z.infer<typeof ResourceKind>;
 
+/** What a run stores under `artifact.kind` (CR-002 from T2.2). */
+export const ArtifactKind = z.enum(["task-packet", "step-result", "evidence", "log"]);
+export type ArtifactKind = z.infer<typeof ArtifactKind>;
+
 /** `omi doctor` check outcome: only `fail` makes the command exit non-zero. */
 export const CheckStatus = z.enum(["pass", "warn", "fail"]);
 export type CheckStatus = z.infer<typeof CheckStatus>;
@@ -194,8 +199,10 @@ const relPath = z
     message: "expected repo-relative path without '..'",
   });
 
+const findingId = z.string().regex(/^[A-Z]{2,5}-\d{3,}$/, "expected stable id like CR-001");
+
 export const Finding = z.strictObject({
-  id: z.string().regex(/^[A-Z]{2,5}-\d{3,}$/, "expected stable id like CR-001"),
+  id: findingId,
   severity: Severity,
   path: relPath.optional(),
   line: z.int().positive().optional(),
@@ -204,7 +211,62 @@ export const Finding = z.strictObject({
 });
 export type Finding = z.infer<typeof Finding>;
 
+// ---- Task packet: runtime → agent (spec §11). Built by the CLI, never by an LLM. ----
+
+/** Identifies the step-result contract the agent must answer with. */
+export const STEP_RESULT_SCHEMA = `step-result@${SCHEMA_VERSION}`;
+
+/** One Issue body of the context chain, nearest (the executable Issue) first. */
+export const IssueContextEntry = z.strictObject({
+  issue: IssueRef,
+  type: IssueType.nullable(),
+  title: z.string().max(300),
+  body: z.string(),
+  /** Body was cut to fit the packet budget. */
+  truncated: z.boolean(),
+});
+export type IssueContextEntry = z.infer<typeof IssueContextEntry>;
+
+/** A finding another task deferred to this one (`<!-- omi:carried-findings=… -->`, AGENTS.md rule 7). */
+export const CarriedFinding = z.strictObject({
+  source: text(500),
+  finding: text(2000),
+  action: text(2000),
+});
+export type CarriedFinding = z.infer<typeof CarriedFinding>;
+
+export const TaskPacket = z.strictObject({
+  schemaVersion,
+  workflowRunId: id,
+  issue: IssueRef,
+  stepId: id,
+  role: Role,
+  round,
+  attempt,
+  /** Repo-relative paths the step may change; empty = whole worktree. */
+  scope: z.array(relPath).max(50),
+  worktree: z.string().refine((p) => isAbsolute(p), { message: "expected absolute path" }),
+  baseSha: sha,
+  issueContext: z.array(IssueContextEntry).min(1).max(10),
+  openFindingIds: z.array(findingId).max(100),
+  carriedFindings: z.array(CarriedFinding).max(50),
+  readOnlyArtifacts: z.array(relPath).max(50),
+  outputSchema: z.literal(STEP_RESULT_SCHEMA),
+});
+export type TaskPacket = z.infer<typeof TaskPacket>;
+
 // ---- Step result: agent → runtime (spec §11). A recommendation, never a transition. ----
+
+/** Token usage as reported by the agent host, when it reports any. */
+export const TokenUsage = z.strictObject({
+  inputTokens: z.int().min(0),
+  outputTokens: z.int().min(0),
+  cacheReadTokens: z.int().min(0).optional(),
+  cacheCreationTokens: z.int().min(0).optional(),
+});
+
+/** Proposed rewrite of one `<!-- omi:section=… -->` of the Issue body; only the CLI writes it. */
+export const SectionUpdate = z.strictObject({ section: id, markdown: text(20_000) });
 
 export const StepResult = z
   .strictObject({
@@ -223,6 +285,8 @@ export const StepResult = z
     findings: z.array(Finding).max(100).default([]),
     blockerReason: text(1000).optional(),
     nextAction: text(500).optional(),
+    sectionUpdates: z.array(SectionUpdate).max(10).default([]),
+    usage: TokenUsage.optional(),
   })
   .refine((r) => r.status !== "BLOCKED" || r.blockerReason, {
     message: "BLOCKED requires blockerReason",
