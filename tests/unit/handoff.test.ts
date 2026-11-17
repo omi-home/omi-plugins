@@ -141,6 +141,12 @@ test("acceptStepResult: fake paths, foreign commit, out-of-scope file rejected",
   assert.equal(bad({ commitSha: "deadbeefdeadbeef" }), "CONTRACT_INVALID");
   writeFileSync(join(dir, "a.txt"), "changed");
   assert.equal(bad({ changedFiles: ["a.txt"] }), "CONTRACT_INVALID"); // scope is src/
+  writeFileSync(join(dir, "srcX.ts"), "x");
+  const narrow = buildTaskPacket({ ...input(dir, base), scope: ["src"] });
+  assert.equal(
+    codeOf(() => acceptStepResult(narrow, result({ changedFiles: ["srcX.ts"] }))),
+    "CONTRACT_INVALID",
+  );
 });
 
 test("acceptStepResult: invalid status, wrong identity, junk and oversized output rejected", () => {

@@ -62,6 +62,9 @@ const isCommitAfter = (worktree: string, base: string, sha: string) => {
 };
 
 const norm = (p: string) => p.replaceAll("\\", "/").replace(/^\.\//, "");
+/** `src` and `src/` cover `src/x`, never `srcX/y`. */
+const inScope = (f: string, s: string) =>
+  f === s.replace(/\/$/, "") || f.startsWith(s.endsWith("/") ? s : `${s}/`);
 
 /**
  * Parses raw agent output and checks it answers this packet: same run/issue/step/round/
@@ -95,7 +98,7 @@ export function acceptStepResult(packet: TaskPacket, raw: string): StepResult {
   const issues: { path: string; message: string }[] = [];
   for (const f of r.changedFiles) {
     if (!changed.has(norm(f))) issues.push({ path: f, message: "not changed in the worktree" });
-    else if (packet.scope.length && !packet.scope.some((s) => norm(f).startsWith(norm(s)))) {
+    else if (packet.scope.length && !packet.scope.some((s) => inScope(norm(f), norm(s)))) {
       issues.push({ path: f, message: "outside packet scope" });
     }
   }
