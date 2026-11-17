@@ -22,6 +22,7 @@ File này là chỉ dẫn canonical cho mọi phiên Claude Code làm việc **t
 npm ci            # cài đặt
 npm run check     # lint + typecheck + test (phải xanh trước khi mở PR)
 npm run format    # tự sửa format/lint
+OMI_LIVE=1 npm test  # thêm probe chạy agent thật (tốn token): canary rule pack, model quan sát được
 ```
 
 - Runtime TypeScript chạy trực tiếp bằng Node ≥ 22.18 (type stripping) — không có bước build. Chỉ dùng cú pháp TS xoá được (`erasableSyntaxOnly`), import kèm đuôi `.ts`.

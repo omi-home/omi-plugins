@@ -2,7 +2,7 @@
 
 Plugin Claude Code (`omi-engineering`) và runtime cục bộ xác định cho quy trình Agile theo ticket: GitHub Issue/Project làm nguồn công việc, mỗi task một worktree, vòng review 2 + Architect + 2, báo cáo từng bước lên Issue và dọn tài nguyên sau merge.
 
-> Trạng thái: **Phase 1 — đang dựng khung**. Plugin đã load được nhưng chưa có agent, skill hay CLI. Xem [lộ trình](./omi-plugins-roadmap.md).
+> Trạng thái: **Phase 1 — đang dựng khung**. Có agent đầu tiên `backend-engineer` với rule pack trong `resources/`; chưa có CLI. Xem [lộ trình](./omi-plugins-roadmap.md).
 
 ## Yêu cầu
 
