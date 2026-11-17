@@ -76,6 +76,7 @@ const comment = {
   schemaVersion: 1,
   issue,
   workflowRunId: "run-1",
+  category: "review",
   workflow: "Feature Delivery",
   stepId: "code-review",
   stepTitle: "Code Review",

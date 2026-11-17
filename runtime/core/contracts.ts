@@ -296,11 +296,25 @@ export type StepResult = z.infer<typeof StepResult>;
 
 // ---- Step comment: runtime → GitHub (spec §12) ----
 
+/** Report template family; one file per category in `templates/reports/`. */
+export const ReportCategory = z.enum([
+  "analysis",
+  "architecture",
+  "design",
+  "implementation",
+  "review",
+  "qa",
+  "checks",
+  "cleanup",
+]);
+export type ReportCategory = z.infer<typeof ReportCategory>;
+
 export const StepComment = z
   .strictObject({
     schemaVersion,
     issue: IssueRef,
     workflowRunId: id,
+    category: ReportCategory,
     workflow: text(100),
     stepId: id,
     stepTitle: text(100),
@@ -314,6 +328,7 @@ export const StepComment = z
     commitSha: sha.optional(),
     status: StepOutcome,
     summary: text(2000),
+    evidencePaths: z.array(relPath).max(100).default([]),
     findings: z.array(Finding).max(100).default([]),
     nextAction: text(500),
     executionId: id,
