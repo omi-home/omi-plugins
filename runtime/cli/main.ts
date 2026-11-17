@@ -6,7 +6,15 @@ import { parseArgs } from "node:util";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { type Check, doctor } from "./doctor.ts";
-import { prCreate, taskRun, taskStart, taskStatus, ticketValidate } from "./task.ts";
+import {
+  prCreate,
+  prMerge,
+  prValidate,
+  taskRun,
+  taskStart,
+  taskStatus,
+  ticketValidate,
+} from "./task.ts";
 
 export const HELP = `Usage: omi <command> [--output human|json]
 
@@ -21,6 +29,10 @@ Commands:
   pr create <n>          Push Issue #n's task branch, create or reuse its PR → develop (Release: develop →
                          main) and verify base, head and the one primary Issue; marks it In Review.
                          --title <text> (default: Issue title), --body-file <path> (extra PR description)
+  pr validate <n>        Read-only merge eligibility of Issue #n's task PR: state, base, primary
+                         Issue, tip, conflicts, CI, reviews, merge method, protection, risk
+  pr merge <n>           Merge Issue #n's task PR when every gate passes (configured method, pinned
+                         to the validated head); risk:high goes to Waiting PO and is not merged
   version                Print the OMI version
   help                   Show this help
 
@@ -55,7 +67,15 @@ const issueArg = (a: string | undefined) => {
 };
 
 /** Subcommands: <group> <action> <issue>. */
-const NESTED = new Set(["ticket validate", "task start", "task status", "task run", "pr create"]);
+const NESTED = new Set([
+  "ticket validate",
+  "task start",
+  "task status",
+  "task run",
+  "pr create",
+  "pr validate",
+  "pr merge",
+]);
 
 const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
 
@@ -164,6 +184,22 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
             : []),
         ];
         return ok(r, lines(human));
+      }
+      case "pr validate": {
+        const r = prValidate({ cwd }, issue);
+        return ok(
+          r,
+          `pr        ${r.pr ?? "none"}
+${humanChecks(r.checks)}`,
+          checksExit(r.checks),
+        );
+      }
+      case "pr merge": {
+        const r = prMerge({ cwd }, issue);
+        const human = [
+          `merged    ${r.receipt.url} (${r.receipt.headSha.slice(0, 12)} → ${r.receipt.mergeCommit?.slice(0, 12) ?? "?"})`,
+        ];
+        return ok(r, humanChecks(r.checks) + lines(human));
       }
       case "":
         throw new OmiError("USAGE_INVALID", "missing command (see `omi help`)");

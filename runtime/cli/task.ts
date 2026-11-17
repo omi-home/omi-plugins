@@ -8,6 +8,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type GhRunner, spawnGh } from "../adapters/github/client.ts";
 import {
+  type MergeReceipt,
+  mergeEligibility,
+  mergePr,
+  prFacts,
+  RISK_CHECK,
+  receiptOf,
+} from "../adapters/github/merge.ts";
+import {
   closingIssues,
   createPr,
   type PullRequest,
@@ -21,12 +29,13 @@ import { fetchTicket, type Ticket, validateTicket } from "../adapters/github/tic
 import { loadConfig, type OmiConfig } from "../core/config.ts";
 import {
   type Check,
+  type IssueRef,
   IssueType,
   type WorkflowContext,
   type WorkflowEventType,
 } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
-import { PROJECT_STATUS } from "../core/workflow-engine/fsm.ts";
+import { PRE_MERGE, PROJECT_STATUS } from "../core/workflow-engine/fsm.ts";
 import { runSlice, type SliceDeps } from "../core/workflow-engine/slice.ts";
 import { type Db, openState, statePath } from "../persistence/db.ts";
 import {
@@ -362,4 +371,117 @@ export function prCreate(
   }
   const status = release ? null : setStatus(config, issue, "In Review", gh);
   return { pr, created: !existing, checks, status };
+}
+
+export interface TaskPr {
+  config: OmiConfig;
+  ref: IssueRef;
+  primary: string;
+  ticket: Ticket;
+  head: string;
+  base: string;
+  /** Local tip of the task branch when its worktree still exists. */
+  localTip?: string;
+}
+
+/** The task branch of a gated executable Issue, from its live run's owned resources. */
+function taskPr(deps: TaskDeps, issue: number): TaskPr {
+  const gh = deps.gh ?? spawnGh;
+  const { config } = repo(deps.cwd);
+  const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
+  const primary = `${ref.repository}#${issue}`;
+  const ticket = fetchTicket(config, issue, gh);
+  if (typeOf(ticket) === "release") {
+    throw new OmiError("POLICY_VIOLATION", "release PRs (develop → main) are merged by the PO");
+  }
+  const bad = startGates(ticket, config).find((c) => c.status === "fail");
+  if (bad) throw new OmiError(bad.code ?? "TICKET_INVALID", `${bad.name}: ${bad.detail}`);
+  const db = openState(statePath(deps.cwd));
+  let head: string | undefined;
+  let worktree: string | undefined;
+  try {
+    const run = liveRun(db, ref);
+    if (!run) throw new OmiError("POLICY_VIOLATION", `no active run for ${primary}: task start`);
+    head = ownedRefs(db, run.id, "branch")[0];
+    worktree = ownedRefs(db, run.id, "worktree")[0];
+  } finally {
+    db.close();
+  }
+  if (!head) throw new OmiError("OWNERSHIP_MISMATCH", `${primary} has no owned branch`);
+  const localTip =
+    worktree && existsSync(worktree) ? gitOut(worktree, ["rev-parse", head]) : undefined;
+  return { config, ref, primary, ticket, head, base: config.git.baseBranch, localTip };
+}
+
+export interface MergeCheckResult {
+  pr: string | null;
+  checks: Check[];
+}
+
+const METHOD = { squash: "SQUASH", merge: "MERGE", rebase: "REBASE" } as const;
+
+function eligibility(deps: TaskDeps, issue: number) {
+  const t = taskPr(deps, issue);
+  const facts = prFacts(t.config, { head: t.head, base: t.base, states: ["OPEN"] }, deps.gh);
+  const checks = mergeEligibility(facts, {
+    primary: t.primary,
+    base: t.base,
+    method: METHOD[t.config.git.mergeMethod],
+    issueLabels: t.ticket.labels.nodes.map((l) => l.name),
+    localTip: t.localTip,
+    privateRiskAccepted: t.config.github.privateRepoRiskAccepted,
+  });
+  return { t, facts, checks };
+}
+
+/** `omi pr validate <n>`: read-only merge eligibility of the task PR. */
+export function prValidate(deps: TaskDeps, issue: number): MergeCheckResult {
+  const { facts, checks } = eligibility(deps, issue);
+  return { pr: facts.pr?.url ?? null, checks };
+}
+
+export interface MergeResult {
+  checks: Check[];
+  receipt: MergeReceipt;
+}
+
+/**
+ * `omi pr merge <n>`: the authorized merge path for task PRs. Merges only when every gate
+ * passes, with the configured method, pinned to the validated head SHA. A High risk PR goes to
+ * the PO instead (run → WAITING_PO, Status Waiting PO) and is never merged here.
+ */
+export function prMerge(deps: TaskDeps, issue: number): MergeResult {
+  const gh = deps.gh ?? spawnGh;
+  const { t, facts, checks } = eligibility(deps, issue);
+  const failed = checks.filter((c) => c.status === "fail");
+  if (failed.some((c) => c.name === RISK_CHECK)) {
+    const db = openState(statePath(deps.cwd));
+    try {
+      const run = liveRun(db, t.ref);
+      if (run && PRE_MERGE.includes(run.state)) advanceRun(db, run.id, { type: "ESCALATE_TO_PO" });
+    } finally {
+      db.close();
+    }
+    setStatus(t.config, issue, "Waiting PO", gh);
+  }
+  const bad = failed[0];
+  if (bad || !facts.pr) {
+    throw new OmiError(
+      bad?.code ?? "POLICY_VIOLATION",
+      `merge refused: ${bad?.name}: ${bad?.detail}`,
+      {
+        checks,
+      },
+    );
+  }
+  mergePr(
+    { prId: facts.pr.id, method: METHOD[t.config.git.mergeMethod], headOid: facts.pr.headRefOid },
+    gh,
+  );
+  const after = prFacts(t.config, { head: t.head, base: t.base, states: ["MERGED"] }, gh);
+  const receipt = receiptOf(after.pr);
+  if (!receipt || receipt.headSha !== facts.pr.headRefOid) {
+    throw new OmiError("GITHUB_UNAVAILABLE", "merge sent but no matching merge receipt yet: retry");
+  }
+  return { checks, receipt };
 }

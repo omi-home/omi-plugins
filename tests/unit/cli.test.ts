@@ -40,6 +40,10 @@ Commands:
   pr create <n>          Push Issue #n's task branch, create or reuse its PR → develop (Release: develop →
                          main) and verify base, head and the one primary Issue; marks it In Review.
                          --title <text> (default: Issue title), --body-file <path> (extra PR description)
+  pr validate <n>        Read-only merge eligibility of Issue #n's task PR: state, base, primary
+                         Issue, tip, conflicts, CI, reviews, merge method, protection, risk
+  pr merge <n>           Merge Issue #n's task PR when every gate passes (configured method, pinned
+                         to the validated head); risk:high goes to Waiting PO and is not merged
   version                Print the OMI version
   help                   Show this help
 

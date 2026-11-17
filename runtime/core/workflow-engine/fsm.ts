@@ -63,7 +63,7 @@ export const PROJECT_STATUS: Record<WorkflowState, ProjectStatus> = {
   CANCELLED: "Cancelled",
 };
 
-const PRE_MERGE: readonly WorkflowState[] = [
+export const PRE_MERGE: readonly WorkflowState[] = [
   "CREATED",
   "TICKET_VALIDATED",
   "WORKSPACE_READY",

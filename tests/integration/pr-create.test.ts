@@ -10,7 +10,7 @@ import { test } from "node:test";
 import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { type PullRequest, prBody, validatePr } from "../../runtime/adapters/github/pr.ts";
 import type { Ticket } from "../../runtime/adapters/github/ticket.ts";
-import { prCreate, taskStart } from "../../runtime/cli/task.ts";
+import { prCreate, prMerge, prValidate, taskStart, taskStatus } from "../../runtime/cli/task.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -42,6 +42,9 @@ interface Fake {
   defaultBranch?: string;
   /** PR lookups that still show the previous head (GitHub lags behind a push). */
   staleLookups?: number;
+  /** Merge-gate view of the task PR (T4.2); merged by `mergePullRequest`. */
+  merge?: Record<string, unknown>;
+  mergeSent?: { id: string; oid: string; method: string }[];
 }
 
 function fakeGh(f: Fake) {
@@ -62,6 +65,36 @@ function fakeGh(f: Fake) {
         .filter((_, i) => i % 2 === 1)
         .map((kv) => kv.split(/=(.*)/s).slice(0, 2)),
     );
+    if (query.includes("viewerPermission")) {
+      const pr = f.merge;
+      const states = /states:\[([A-Z,]+)\]/.exec(query)?.[1]?.split(",") ?? [];
+      return ok({
+        repository: {
+          isPrivate: false,
+          viewerPermission: "WRITE",
+          squashMergeAllowed: true,
+          mergeCommitAllowed: false,
+          rebaseMergeAllowed: false,
+          ref: { branchProtectionRule: { isAdminEnforced: true }, rules: { nodes: [] } },
+          pullRequests: { nodes: pr && states.includes(String(pr.state)) ? [pr] : [] },
+        },
+      });
+    }
+    if (query.includes("mergePullRequest")) {
+      f.mergeSent ??= [];
+      f.mergeSent.push({
+        id: vars.id ?? "",
+        oid: vars.oid ?? "",
+        method: /mergeMethod:(\w+)/.exec(query)?.[1] ?? "",
+      });
+      Object.assign(f.merge ?? {}, {
+        state: "MERGED",
+        merged: true,
+        mergedAt: "2026-11-17T00:00:00Z",
+        mergeCommit: { oid: "c".repeat(40) },
+      });
+      return ok({ mergePullRequest: { pullRequest: { merged: true } } });
+    }
     if (query.includes("createPullRequest")) {
       created.push({
         base: vars.b ?? "",
@@ -113,6 +146,7 @@ function fakeGh(f: Fake) {
       const options = [
         { id: "OPT_IP", name: "In Progress" },
         { id: "OPT_IR", name: "In Review" },
+        { id: "OPT_WPO", name: "Waiting PO" },
       ];
       return ok({ repositoryOwner: { projectV2: { id: "P", field: { id: "F", options } } } });
     }
@@ -306,4 +340,84 @@ test("a new push to an existing PR: head re-read with backoff until GitHub catch
   const r = prCreate({ cwd: s.root, gh: s.gh.run, sleep: (ms) => waits.push(ms) }, 5);
   assert.equal(r.checks.find((c) => c.name === "pr-tip")?.status, "pass");
   assert.deepEqual(waits, [1000, 2000]);
+});
+
+// ---- T4.2 merge eligibility + authorized merge ----
+
+function mergeable(s: ReturnType<typeof started>, f: Fake, patch: Record<string, unknown> = {}) {
+  f.merge = {
+    id: "PR_m",
+    number: 60,
+    url: "https://github.com/o/repo/pull/60",
+    state: "OPEN",
+    isDraft: false,
+    merged: false,
+    mergedAt: null,
+    mergeable: "MERGEABLE",
+    reviewDecision: null,
+    baseRefName: "develop",
+    headRefName: s.branch,
+    headRefOid: git(s.wt, "rev-parse", "HEAD"),
+    body: prBody("o/repo", 5),
+    mergeCommit: null,
+    labels: { nodes: [] },
+    commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+    ...patch,
+  };
+}
+
+test("pr merge: squash pinned to the validated head, receipt returned", () => {
+  const f: Fake = { issues: { 5: "dev-task" } };
+  const s = started(f);
+  mergeable(s, f);
+  const v = prValidate({ cwd: s.root, gh: s.gh.run }, 5);
+  assert.ok(
+    v.checks.every((c) => c.status !== "fail"),
+    JSON.stringify(v.checks),
+  );
+  const r = prMerge({ cwd: s.root, gh: s.gh.run }, 5);
+  const tip = git(s.wt, "rev-parse", "HEAD");
+  assert.deepEqual(f.mergeSent, [{ id: "PR_m", oid: tip, method: "SQUASH" }]);
+  assert.equal(r.receipt.headSha, tip);
+  assert.equal(r.receipt.mergeCommit, "c".repeat(40));
+});
+
+test("pr merge: unresolved check or local tip ahead of the PR refuses without merging", () => {
+  const f: Fake = { issues: { 5: "dev-task" } };
+  const s = started(f);
+  mergeable(s, f, {
+    commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+  });
+  assert.equal(
+    code(() => prMerge({ cwd: s.root, gh: s.gh.run }, 5)),
+    "POLICY_VIOLATION",
+  );
+  mergeable(s, f, { headRefOid: "1".repeat(40) });
+  assert.equal(
+    code(() => prMerge({ cwd: s.root, gh: s.gh.run }, 5)),
+    "POLICY_VIOLATION",
+  );
+  assert.equal(f.mergeSent, undefined);
+});
+
+test("pr merge: risk:high is never merged; run → WAITING_PO, Status Waiting PO", () => {
+  const f: Fake = { issues: { 5: "dev-task" } };
+  const s = started(f);
+  mergeable(s, f, { labels: { nodes: [{ name: "risk:high" }] } });
+  assert.equal(
+    code(() => prMerge({ cwd: s.root, gh: s.gh.run }, 5)),
+    "POLICY_VIOLATION",
+  );
+  assert.equal(f.mergeSent, undefined);
+  assert.equal(taskStatus({ cwd: s.root }, 5).run?.state, "WAITING_PO");
+  assert.deepEqual(s.gh.statuses.slice(-1), ["ITEM_5:OPT_WPO"]);
+});
+
+test("pr merge: release PRs are left to the PO", () => {
+  const root = repo();
+  const gh = fakeGh({ issues: { 7: "release" } });
+  assert.equal(
+    code(() => prMerge({ cwd: root, gh: gh.run }, 7)),
+    "POLICY_VIOLATION",
+  );
 });
