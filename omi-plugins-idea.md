@@ -404,6 +404,7 @@ Record per-step: estimated or instrumented tokens if available, wall time, model
 - Workflow: `CREATED`, `TICKET_VALIDATED`, `WORKSPACE_READY`, `RUNNING`, `REWORK`, `ARCHITECT_ESCALATION`, `WAITING_PO`, `BLOCKED`, `IN_QA`, `PR_PENDING`, `PR_MERGED`, `CLEANUP_PENDING`, `CLEANUP_FAILED`, `COMPLETED`, `FAILED`, `CANCELLED`, `RECOVERY_REQUIRED`.
 - Step: `PENDING`, `RUNNING`, `RESULT_PERSISTED`, `REPORT_PENDING`, `REPORT_POSTED`, `PASSED`, `FAILED`, `BLOCKED`, `SKIPPED`.
 - Technical `attempt`: retries for transient tool/transport failure. Domain `round`: new Dev/Review cycle. **Do not increment round for network/API/tool errors.**
+- Bounded defaults (PO, 2026-11-17; configurable later): `maxAttempts = 3` technical attempts per step, then `BLOCKED` (non-transient errors block at once); `maxValidationFixes = 2` deterministic-check fixes per round, then `BLOCKED`; `maxQaReworks = 2` QA reworks, then `WAITING_PO`.
 
 ### Policy — 2 + Architect + 2
 
@@ -423,7 +424,7 @@ Dev R1 → Validator → Code Reviewer R1
 
 - Architect is called **once** by default at two consecutive counted failed review rounds. A severe security issue may trigger earlier Architect/PO escalation via an explicit risk policy; never conceal an exception.
 - Reviewer reports structured, actionable findings with IDs/severity/path/expected behavior; rework consumes **delta findings**, not full original prompt.
-- Before each cognitive review, deterministic build/lint/test checks run; failures route back to Engineer with separate bounded validation-fix attempts. They do not count as reviewer failures.
+- Before each cognitive review, deterministic build/lint/test checks run; failures route back to Engineer with separate bounded validation-fix attempts (`maxValidationFixes`). They do not count as reviewer failures.
 - Review checks are independently run, reviewing new diff, old findings, touched dependencies and regression risk; failed findings retain stable IDs where possible.
 - After rounds exhausted, no fifth Dev attempt; `WAITING_PO` and durable escalation report. Resume only after PO decision and new authorized policy/work item, with audit.
 - QA defects after review create a separate bounded rework policy; never silently reset review failure history.
@@ -461,6 +462,7 @@ Every agent receives a **task packet** (not full chat):
   "baseSha": "abcdef123456",
   "inputs": ["docs/requirements/registration.md"],
   "openFindingIds": ["CR-001"],
+  "carriedFindings": [{"source": "org/repo#98", "id": "CR-002", "action": "classify gh network errors as transient"}],
   "readOnlyArtifacts": ["docs/architecture/auth-adr.md"],
   "outputSchema": "step-result.schema.json"
 }
@@ -501,6 +503,19 @@ Architect escalation after 2 failed reviews.
 
 _Execution ID: unique-id · Created at: ISO-8601_
 ```
+
+**Carried findings.** A finding or known limitation that a review or gate defers to another task is posted on that target Issue at once — never only in the source report — as one comment per source step:
+
+```markdown
+<!-- omi:carried-findings=T-ID -->
+## Findings carried into this task
+
+| Source | Finding | Action |
+|---|---|---|
+| org/repo#98 · CR-002 | observed problem | what this task must do |
+```
+
+The target is resolved from the roadmap/Issue tree, not guessed; a wrong target is corrected on both Issues. When the target task starts, its `carried-findings` comments become part of its scope (`carriedFindings` in the task packet, §11) and its review report states how each was resolved.
 
 For CLI steps: `executor=omi-cli`, `model=null`, `effort=null`. Recording intended values as observed ones is forbidden. Templates in `templates/reports/` cover every required role/step; no LLM reformatting.
 
@@ -562,7 +577,8 @@ Every arrow is a **validated transition**; each finished stage posts a unique Is
 - PR linked to designated ticket, target correct, merged where applicable.
 - All required GitHub step comments posted or recovered without duplication.
 - Cleanup verified for merged tasks; no orphan worktree/branch owned by completed task.
-- Issue and Project status reconciled; parent hierarchy reflects current progress.
+- Issue and Project status reconciled; parent hierarchy reflects current progress: a parent never shows less progress than its children. When the last child of a Feature closes, the Feature is closed and set Done; a Milestone is In Review while its gate runs and Done only after PO acceptance. Built-in Project automation does not do this; OMI does (T2.6).
+- Every deferred finding is carried onto its target Issue (§12).
 - Outstanding risks disclosed rather than silently marked complete.
 
 ## 17. Phase 0 mandatory technical spikes (GO / NO-GO)

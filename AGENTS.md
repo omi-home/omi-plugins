@@ -15,6 +15,8 @@ File này là chỉ dẫn canonical cho mọi phiên Claude Code làm việc **t
 3. PR → `develop`, body có `Closes #<issue>`; release là PR `develop → main` kèm Release Issue.
 4. Mỗi bước hoàn tất có một comment báo cáo trên Issue (role/model/effort/round/status; effort thực tế ghi `unknown`).
 5. Sau merge: dọn worktree và branch local an toàn, không `--force`, không xóa branch remote tự động.
+6. Status trên Project #2 không tự đổi: bắt đầu → In Progress, mở PR → In Review, merge + dọn → Done. Cập nhật luôn status cha: Feature đóng + Done khi task con cuối cùng đóng; Milestone In Review trong lúc chạy gate, chỉ Done khi PO chấp nhận.
+7. Finding hoặc giới hạn được hoãn sang task khác phải comment ngay lên Issue đích (marker `<!-- omi:carried-findings=<T-id> -->`, bảng nguồn · finding · việc cần làm), kiểm tra số task theo roadmap trước khi ghi. Khi bắt đầu task, đọc các comment này và đưa vào phạm vi.
 
 ## Lệnh
 
