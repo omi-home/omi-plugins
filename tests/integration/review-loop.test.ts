@@ -200,6 +200,14 @@ test("no verdict without the reviewer's posted report; a pending report also blo
   );
   assert.equal(repo.runContext(db, "run").state, "RUNNING", "nothing moved");
   assert.equal(repo.reviewRounds(db, "run"), 0);
+  repo.markReported(db, { marker: "<!-- r1 -->", commentId: "1", commentUrl: "https://x/1" });
+  assert.equal(
+    code(() => ev(db, "REVIEW_PASSED")),
+    "POLICY_VIOLATION",
+    "reviewer said FAILED",
+  );
+  assert.equal(ev(db, "REVIEW_FAILED").state, "REWORK");
+  assert.equal(repo.reviewRounds(db, "run"), 1);
 });
 
 test("UNBLOCK after exhausted check fixes restores the fix budget (#25 CR-002)", () => {

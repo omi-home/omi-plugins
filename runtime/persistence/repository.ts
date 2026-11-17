@@ -150,13 +150,13 @@ export function advanceRun(
     if (verdict && ctx.state === "RUNNING") {
       const reported = db
         .prepare(
-          `SELECT 1 FROM step_run WHERE run_id = ? AND round = ? AND role IN (${REVIEWERS.map(() => "?").join(", ")}) AND state IN (${REVIEW_REPORTED.map(() => "?").join(", ")})`,
+          `SELECT 1 FROM step_run WHERE run_id = ? AND round = ? AND role IN (${REVIEWERS.map(() => "?").join(", ")}) AND state IN (${REVIEW_REPORTED.map(() => "?").join(", ")}) AND json_extract(result, '$.status') = ?`,
         )
-        .get(runId, ctx.round, ...REVIEWERS, ...REVIEW_REPORTED);
+        .get(runId, ctx.round, ...REVIEWERS, ...REVIEW_REPORTED, verdict);
       if (!reported) {
         throw new OmiError(
           "POLICY_VIOLATION",
-          `review round ${ctx.round} has no posted reviewer report: verdict refused`,
+          `review round ${ctx.round} has no posted reviewer report saying ${verdict}: verdict refused`,
         );
       }
     }
