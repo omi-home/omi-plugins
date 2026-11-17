@@ -4,8 +4,8 @@
 // foreign worktree, a live process or an unverified merge stops the cleanup (CLEANUP_FAILED)
 // and every remaining resource is kept for reconciliation.
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, rmSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { MergeReceipt } from "../adapters/github/merge.ts";
 import {
   type CleanupResult,
@@ -270,4 +270,28 @@ function steps(db: Db, o: CleanupOptions, issue: IssueRef): CleanupResult {
     },
     "cleanup result",
   );
+}
+
+/**
+ * Log retention (spec §14, `cleanup.logRetentionDays`): removes `<evidenceRoot>/<runId>` of
+ * COMPLETED runs whose directory is older than `days`. Evidence of any other run, and anything
+ * that is not a plain directory named after a known run, is kept. Returns what was removed.
+ */
+export function applyRetention(
+  db: Db,
+  o: { evidenceRoot: string; days: number; now?: number },
+): string[] {
+  if (!existsSync(o.evidenceRoot)) return [];
+  const cutoff = (o.now ?? Date.now()) - o.days * 86_400_000;
+  const removed: string[] = [];
+  for (const name of readdirSync(o.evidenceRoot)) {
+    const dir = join(o.evidenceRoot, name);
+    const st = lstatSync(dir);
+    if (!st.isDirectory() || st.mtimeMs >= cutoff || getRun(db, name)?.state !== "COMPLETED") {
+      continue;
+    }
+    rmSync(dir, { recursive: true, force: true });
+    removed.push(dir);
+  }
+  return removed;
 }

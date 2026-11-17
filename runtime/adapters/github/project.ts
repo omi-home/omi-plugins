@@ -200,3 +200,72 @@ export function setStatus(
   write(field, item.id, to, run);
   return { issue: `${at.owner}/${at.repo}#${issue}`, from, to };
 }
+
+const PARENT_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
+  repository(owner:$owner,name:$repo){ issue(number:$number){
+    id state labels(first:30){nodes{name}} subIssuesSummary{total completed}
+  } }
+}`;
+
+const ParentData = z.strictObject({
+  repository: z
+    .strictObject({
+      issue: z
+        .strictObject({
+          id: z.string(),
+          state: z.enum(["OPEN", "CLOSED"]),
+          labels: z.strictObject({ nodes: z.array(z.strictObject({ name: z.string() })) }),
+          subIssuesSummary: z.strictObject({ total: z.int(), completed: z.int() }),
+        })
+        .nullable(),
+    })
+    .nullable(),
+});
+
+const CLOSE = `mutation($id:ID!){closeIssue(input:{issueId:$id,stateReason:COMPLETED}){issue{id}}}`;
+
+export interface FinishChange extends StatusChange {
+  closed: boolean;
+}
+
+/**
+ * After merge + verified cleanup (spec §8 gate 7, AGENTS.md rule 6): the task → Done, then up
+ * the native parent chain while every sub-issue of a parent is closed: a Feature (or any
+ * non-Milestone container) is closed and set Done; a Milestone only goes to In Review, since
+ * Done needs the PO's acceptance of its gate. Stops at the first parent with open children.
+ * Read → diff → write: a second call changes nothing.
+ */
+export function markFinished(
+  config: OmiConfig,
+  issue: number,
+  run: GhRunner = spawnGh,
+): FinishChange[] {
+  const field = statusField(config, run);
+  field.option("Done");
+  field.option("In Review");
+  const changes: FinishChange[] = [];
+  const done = setStatus(config, issue, "Done", run);
+  if (done) changes.push({ ...done, closed: false });
+  let at = projectItem(
+    config,
+    { owner: config.github.owner, repo: config.github.repo, number: issue },
+    run,
+  ).parent;
+  for (let depth = 0; at && depth < MAX_DEPTH; depth++) {
+    const info = graphql(PARENT_QUERY, at, ParentData, "parent issue", run).repository?.issue;
+    if (!info || info.subIssuesSummary.completed < info.subIssuesSummary.total) break;
+    const milestone = info.labels.nodes.some((l) => l.name === "type:milestone");
+    const to: ProjectStatus = milestone ? "In Review" : "Done";
+    const { item, from, parent } = projectItem(config, at, run);
+    const close = !milestone && info.state === "OPEN";
+    if (close) graphql(CLOSE, { id: info.id }, z.unknown(), "close issue", run);
+    const move = item && from !== to && from !== "Done";
+    if (move) write(field, item.id, to, run);
+    if (close || move) {
+      changes.push({ issue: `${at.owner}/${at.repo}#${at.number}`, from, to, closed: close });
+    }
+    if (milestone) break; // the PO accepts a Milestone; nothing above rolls up automatically
+    at = parent;
+  }
+  return changes;
+}

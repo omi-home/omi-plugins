@@ -182,7 +182,9 @@ export function transition(
       }
       break;
     case "MERGE_VERIFIED":
-      if (is("PR_PENDING")) return to("PR_MERGED");
+      // GitHub's merge receipt is a fact, whoever merged (OMI, or the PO for a High risk PR):
+      // record it from any pre-merge or held state rather than orphan the merged work.
+      if (is(...PRE_MERGE, "BLOCKED", "WAITING_PO")) return to("PR_MERGED", { resumeFrom: null });
       break;
     case "CLEANUP_STARTED":
       if (is("PR_MERGED", "CLEANUP_FAILED")) return to("CLEANUP_PENDING");

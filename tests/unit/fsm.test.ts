@@ -52,7 +52,8 @@ const TABLE: [WorkflowState, WorkflowEventType, WorkflowState][] = [
   ["ARCHITECT_ESCALATION", "ARCHITECT_SCOPE_CHANGE", "WAITING_PO"],
   ["IN_QA", "QA_PASSED", "PR_PENDING"],
   ["IN_QA", "QA_FAILED", "REWORK"],
-  ["PR_PENDING", "MERGE_VERIFIED", "PR_MERGED"],
+  ["BLOCKED", "MERGE_VERIFIED", "PR_MERGED"],
+  ["WAITING_PO", "MERGE_VERIFIED", "PR_MERGED"],
   ["PR_MERGED", "CLEANUP_STARTED", "CLEANUP_PENDING"],
   ["CLEANUP_FAILED", "CLEANUP_STARTED", "CLEANUP_PENDING"],
   ["CLEANUP_PENDING", "CLEANUP_SUCCEEDED", "COMPLETED"],
@@ -68,6 +69,7 @@ const TABLE: [WorkflowState, WorkflowEventType, WorkflowState][] = [
     [s, "CANCEL", "CANCELLED"],
     [s, "FAIL", "FAILED"],
     [s, "INCONSISTENCY_DETECTED", "RECOVERY_REQUIRED"],
+    [s, "MERGE_VERIFIED", "PR_MERGED"],
   ]),
   ...(["BLOCKED", "WAITING_PO", "RECOVERY_REQUIRED"] as const).flatMap(
     (s): [WorkflowState, WorkflowEventType, WorkflowState][] => [

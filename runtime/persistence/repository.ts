@@ -512,3 +512,22 @@ export const latestRun = (db: Db, issue: IssueRef): RunRow | undefined =>
       )
       .get(issue.repository, issue.number),
   );
+
+/**
+ * Queues a report whose content may change on replay (the one cleanup comment of a run): a new
+ * body re-opens the outbox row, and the publisher PATCHes the comment found by its marker.
+ */
+export function upsertReport(db: Db, o: { runId: string; marker: string; body: string }): void {
+  tx(db, "upsert report", () => {
+    db.prepare(
+      "INSERT INTO outbox (run_id, marker, body, state, created_at) VALUES (?, ?, ?, 'PENDING', ?) ON CONFLICT (marker) DO UPDATE SET body = excluded.body, state = 'PENDING' WHERE outbox.body <> excluded.body",
+    ).run(o.runId, o.marker, o.body, iso());
+  });
+}
+
+/** Every ref of one kind a run ever claimed, released or not, oldest first. */
+export const claimedRefs = (db: Db, runId: string, kind: ResourceKind): string[] =>
+  db
+    .prepare("SELECT ref FROM resource_owner WHERE run_id = ? AND kind = ? ORDER BY id")
+    .all(runId, kind)
+    .map((r) => String(r.ref));

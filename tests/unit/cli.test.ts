@@ -37,6 +37,9 @@ Commands:
   task run <n>           Start Issue #n and drive Engineer → checks → Reviewer (→ Architect) until
                          it needs a person (In QA, Waiting PO, Blocked). Runs agents: spends tokens.
                          --from-source loads the agents from this checkout instead of the installed plugin
+  task finalize <n>      After Issue #n's PR is merged: verify the merge receipt, clean the owned
+                         worktree, branch and temp dirs safely (no --force), post one cleanup report,
+                         then Done + parent roll-up. --dry-run shows the cleanup plan only
   pr create <n>          Push Issue #n's task branch, create or reuse its PR → develop (Release: develop →
                          main) and verify base, head and the one primary Issue; marks it In Review.
                          --title <text> (default: Issue title), --body-file <path> (extra PR description)

@@ -3,7 +3,7 @@
 // No LLM call anywhere in setup.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type GhRunner, spawnGh } from "../adapters/github/client.ts";
@@ -18,19 +18,29 @@ import {
 import {
   closingIssues,
   createPr,
+  markedPrimaries,
   type PullRequest,
   prBody,
   repoFacts,
   sleepSync,
   validatePr,
 } from "../adapters/github/pr.ts";
-import { markStarted, type StatusChange, setStatus } from "../adapters/github/project.ts";
+import {
+  markFinished,
+  markStarted,
+  type StatusChange,
+  setStatus,
+} from "../adapters/github/project.ts";
 import { fetchTicket, type Ticket, validateTicket } from "../adapters/github/ticket.ts";
 import { loadConfig, type OmiConfig } from "../core/config.ts";
 import {
   type Check,
+  type CleanupResult,
   type IssueRef,
   IssueType,
+  parseContract,
+  SCHEMA_VERSION,
+  StepComment,
   type WorkflowContext,
   type WorkflowEventType,
 } from "../core/contracts.ts";
@@ -40,8 +50,10 @@ import { runSlice, type SliceDeps } from "../core/workflow-engine/slice.ts";
 import { type Db, openState, statePath } from "../persistence/db.ts";
 import {
   acquireLease,
+  addArtifact,
   adoptResources,
   advanceRun,
+  claimedRefs,
   createRun,
   getRun,
   latestRun,
@@ -49,8 +61,13 @@ import {
   ownedRefs,
   type RunRow,
   releaseLease,
+  runContext,
   transitions,
+  upsertReport,
 } from "../persistence/repository.ts";
+import { publishPending } from "../reporting/outbox.ts";
+import { renderStepReport } from "../reporting/render.ts";
+import { applyRetention, cleanupRun } from "../resources/cleanup.ts";
 import { branchName, ensureWorktree, type Workspace } from "../resources/worktree.ts";
 
 export interface TaskDeps {
@@ -484,4 +501,149 @@ export function prMerge(deps: TaskDeps, issue: number): MergeResult {
     throw new OmiError("GITHUB_UNAVAILABLE", "merge sent but no matching merge receipt yet: retry");
   }
   return { checks, receipt };
+}
+
+export interface FinalizeResult {
+  run: RunRow;
+  receipt: MergeReceipt | null;
+  cleanup: CleanupResult | null;
+  report: string | null;
+  status: StatusChange[];
+}
+
+function cleanupComment(run: RunRow, round: number, receipt: MergeReceipt, r: CleanupResult) {
+  const failed = r.steps.filter((s) => s.status === "failed");
+  const comment: StepComment = {
+    schemaVersion: SCHEMA_VERSION,
+    issue: { repository: run.repository, number: run.issue },
+    workflowRunId: run.id,
+    category: "cleanup",
+    workflow: run.workflow,
+    stepId: "cleanup",
+    stepTitle: "Cleanup sau merge",
+    round: Math.min(Math.max(round, 1), 4),
+    attempt: 1, // one cleanup comment per run: a replay updates it in place
+    executor: "omi-cli",
+    requestedModel: null,
+    actualModel: null,
+    requestedEffort: null,
+    actualEffort: null,
+    status: r.state === "COMPLETED" ? "PASSED" : "FAILED",
+    summary: [
+      `PR #${receipt.number} merged ${receipt.mergedAt} (head ${receipt.headSha.slice(0, 12)}).`,
+      ...r.steps.map(
+        (s) => `- ${s.name}: ${s.status}${s.detail ? ` — ${s.detail.slice(0, 120)}` : ""}`,
+      ),
+    ].join("\n"),
+    changedFiles: [],
+    evidencePaths: [],
+    findings: failed.map((s, i) => ({
+      id: `CLN-${String(i + 1).padStart(3, "0")}`,
+      severity: "high" as const,
+      observed: `${s.name}: ${s.detail ?? "failed"}`,
+      expected: "every owned resource verified and released without --force",
+    })),
+    nextAction:
+      r.state === "COMPLETED"
+        ? "None: task Done; parents rolled up."
+        : "Fix the failed step, then rerun `omi task finalize`; resources were kept.",
+    executionId: `${run.id}-cleanup`,
+    createdAt: new Date().toISOString(),
+    ...(receipt.mergeCommit ? { commitSha: receipt.mergeCommit } : {}),
+  };
+  return renderStepReport(parseContract(StepComment, comment, "cleanup comment"));
+}
+
+/**
+ * `omi task finalize <n>` (spec §14 completion flow): merge receipt from GitHub → run PR_MERGED →
+ * CLEANUP_PENDING → receipt archived + log retention → safe cleanup (T4.3) → cleanup comment
+ * posted → COMPLETED, Done and parent roll-up. Any failure leaves the run short of COMPLETED, so
+ * Done is never shown for unverified cleanup; rerunning resumes where it stopped. `dryRun` only
+ * reports what cleanup would do.
+ */
+export function taskFinalize(deps: TaskDeps & { dryRun?: boolean }, issue: number): FinalizeResult {
+  const gh = deps.gh ?? spawnGh;
+  const { root, config } = repo(deps.cwd);
+  const file = statePath(deps.cwd);
+  const db = openState(file);
+  const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
+  const primary = `${ref.repository}#${issue}`;
+  const lease = `task:${primary}`;
+  const session = deps.session ?? randomUUID();
+  try {
+    acquireLease(db, { key: lease, holder: session, ttlMs: START_LEASE_MS });
+    try {
+      let run = liveRun(db, ref) ?? latestRun(db, ref);
+      if (!run) throw new OmiError("POLICY_VIOLATION", `no run for ${primary}`);
+      const runId = run.id;
+      if (run.state === "COMPLETED") {
+        // Cleanup and its report are done; only the Project projection may be behind.
+        const status = deps.dryRun ? [] : markFinished(config, issue, gh);
+        return { run, receipt: null, cleanup: null, report: null, status };
+      }
+      const branch = claimedRefs(db, runId, "branch")[0];
+      if (!branch) throw new OmiError("OWNERSHIP_MISMATCH", `${primary} never owned a branch`);
+      const base = config.git.baseBranch;
+      const facts = prFacts(config, { head: branch, base, states: ["MERGED"] }, gh);
+      const receipt = receiptOf(facts.pr);
+      if (!receipt || receipt.baseRef !== base) {
+        throw new OmiError("POLICY_VIOLATION", `${branch} has no PR merged into ${base}`);
+      }
+      if (!markedPrimaries(facts.pr?.body ?? "").includes(primary)) {
+        throw new OmiError(
+          "POLICY_VIOLATION",
+          `merged PR #${receipt.number} does not name ${primary}`,
+        );
+      }
+      const cleanOpts = { repoRoot: root, runId, receipt, tempRoot: dirname(file) };
+      if (deps.dryRun) {
+        const cleanup = cleanupRun(db, { ...cleanOpts, dryRun: true });
+        return { run, receipt, cleanup, report: null, status: [] };
+      }
+
+      publishPending(db, runId, { gh }); // earlier reports first: progress waits for them
+      const state = () => runContext(db, runId).state;
+      if ([...PRE_MERGE, "BLOCKED", "WAITING_PO"].includes(state())) {
+        advanceRun(db, runId, { type: "MERGE_VERIFIED" });
+      }
+      if (["PR_MERGED", "CLEANUP_FAILED"].includes(state())) {
+        advanceRun(db, runId, { type: "CLEANUP_STARTED" });
+      }
+      if (state() !== "CLEANUP_PENDING") {
+        throw new OmiError("INVALID_TRANSITION", `run ${runId} is ${state()}: cannot finalize`);
+      }
+
+      const evidence = join(dirname(file), "evidence", runId);
+      mkdirSync(evidence, { recursive: true });
+      const receiptFile = join(evidence, "merge-receipt.json");
+      if (!existsSync(receiptFile)) {
+        writeFileSync(receiptFile, `${JSON.stringify(receipt, null, 2)}\n`);
+        addArtifact(db, { runId, kind: "evidence", path: receiptFile });
+      }
+      applyRetention(db, {
+        evidenceRoot: dirname(evidence),
+        days: config.cleanup.logRetentionDays,
+      });
+
+      const cleanup = cleanupRun(db, cleanOpts);
+      writeFileSync(join(evidence, "cleanup-result.json"), `${JSON.stringify(cleanup, null, 2)}\n`);
+      const report = cleanupComment(run, runContext(db, runId).round, receipt, cleanup);
+      upsertReport(db, { runId, marker: report.split("\n")[0] as string, body: report });
+      publishPending(db, runId, { gh }); // throws: the run stays CLEANUP_PENDING, retry resumes
+
+      if (cleanup.state === "CLEANUP_FAILED") {
+        run = advanceRun(db, runId, { type: "CLEANUP_ERROR" }).run;
+        const blocked = setStatus(config, issue, PROJECT_STATUS.CLEANUP_FAILED, gh);
+        return { run, receipt, cleanup, report, status: blocked ? [blocked] : [] };
+      }
+      run = advanceRun(db, runId, { type: "CLEANUP_SUCCEEDED" }).run;
+      // COMPLETED is recorded first; a failure below is repaired by rerunning finalize.
+      const status = markFinished(config, issue, gh);
+      return { run, receipt, cleanup, report, status };
+    } finally {
+      releaseLease(db, { key: lease, holder: session });
+    }
+  } finally {
+    db.close();
+  }
 }

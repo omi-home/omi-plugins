@@ -10,6 +10,7 @@ import {
   prCreate,
   prMerge,
   prValidate,
+  taskFinalize,
   taskRun,
   taskStart,
   taskStatus,
@@ -26,6 +27,9 @@ Commands:
   task run <n>           Start Issue #n and drive Engineer → checks → Reviewer (→ Architect) until
                          it needs a person (In QA, Waiting PO, Blocked). Runs agents: spends tokens.
                          --from-source loads the agents from this checkout instead of the installed plugin
+  task finalize <n>      After Issue #n's PR is merged: verify the merge receipt, clean the owned
+                         worktree, branch and temp dirs safely (no --force), post one cleanup report,
+                         then Done + parent roll-up. --dry-run shows the cleanup plan only
   pr create <n>          Push Issue #n's task branch, create or reuse its PR → develop (Release: develop →
                          main) and verify base, head and the one primary Issue; marks it In Review.
                          --title <text> (default: Issue title), --body-file <path> (extra PR description)
@@ -72,6 +76,7 @@ const NESTED = new Set([
   "task start",
   "task status",
   "task run",
+  "task finalize",
   "pr create",
   "pr validate",
   "pr merge",
@@ -185,14 +190,20 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         ];
         return ok(r, lines(human));
       }
+      case "task finalize": {
+        const r = taskFinalize({ cwd, dryRun: values["dry-run"] }, issue);
+        const human = [
+          `run       ${r.run.id} (${r.run.state})`,
+          ...(r.cleanup?.steps.map(
+            (s) => `${s.status.toUpperCase().padEnd(7)} ${s.name.padEnd(22)} ${s.detail ?? ""}`,
+          ) ?? []),
+          ...r.status.map((c) => `status    ${c.issue}: ${c.from ?? "unset"} → ${c.to}`),
+        ];
+        return ok(r, lines(human), r.cleanup?.state === "CLEANUP_FAILED" ? EXIT.failed : EXIT.ok);
+      }
       case "pr validate": {
         const r = prValidate({ cwd }, issue);
-        return ok(
-          r,
-          `pr        ${r.pr ?? "none"}
-${humanChecks(r.checks)}`,
-          checksExit(r.checks),
-        );
+        return ok(r, `pr        ${r.pr ?? "none"}\n${humanChecks(r.checks)}`, checksExit(r.checks));
       }
       case "pr merge": {
         const r = prMerge({ cwd }, issue);
@@ -227,5 +238,6 @@ const parse = (args: string[]) =>
       "from-source": { type: "boolean" },
       title: { type: "string" },
       "body-file": { type: "string" },
+      "dry-run": { type: "boolean" },
     },
   });
