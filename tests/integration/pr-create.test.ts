@@ -40,6 +40,8 @@ interface Fake {
   /** Closing references returned per call; the last one repeats. */
   closing?: string[][];
   defaultBranch?: string;
+  /** PR lookups that still show the previous head (GitHub lags behind a push). */
+  staleLookups?: number;
 }
 
 function fakeGh(f: Fake) {
@@ -80,13 +82,19 @@ function fakeGh(f: Fake) {
       return ok({ createPullRequest: { pullRequest: pr } });
     }
     if (query.includes("pullRequests(headRefName")) {
-      return ok({
+      const answer = ok({
         repository: {
           id: "R",
           defaultBranchRef: { name: f.defaultBranch ?? "develop" },
-          pullRequests: { nodes: (f.open ?? []).filter((p) => p.headRefName === vars.head) },
+          pullRequests: {
+            nodes: (f.open ?? [])
+              .filter((p) => p.headRefName === vars.head)
+              .map((p) => ((f.staleLookups ?? 0) > 0 ? { ...p, headRefOid: "0".repeat(40) } : p)),
+          },
         },
       });
+      if (f.staleLookups) f.staleLookups--;
+      return answer;
     }
     if (query.includes("closingIssuesReferences")) {
       const list = f.closing ?? [["o/repo#5"]];
@@ -282,4 +290,20 @@ test("validatePr: body naming two primaries is dual-primary", () => {
     { primary: "o/repo#5", base: "develop", head: "h", closing: null },
   );
   assert.equal(checks.find((c) => c.name === "pr-primary")?.status, "fail");
+});
+
+test("a new push to an existing PR: head re-read with backoff until GitHub catches up", () => {
+  const f: Fake = { issues: { 5: "dev-task" } };
+  const s = started(f);
+  prCreate({ cwd: s.root, gh: s.gh.run, sleep: noSleep }, 5);
+  writeFileSync(join(s.wt, "c.txt"), "c\n");
+  git(s.wt, "add", "c.txt");
+  git(s.wt, "commit", "-q", "-m", "c");
+  const pr = f.open?.[0] as PullRequest;
+  pr.headRefOid = git(s.wt, "rev-parse", "HEAD"); // what GitHub shows once it caught up
+  f.staleLookups = 2;
+  const waits: number[] = [];
+  const r = prCreate({ cwd: s.root, gh: s.gh.run, sleep: (ms) => waits.push(ms) }, 5);
+  assert.equal(r.checks.find((c) => c.name === "pr-tip")?.status, "pass");
+  assert.deepEqual(waits, [1000, 2000]);
 });

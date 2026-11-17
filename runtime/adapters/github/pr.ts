@@ -18,6 +18,11 @@ export const PullRequest = z.strictObject({
 });
 export type PullRequest = z.infer<typeof PullRequest>;
 
+/** Blocking wait for the synchronous CLI (backoff between GitHub reads). */
+export const sleepSync = (ms: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
 const PR_FIELDS = "id number url baseRefName headRefName headRefOid body";
 
 /** Marker naming the primary Issue in the PR body: the fallback link when base ≠ default. */
@@ -113,8 +118,7 @@ export function closingIssues(
   prId: string,
   o: { run?: GhRunner; sleep?: (ms: number) => void; timeoutMs?: number } = {},
 ): string[] {
-  const sleep =
-    o.sleep ?? ((ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms));
+  const sleep = o.sleep ?? sleepSync;
   let waited = 0;
   for (let delay = 1000; ; delay *= 2) {
     const data = graphql(

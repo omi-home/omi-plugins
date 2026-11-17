@@ -13,6 +13,7 @@ import {
   type PullRequest,
   prBody,
   repoFacts,
+  sleepSync,
   validatePr,
 } from "../adapters/github/pr.ts";
 import { markStarted, type StatusChange, setStatus } from "../adapters/github/project.ts";
@@ -313,7 +314,17 @@ export function prCreate(
     gitOut(worktree, ["push", "--quiet", "-u", "origin", head]);
   }
 
-  const facts = repoFacts(config, head, gh);
+  let facts = repoFacts(config, head, gh);
+  // GitHub moves an existing PR's head to a fresh push asynchronously: re-read briefly.
+  const sleep = deps.sleep ?? sleepSync;
+  for (
+    let delay = 1000;
+    tip && facts.open[0] && facts.open[0].headRefOid !== tip && delay <= 8000;
+    delay *= 2
+  ) {
+    sleep(delay);
+    facts = repoFacts(config, head, gh);
+  }
   if (facts.open.length > 1) {
     throw new OmiError("POLICY_VIOLATION", `${facts.open.length} open PRs from ${head}`);
   }
