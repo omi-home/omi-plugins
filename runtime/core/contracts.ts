@@ -80,6 +80,54 @@ export const WorkflowState = z.enum([
 ]);
 export type WorkflowState = z.infer<typeof WorkflowState>;
 
+/** Events the workflow FSM accepts (runtime/core/workflow-engine/fsm.ts). */
+export const WorkflowEventType = z.enum([
+  "TICKET_VALID",
+  "WORKSPACE_CREATED",
+  "DEV_STARTED",
+  "CHECKS_FAILED",
+  "REVIEW_PASSED",
+  "REVIEW_FAILED",
+  "ARCHITECT_PLAN_ACCEPTED",
+  "ARCHITECT_SCOPE_CHANGE",
+  "QA_PASSED",
+  "QA_FAILED",
+  "MERGE_VERIFIED",
+  "CLEANUP_STARTED",
+  "CLEANUP_SUCCEEDED",
+  "CLEANUP_ERROR",
+  "TECHNICAL_FAILURE",
+  "BLOCK",
+  "UNBLOCK",
+  "ESCALATE_TO_PO",
+  "PO_RESUME",
+  "CANCEL",
+  "FAIL",
+  "INCONSISTENCY_DETECTED",
+  "RECOVERED",
+]);
+export type WorkflowEventType = z.infer<typeof WorkflowEventType>;
+
+/**
+ * Durable FSM context. `round` = review round (domain), `attempt` = technical retry of the
+ * current step: transport/tool errors only ever move `attempt` (idea §10).
+ */
+export const WorkflowContext = z.strictObject({
+  state: WorkflowState,
+  round: z.int().min(0).max(4),
+  /** Consecutive counted review failures since the last pass. */
+  failedRounds: z.int().min(0).max(4),
+  architectUsed: z.boolean(),
+  /** QA rework is a separate budget; it never resets review history. */
+  qaReworks: z.int().min(0),
+  reworkFor: z.enum(["review", "qa"]).nullable(),
+  attempt: z.int().min(1),
+  validationFixes: z.int().min(0),
+  /** Where BLOCKED/WAITING_PO/RECOVERY_REQUIRED return to; null = needs a new authorized work item. */
+  resumeFrom: WorkflowState.nullable(),
+});
+export type WorkflowContext = z.infer<typeof WorkflowContext>;
+
 export const StepState = z.enum([
   "PENDING",
   "RUNNING",
