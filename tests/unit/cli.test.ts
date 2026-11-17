@@ -30,9 +30,12 @@ test("golden: help and version, human and json", () => {
     `Usage: omi <command> [--output human|json]
 
 Commands:
-  doctor    Check tools, repository, AGENTS.md, .omi/config.yaml and GitHub access
-  version   Print the OMI version
-  help      Show this help
+  doctor                 Check tools, repository, AGENTS.md, .omi/config.yaml and GitHub access
+  ticket validate <n>    Check Issue #n against the ticket-first gates (no changes)
+  task start <n>         Validate Issue #n, create or reuse its run and worktree, mark it In Progress
+  task status <n>        Show the local run, worktree and transitions of Issue #n
+  version                Print the OMI version
+  help                   Show this help
 
 Exit codes: 0 ok, 1 failed check or error, 2 usage error, 75 transient error (retry)
 `,
@@ -51,6 +54,13 @@ const matrix: [string[], number, string | null][] = [
   [["version", "--bogus"], 2, "USAGE_INVALID"],
   [["version", "--output", "xml"], 2, "USAGE_INVALID"],
   [["doctor"], 1, null], // tmpdir is not a git repository
+  [["task"], 2, "USAGE_INVALID"],
+  [["task", "bogus", "5"], 2, "USAGE_INVALID"],
+  [["task", "start"], 2, "USAGE_INVALID"],
+  [["task", "start", "abc"], 2, "USAGE_INVALID"],
+  [["ticket", "validate", "0"], 2, "USAGE_INVALID"],
+  [["task", "start", "5", "extra"], 2, "USAGE_INVALID"],
+  [["task", "status", "#5"], 1, "CONFIG_INVALID"], // not a git repository
 ];
 
 test("exit-code matrix", () => {

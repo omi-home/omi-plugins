@@ -323,6 +323,13 @@ function reuse(
       owner: `${marker.repository}#${marker.issue}`,
     });
   }
+  if (marker.runId !== o.runId) {
+    // Same task resumed by a new run (one live run per Issue): the marker follows the owner.
+    writeFileSync(
+      markerFile(w.path),
+      `${JSON.stringify({ ...marker, runId: o.runId }, null, 2)}\n`,
+    );
+  }
   const dirty = git(["status", "--porcelain", "--untracked-files=all"], w.path) !== "";
   return { path: w.path, branch: o.branch, baseSha: marker.baseSha, reused: true, dirty };
 }

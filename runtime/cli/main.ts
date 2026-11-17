@@ -5,13 +5,17 @@ import { parseArgs } from "node:util";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { type Check, doctor } from "./doctor.ts";
+import { taskStart, taskStatus, ticketValidate } from "./task.ts";
 
 export const HELP = `Usage: omi <command> [--output human|json]
 
 Commands:
-  doctor    Check tools, repository, AGENTS.md, .omi/config.yaml and GitHub access
-  version   Print the OMI version
-  help      Show this help
+  doctor                 Check tools, repository, AGENTS.md, .omi/config.yaml and GitHub access
+  ticket validate <n>    Check Issue #n against the ticket-first gates (no changes)
+  task start <n>         Validate Issue #n, create or reuse its run and worktree, mark it In Progress
+  task status <n>        Show the local run, worktree and transitions of Issue #n
+  version                Print the OMI version
+  help                   Show this help
 
 Exit codes: 0 ok, 1 failed check or error, 2 usage error, 75 transient error (retry)
 `;
@@ -27,6 +31,26 @@ export interface CliResult {
 const VERSION: string = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
 ).version;
+
+/** 0 when nothing failed; 75 when every failure is transient (retry helps); else 1. */
+const checksExit = (checks: Check[]) => {
+  const failed = checks.filter((c) => c.status === "fail");
+  if (!failed.length) return EXIT.ok;
+  return failed.every((c) => c.code && ERROR_CODES[c.code].transient)
+    ? EXIT.transient
+    : EXIT.failed;
+};
+
+const issueArg = (a: string | undefined) => {
+  const m = /^#?(\d+)$/.exec(a ?? "");
+  if (!m || Number(m[1]) < 1) throw new OmiError("USAGE_INVALID", "expected an issue number");
+  return Number(m[1]);
+};
+
+/** Subcommands: <group> <action> <issue>. */
+const NESTED = new Set(["ticket validate", "task start", "task status"]);
+
+const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
 
 const humanChecks = (checks: Check[]) =>
   checks
@@ -59,9 +83,15 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       throw new OmiError("USAGE_INVALID", "--output must be human or json");
     }
     command = values.help ? "help" : (positionals[0] ?? "");
-    if (positionals.length > 1) {
-      throw new OmiError("USAGE_INVALID", `unexpected argument: ${positionals[1]}`);
+    let rest = positionals.slice(1);
+    if (!values.help && NESTED.has(`${command} ${rest[0]}`)) {
+      command = `${command} ${rest[0]}`;
+      rest = rest.slice(1);
+    } else if (command === "ticket" || command === "task") {
+      throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
     }
+    const issue = NESTED.has(command) ? issueArg(rest.shift()) : 0;
+    if (rest.length) throw new OmiError("USAGE_INVALID", `unexpected argument: ${rest[0]}`);
 
     switch (command) {
       case "help":
@@ -70,14 +100,33 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         return ok({ omi: VERSION }, `omi ${VERSION}\n`);
       case "doctor": {
         const checks = doctor(cwd);
-        const failed = checks.filter((c) => c.status === "fail");
-        // Retrying helps only when every failure is transient (network, rate limit, 5xx).
-        const code = !failed.length
-          ? EXIT.ok
-          : failed.every((c) => c.code && ERROR_CODES[c.code].transient)
-            ? EXIT.transient
-            : EXIT.failed;
-        return ok({ checks }, humanChecks(checks), code);
+        return ok({ checks }, humanChecks(checks), checksExit(checks));
+      }
+      case "ticket validate": {
+        const checks = ticketValidate({ cwd }, issue);
+        return ok({ issue, checks }, humanChecks(checks), checksExit(checks));
+      }
+      case "task start": {
+        const r = taskStart({ cwd }, issue);
+        const human = [
+          `run       ${r.run.id} (${r.run.state})`,
+          `worktree  ${r.workspace.path}${r.workspace.reused ? " (reused)" : ""}${r.workspace.dirty ? " (dirty)" : ""}`,
+          `branch    ${r.workspace.branch} @ base ${r.workspace.baseSha.slice(0, 12)}`,
+          ...r.status.map((c) => `status    ${c.issue}: ${c.from ?? "unset"} → ${c.to}`),
+        ];
+        return ok(r, lines(human));
+      }
+      case "task status": {
+        const st = taskStatus({ cwd }, issue);
+        const human = st.run
+          ? [
+              `run       ${st.run.id} (${st.run.state})`,
+              `worktree  ${st.worktree ? `${st.worktree.path}${st.worktree.exists ? "" : " (missing)"}` : "none"}`,
+              `branch    ${st.branch ?? "none"}`,
+              ...st.transitions.map((t) => `  ${t.from ?? "-"} → ${t.to} (${t.event})`),
+            ]
+          : [`no run for issue #${issue}`];
+        return ok(st, lines(human));
       }
       case "":
         throw new OmiError("USAGE_INVALID", "missing command (see `omi help`)");

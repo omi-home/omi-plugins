@@ -356,3 +356,38 @@ export function releaseLease(db: Db, o: { key: string; holder: string }): void {
     db.prepare("DELETE FROM lease WHERE key = ? AND holder = ?").run(o.key, o.holder);
   });
 }
+
+/**
+ * Hands live resources of finished runs (COMPLETED/FAILED/CANCELLED) of the same Issue to `runId`,
+ * so a new run can resume the preserved workspace (#28 CR-001). Returns the number moved.
+ */
+export function adoptResources(db: Db, o: { runId: string; issue: IssueRef }): number {
+  return tx(db, "adopt resources", () =>
+    Number(
+      db
+        .prepare(
+          `UPDATE resource_owner SET run_id = ? WHERE released_at IS NULL AND run_id IN (SELECT id FROM workflow_run WHERE repository = ? AND issue = ? AND state IN (${LIVE_EXCLUDED.map(() => "?").join(", ")}))`,
+        )
+        .run(o.runId, o.issue.repository, o.issue.number, ...LIVE_EXCLUDED).changes,
+    ),
+  );
+}
+
+/** Live refs of one kind owned by a run, oldest first. */
+export const ownedRefs = (db: Db, runId: string, kind: ResourceKind): string[] =>
+  db
+    .prepare(
+      "SELECT ref FROM resource_owner WHERE run_id = ? AND kind = ? AND released_at IS NULL ORDER BY id",
+    )
+    .all(runId, kind)
+    .map((r) => String(r.ref));
+
+/** Most recent run of an Issue, live or not. */
+export const latestRun = (db: Db, issue: IssueRef): RunRow | undefined =>
+  toRun(
+    db
+      .prepare(
+        "SELECT * FROM workflow_run WHERE repository = ? AND issue = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+      )
+      .get(issue.repository, issue.number),
+  );
