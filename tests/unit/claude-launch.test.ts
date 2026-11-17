@@ -38,6 +38,38 @@ test("launch: named agent, resources-only Read grant, prompt via stdin, cwd = wo
     fromSource: true,
   });
   assert.equal(src.args[src.args.indexOf("--plugin-dir") + 1], root);
+  assert.ok(!l.args.includes("--permission-mode"), "read-only by default");
+  const dev = buildAgentLaunch({
+    pluginRoot: root,
+    role: "backend-engineer",
+    worktree: wt,
+    prompt: "",
+    allowedTools: ["Bash(npm test)"],
+    acceptEdits: true,
+  });
+  assert.ok(dev.args.includes("Bash(npm test)"));
+  assert.equal(dev.args[dev.args.indexOf("--permission-mode") + 1], "acceptEdits");
+});
+
+test("observeRun: cut transcript lines skipped (#19 CR-001); host usage read; no result → OmiError", () => {
+  const out = observeRun(
+    [
+      '{"type":"assistant","message":{"model":"claude-opus-5-5"}}',
+      '{"type":"assistant","message":{"mod',
+      JSON.stringify({
+        type: "result",
+        result: "ok",
+        usage: { input_tokens: 3, output_tokens: 4, cache_creation_input_tokens: 9 },
+      }),
+    ].join("\n"),
+  );
+  assert.deepEqual(out.usage, {
+    inputTokens: 3,
+    outputTokens: 4,
+    cacheReadTokens: undefined,
+    cacheCreationTokens: 9,
+  });
+  assert.throws(() => observeRun('{"type":"assistant"}\n{"type":"res'), { code: "INTERNAL" });
 });
 
 test("launch: relative paths rejected", () => {

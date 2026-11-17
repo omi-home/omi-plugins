@@ -4,19 +4,28 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type GhRunner, spawnGh } from "../adapters/github/client.ts";
-import { markStarted, type StatusChange } from "../adapters/github/project.ts";
+import { markStarted, type StatusChange, setStatus } from "../adapters/github/project.ts";
 import { fetchTicket, type Ticket, validateTicket } from "../adapters/github/ticket.ts";
 import { loadConfig, type OmiConfig } from "../core/config.ts";
-import { type Check, IssueType, type WorkflowEventType } from "../core/contracts.ts";
+import {
+  type Check,
+  IssueType,
+  type WorkflowContext,
+  type WorkflowEventType,
+} from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
+import { PROJECT_STATUS } from "../core/workflow-engine/fsm.ts";
+import { runSlice, type SliceDeps } from "../core/workflow-engine/slice.ts";
 import { type Db, openState, statePath } from "../persistence/db.ts";
 import {
   acquireLease,
   adoptResources,
   advanceRun,
   createRun,
+  getRun,
   latestRun,
   liveRun,
   ownedRefs,
@@ -43,6 +52,9 @@ const EXECUTABLE: readonly IssueType[] = [
   "bug",
 ];
 const START_LEASE_MS = 10 * 60_000;
+/** A whole review loop may run several agents back to back. */
+const RUN_LEASE_MS = 6 * 60 * 60_000;
+const PLUGIN_ROOT = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 
 function repo(cwd: string): { root: string; config: OmiConfig } {
   let common: string;
@@ -173,6 +185,59 @@ export function taskStatus(deps: TaskDeps, issue: number): TaskStatus {
       branch: ownedRefs(db, run.id, "branch")[0] ?? null,
       transitions: transitions(db, run.id),
     };
+  } finally {
+    db.close();
+  }
+}
+
+export interface RunResult {
+  run: RunRow;
+  state: WorkflowContext["state"];
+  round: number;
+  status: StatusChange | null;
+}
+
+/**
+ * `omi task run <n>`: start (idempotent) then drive the review loop until it needs a person
+ * (IN_QA, WAITING_PO, BLOCKED); the Project Status then mirrors the workflow state (#99).
+ * Spawns agent processes: this command spends tokens.
+ */
+export function taskRun(
+  deps: TaskDeps & Pick<SliceDeps, "runAgent" | "fromSource">,
+  issue: number,
+): RunResult {
+  const gh = deps.gh ?? spawnGh;
+  const start = taskStart(deps, issue);
+  const { config } = repo(deps.cwd);
+  const file = statePath(deps.cwd);
+  const db = openState(file);
+  const lease = `task:${start.run.repository}#${issue}`;
+  const session = deps.session ?? randomUUID();
+  try {
+    acquireLease(db, { key: lease, holder: session, ttlMs: RUN_LEASE_MS });
+    try {
+      const ctx = runSlice(
+        {
+          db,
+          config,
+          gh,
+          pluginRoot: PLUGIN_ROOT,
+          evidenceDir: join(dirname(file), "evidence", start.run.id),
+          runAgent: deps.runAgent,
+          fromSource: deps.fromSource,
+        },
+        { run: start.run, worktree: start.workspace.path, baseSha: start.workspace.baseSha },
+      );
+      const status = setStatus(config, issue, PROJECT_STATUS[ctx.state], gh);
+      return {
+        run: getRun(db, start.run.id) as RunRow,
+        state: ctx.state,
+        round: ctx.round,
+        status,
+      };
+    } finally {
+      releaseLease(db, { key: lease, holder: session });
+    }
   } finally {
     db.close();
   }

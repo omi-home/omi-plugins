@@ -1,6 +1,6 @@
 # Backend implementation rules
 
-Pack-ID: omi-backend-rules/v1
+Pack-ID: omi-backend-rules/v2
 
 When asked which rule pack you loaded, answer with the Pack-ID above verbatim.
 
@@ -28,4 +28,7 @@ When asked which rule pack you loaded, answer with the Pack-ID above verbatim.
 
 ## Result
 
-Finish with: status (`PASSED` / `FAILED` / `BLOCKED`), a short summary, the list of changed files (repo-relative), the commands you ran and their outcome, and any blocker reason. Your recommendation of the next step is advisory; the runtime decides transitions.
+- Commit your change in the worktree (`git add` + `git commit`) and report the commit SHA; never push.
+- Run the repository's own check commands before finishing; the OMI runtime runs them again after you.
+- Reply with the JSON step result your task packet asks for: `PASSED` when the task (or every open finding on rework) is done, `BLOCKED` with `blockerReason` when it cannot be done without a decision, `FAILED` only when you tried and could not make it work.
+- `changedFiles` are the files you actually changed (repo-relative); the runtime verifies them against git. Your next-step recommendation is advisory; the runtime decides transitions.

@@ -1,7 +1,7 @@
 // Named-agent launcher (ADR-0001 D1): one `claude -p --agent` process per step, cwd = task worktree.
 // Grants Read on <plugin-root>/resources/** only, so the agent can load its rule pack (D3).
 import { isAbsolute, join, resolve } from "node:path";
-import type { Role } from "../../core/contracts.ts";
+import type { Role, TokenUsage } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 
 export const PLUGIN_NAME = "omi-engineering";
@@ -28,6 +28,10 @@ export function buildAgentLaunch(o: {
   prompt: string;
   /** Load the plugin from source (`--plugin-dir`) instead of the installed copy. */
   fromSource?: boolean;
+  /** Extra permission rules, e.g. `Bash(npm test)` for the repo's own check commands. */
+  allowedTools?: string[];
+  /** Let the agent edit files in its worktree (implementing roles only). */
+  acceptEdits?: boolean;
 }): AgentLaunch {
   for (const [name, p] of [
     ["pluginRoot", o.pluginRoot],
@@ -44,6 +48,8 @@ export function buildAgentLaunch(o: {
       `${PLUGIN_NAME}:${o.role}`,
       "--allowedTools",
       `Read(${resources}/**)`,
+      ...(o.allowedTools ?? []),
+      ...(o.acceptEdits ? ["--permission-mode", "acceptEdits"] : []),
       "--output-format",
       "stream-json",
       "--verbose",
@@ -62,14 +68,27 @@ export interface AgentObservation {
   result: string;
   /** `<tool>:<file_path?>` for every permission the run was denied. */
   permissionDenials: string[];
+  /** Host-reported token usage of the run (result event `usage`), when present. */
+  usage?: TokenUsage;
 }
 
-/** Reads a stream-json transcript. `modelUsage` is not used: it includes host-internal models. */
+const nonNeg = (v: unknown) => (typeof v === "number" && v >= 0 ? Math.trunc(v) : undefined);
+
+/**
+ * Reads a stream-json transcript. `modelUsage` is not used: it includes host-internal models.
+ * Broken lines (a transcript cut by timeout or crash) are skipped; no result event is an error.
+ */
 export function observeRun(streamJson: string): AgentObservation {
   const events = streamJson
     .split("\n")
     .filter((l) => l.startsWith("{"))
-    .map((l) => JSON.parse(l));
+    .flatMap((l) => {
+      try {
+        return [JSON.parse(l)];
+      } catch {
+        return [];
+      }
+    });
   const models = [
     ...new Set(
       events
@@ -80,6 +99,9 @@ export function observeRun(streamJson: string): AgentObservation {
   ];
   const result = events.findLast((e) => e.type === "result");
   if (!result) throw new OmiError("INTERNAL", "agent run produced no result event");
+  const u = result.usage ?? {};
+  const input = nonNeg(u.input_tokens);
+  const output = nonNeg(u.output_tokens);
   return {
     actualModel: models.length ? models.join(",") : "unknown",
     actualEffort: "unknown",
@@ -89,5 +111,15 @@ export function observeRun(streamJson: string): AgentObservation {
       (d: { tool_name: string; tool_input?: { file_path?: string } }) =>
         `${d.tool_name}:${d.tool_input?.file_path ?? ""}`,
     ),
+    ...(input !== undefined && output !== undefined
+      ? {
+          usage: {
+            inputTokens: input,
+            outputTokens: output,
+            cacheReadTokens: nonNeg(u.cache_read_input_tokens),
+            cacheCreationTokens: nonNeg(u.cache_creation_input_tokens),
+          },
+        }
+      : {}),
   };
 }

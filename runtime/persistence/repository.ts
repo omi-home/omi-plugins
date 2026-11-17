@@ -8,7 +8,7 @@ import {
   type ResourceKind,
   type ReviewOutcome,
   type Role,
-  type StepResult,
+  StepResult,
   StepState,
   WorkflowContext,
   WorkflowEventType,
@@ -217,6 +217,13 @@ const toStep = (r: Record<string, unknown> | undefined): StepRow | undefined =>
 
 export const getStep = (db: Db, id: number): StepRow | undefined =>
   toStep(db.prepare("SELECT * FROM step_run WHERE id = ?").get(id));
+
+/** The persisted (already verified) result of a step, re-validated on read. */
+export function stepResult(db: Db, id: number): StepResult {
+  const r = db.prepare("SELECT result FROM step_run WHERE id = ?").get(id);
+  if (!r || r.result === null) throw new OmiError("INVALID_TRANSITION", `step ${id} has no result`);
+  return parseContract(StepResult, JSON.parse(String(r.result)), "stored step result");
+}
 
 /** Idempotent: the same (run, step, round) always maps to one row. */
 export function startStep(

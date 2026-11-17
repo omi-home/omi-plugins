@@ -63,7 +63,7 @@ const input = (worktree: string, baseSha: string): TaskPacketInput => ({
       truncated: false,
     },
   ],
-  openFindingIds: ["CR-001"],
+  openFindings: [],
   carriedFindings: [],
   readOnlyArtifacts: [],
 });

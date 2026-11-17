@@ -34,6 +34,9 @@ Commands:
   ticket validate <n>    Check Issue #n against the ticket-first gates (no changes)
   task start <n>         Validate Issue #n, create or reuse its run and worktree, mark it In Progress
   task status <n>        Show the local run, worktree and transitions of Issue #n
+  task run <n>           Start Issue #n and drive Engineer → checks → Reviewer (→ Architect) until
+                         it needs a person (In QA, Waiting PO, Blocked). Runs agents: spends tokens.
+                         --from-source loads the agents from this checkout instead of the installed plugin
   version                Print the OMI version
   help                   Show this help
 

@@ -3,6 +3,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 import {
   parseContract,
   SCHEMA_VERSION,
@@ -28,6 +29,29 @@ export function buildTaskPacket(input: TaskPacketInput): TaskPacket {
     throw new OmiError("CONTRACT_INVALID", "task packet: worktree does not exist");
   }
   return packet;
+}
+
+/** JSON Schema of what the agent writes (defaults optional, `usage` filled by the runtime). */
+const RESULT_SCHEMA = JSON.stringify(z.toJSONSchema(StepResult, { io: "input" }));
+
+/** The agent's whole input: the packet plus the exact output contract. No chat history. */
+export function packetPrompt(packet: TaskPacket): string {
+  return [
+    "You are running one OMI workflow step. Your task packet (JSON):",
+    "",
+    JSON.stringify(packet, null, 2),
+    "",
+    "- `issueContext` is the executable Issue body and its parents, nearest first: the requirements.",
+    "- `openFindings` are the review/check findings this step must resolve; address only those on rework.",
+    "- `carriedFindings` were deferred to this task by other tasks; they are in scope.",
+    "- Work only inside `worktree`; stay inside `scope` when it is not empty.",
+    "",
+    "When done, reply with ONLY one JSON object (no prose) matching this JSON Schema:",
+    RESULT_SCHEMA,
+    "",
+    `Copy workflowRunId, issue, stepId, round, attempt and role exactly from the packet; schemaVersion is ${SCHEMA_VERSION}.`,
+    "List repo-relative paths only. Your nextAction is advice; the OMI runtime decides what happens next.",
+  ].join("\n");
 }
 
 /** The whole output as JSON, or the last ```json fenced block in it. */

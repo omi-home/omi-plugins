@@ -252,7 +252,8 @@ export const TaskPacket = z.strictObject({
   worktree: z.string().refine((p) => isAbsolute(p), { message: "expected absolute path" }),
   baseSha: sha,
   issueContext: z.array(IssueContextEntry).min(1).max(10),
-  openFindingIds: z.array(findingId).max(100),
+  /** Delta findings this step must address (spec §10: rework consumes findings, not the chat). */
+  openFindings: z.array(Finding).max(100),
   carriedFindings: z.array(CarriedFinding).max(50),
   readOnlyArtifacts: z.array(relPath).max(50),
   outputSchema: z.literal(STEP_RESULT_SCHEMA),
@@ -262,6 +263,7 @@ export type TaskPacket = z.infer<typeof TaskPacket>;
 // ---- Step result: agent → runtime (spec §11). A recommendation, never a transition. ----
 
 /** Token usage as reported by the agent host, when it reports any. */
+export type TokenUsage = z.infer<typeof TokenUsage>;
 export const TokenUsage = z.strictObject({
   inputTokens: z.int().min(0),
   outputTokens: z.int().min(0),

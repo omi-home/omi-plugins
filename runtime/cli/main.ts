@@ -5,7 +5,7 @@ import { parseArgs } from "node:util";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { type Check, doctor } from "./doctor.ts";
-import { taskStart, taskStatus, ticketValidate } from "./task.ts";
+import { taskRun, taskStart, taskStatus, ticketValidate } from "./task.ts";
 
 export const HELP = `Usage: omi <command> [--output human|json]
 
@@ -14,6 +14,9 @@ Commands:
   ticket validate <n>    Check Issue #n against the ticket-first gates (no changes)
   task start <n>         Validate Issue #n, create or reuse its run and worktree, mark it In Progress
   task status <n>        Show the local run, worktree and transitions of Issue #n
+  task run <n>           Start Issue #n and drive Engineer → checks → Reviewer (→ Architect) until
+                         it needs a person (In QA, Waiting PO, Blocked). Runs agents: spends tokens.
+                         --from-source loads the agents from this checkout instead of the installed plugin
   version                Print the OMI version
   help                   Show this help
 
@@ -48,7 +51,7 @@ const issueArg = (a: string | undefined) => {
 };
 
 /** Subcommands: <group> <action> <issue>. */
-const NESTED = new Set(["ticket validate", "task start", "task status"]);
+const NESTED = new Set(["ticket validate", "task start", "task status", "task run"]);
 
 const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
 
@@ -128,6 +131,16 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
           : [`no run for issue #${issue}`];
         return ok(st, lines(human));
       }
+      case "task run": {
+        const r = taskRun({ cwd, fromSource: values["from-source"] }, issue);
+        const human = [
+          `run       ${r.run.id} (${r.state}, round ${r.round})`,
+          ...(r.status
+            ? [`status    ${r.status.issue}: ${r.status.from ?? "unset"} → ${r.status.to}`]
+            : []),
+        ];
+        return ok(r, lines(human));
+      }
       case "":
         throw new OmiError("USAGE_INVALID", "missing command (see `omi help`)");
       default:
@@ -151,5 +164,6 @@ const parse = (args: string[]) =>
     options: {
       output: { type: "string", default: "human" },
       help: { type: "boolean", short: "h" },
+      "from-source": { type: "boolean" },
     },
   });
