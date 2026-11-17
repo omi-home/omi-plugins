@@ -97,6 +97,18 @@ export type StepState = z.infer<typeof StepState>;
 export const StepOutcome = StepState.extract(["PASSED", "FAILED", "BLOCKED", "SKIPPED"]);
 export type StepOutcome = z.infer<typeof StepOutcome>;
 
+/** Review round verdict (idea §10): only PASSED/FAILED count toward the 2 + Architect + 2 policy. */
+export const ReviewOutcome = StepState.extract(["PASSED", "FAILED"]);
+export type ReviewOutcome = z.infer<typeof ReviewOutcome>;
+
+/** GitHub comment outbox (idea §12): pending until the comment id is stored. */
+export const OutboxState = z.enum(["PENDING", "POSTED"]);
+export type OutboxState = z.infer<typeof OutboxState>;
+
+/** Resources a run may own and cleanup may release (idea §14). */
+export const ResourceKind = z.enum(["worktree", "branch", "process", "container", "temp-dir"]);
+export type ResourceKind = z.infer<typeof ResourceKind>;
+
 /** `omi doctor` check outcome: only `fail` makes the command exit non-zero. */
 export const CheckStatus = z.enum(["pass", "warn", "fail"]);
 export type CheckStatus = z.infer<typeof CheckStatus>;
