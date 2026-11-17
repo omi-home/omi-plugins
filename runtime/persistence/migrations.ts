@@ -103,6 +103,11 @@ export const MIGRATIONS: readonly string[] = [
     expires_at  INTEGER NOT NULL
   );
   `,
+  // 2 — outbox target when a report goes to another Issue (carried findings, spec §12); null = run's Issue
+  `
+  ALTER TABLE outbox ADD COLUMN repository TEXT;
+  ALTER TABLE outbox ADD COLUMN issue INTEGER;
+  `,
 ];
 
 export function migrate(db: DatabaseSync, migrations: readonly string[] = MIGRATIONS): number {

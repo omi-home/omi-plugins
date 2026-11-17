@@ -253,11 +253,39 @@ export function persistStepResult(
   });
 }
 
-export const pendingReports = (db: Db, runId: string) =>
+export interface PendingReport {
+  marker: string;
+  body: string;
+  /** Issue the comment goes on: the run's own Issue unless the report targets another one. */
+  target: IssueRef;
+}
+
+export const pendingReports = (db: Db, runId: string): PendingReport[] =>
   db
-    .prepare("SELECT marker, body FROM outbox WHERE run_id = ? AND state = 'PENDING' ORDER BY id")
+    .prepare(
+      "SELECT o.marker, o.body, coalesce(o.repository, r.repository) AS repository, coalesce(o.issue, r.issue) AS issue FROM outbox o JOIN workflow_run r ON r.id = o.run_id WHERE o.run_id = ? AND o.state = 'PENDING' ORDER BY o.id",
+    )
     .all(runId)
-    .map((r) => ({ marker: String(r.marker), body: String(r.body) }));
+    .map((r) => ({
+      marker: String(r.marker),
+      body: String(r.body),
+      target: { repository: String(r.repository), number: Number(r.issue) },
+    }));
+
+/**
+ * Queues a report that is not a step result (e.g. carried findings on another Issue).
+ * Idempotent per marker: re-queueing an existing marker keeps the first record.
+ */
+export function enqueueReport(
+  db: Db,
+  o: { runId: string; marker: string; body: string; target?: IssueRef },
+): void {
+  tx(db, "enqueue report", () => {
+    db.prepare(
+      "INSERT INTO outbox (run_id, marker, body, state, repository, issue, created_at) VALUES (?, ?, ?, 'PENDING', ?, ?, ?) ON CONFLICT (marker) DO NOTHING",
+    ).run(o.runId, o.marker, o.body, o.target?.repository ?? null, o.target?.number ?? null, iso());
+  });
+}
 
 /** Dispatch invariant, second half: the comment exists on GitHub; the step may move on. */
 export function markReported(

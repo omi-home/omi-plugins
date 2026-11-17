@@ -12,11 +12,11 @@ export interface GhResult {
   stderr: string;
   error?: Error;
 }
-/** Injectable for contract tests; production spawns `gh`. */
-export type GhRunner = (args: string[]) => GhResult;
+/** Injectable for contract tests; production spawns `gh`. `input` goes to stdin. */
+export type GhRunner = (args: string[], input?: string) => GhResult;
 
-export const spawnGh: GhRunner = (args) =>
-  spawnSync("gh", args, { encoding: "utf8", timeout: 30_000, windowsHide: true });
+export const spawnGh: GhRunner = (args, input) =>
+  spawnSync("gh", args, { encoding: "utf8", timeout: 30_000, windowsHide: true, input });
 
 const RULES: [RegExp, ErrorCode][] = [
   [/rate limit|RATE_LIMITED|HTTP 429/i, "GITHUB_RATE_LIMITED"],

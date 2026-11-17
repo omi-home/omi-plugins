@@ -1,7 +1,7 @@
 // Step report renderer (spec §12): fills `templates/reports/<category>.md` from a validated
 // StepComment. Deterministic, no LLM reformatting; output is sanitized before it leaves.
 import { readFileSync } from "node:fs";
-import { commentMarker, type StepComment } from "../core/contracts.ts";
+import { type CarriedFinding, commentMarker, type StepComment } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
 import { redact } from "./redact.ts";
 
@@ -61,13 +61,37 @@ export function renderStepReport(c: StepComment): string {
     executionId: c.executionId,
     createdAt: c.createdAt,
   };
-  const template = readFileSync(new URL(`${c.category}.md`, TEMPLATES), "utf8");
+  return fill(c.category, values);
+}
+
+function fill(name: string, values: Record<string, string>): string {
+  const template = readFileSync(new URL(`${name}.md`, TEMPLATES), "utf8");
   const out = template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
     const v = values[key];
     if (v === undefined) {
-      throw new OmiError("INTERNAL", `report template ${c.category}: unknown placeholder ${key}`);
+      throw new OmiError("INTERNAL", `report template ${name}: unknown placeholder ${key}`);
     }
     return v;
   });
   return redact(out);
+}
+
+/**
+ * Comment deferring findings to another task (spec §12 "Carried findings"), one per source
+ * step. `targetId` is the target's logical id (e.g. T3.3); the marker stays parseable by
+ * `parseCarriedFindings` and is unique per source run/step for the outbox.
+ */
+export function renderCarriedFindings(o: {
+  targetId: string;
+  runId: string;
+  stepId: string;
+  rows: CarriedFinding[];
+}): { marker: string; body: string } {
+  const ids = [o.targetId, o.runId, o.stepId];
+  if (!o.rows.length || ids.some((v) => !/^[\w.-]{1,100}$/.test(v))) {
+    throw new OmiError("CONTRACT_INVALID", "carried findings: need rows and plain identifiers");
+  }
+  const marker = `<!-- omi:carried-findings=${o.targetId};run=${o.runId};step=${o.stepId} -->`;
+  const rows = o.rows.map((r) => `| ${cell(r.source)} | ${cell(r.finding)} | ${cell(r.action)} |`);
+  return { marker, body: fill("carried-findings", { marker, rows: rows.join("\n") }) };
 }

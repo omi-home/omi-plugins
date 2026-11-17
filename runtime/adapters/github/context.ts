@@ -73,11 +73,11 @@ export function parseCarriedFindings(comments: string[]): CarriedFinding[] {
       .filter((l) => l.startsWith("|"));
     rows.forEach((line, i) => {
       if (SEPARATOR.test(line) || SEPARATOR.test(rows[i + 1] ?? "")) return; // separator / header
-      // ponytail: escaped `\|` inside a cell splits it; nobody writes one in these tables yet.
+      // `\|` is a literal pipe inside a cell (renderCarriedFindings escapes them).
       const cells = line
-        .replace(/^\||\|$/g, "")
-        .split("|")
-        .map((c) => c.trim());
+        .replace(/^\||(?<!\\)\|$/g, "")
+        .split(/(?<!\\)\|/)
+        .map((c) => c.trim().replaceAll("\\|", "|"));
       const [source, finding, ...action] = cells;
       if (!source || !finding || !action.join("")) return;
       out.push({

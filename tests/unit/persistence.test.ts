@@ -100,7 +100,9 @@ test("restart: committed state survives close/reopen; pending report is replayab
 
   db = openState(file);
   assert.equal(repo.getStep(db, step.id)?.state, "REPORT_PENDING");
-  assert.deepEqual(repo.pendingReports(db, "run-1"), [{ marker: "<!-- m1 -->", body: "report" }]);
+  assert.deepEqual(repo.pendingReports(db, "run-1"), [
+    { marker: "<!-- m1 -->", body: "report", target: issue },
+  ]);
   const posted = { marker: "<!-- m1 -->", commentId: "1", commentUrl: "https://x/1" };
   repo.markReported(db, posted);
   repo.markReported(db, posted); // replay: no-op
