@@ -1,0 +1,12 @@
+{
+  "name": "omi-engineering",
+  "version": "0.1.0",
+  "description": "Ticket-driven, script-first Agile engineering framework: GitHub Issue/Project as work source, one worktree per task, audited review loop and post-merge cleanup.",
+  "author": {
+    "name": "omi-home",
+    "url": "https://github.com/omi-home"
+  },
+  "homepage": "https://github.com/omi-home/omi-plugins",
+  "repository": "https://github.com/omi-home/omi-plugins",
+  "keywords": ["agile", "github-projects", "worktree", "code-review", "workflow"]
+}

@@ -2,7 +2,7 @@
 
 Plugin Claude Code (`omi-engineering`) và runtime cục bộ xác định cho quy trình Agile theo ticket: GitHub Issue/Project làm nguồn công việc, mỗi task một worktree, vòng review 2 + Architect + 2, báo cáo từng bước lên Issue và dọn tài nguyên sau merge.
 
-> Trạng thái: **Phase 1 — đang dựng khung**. Chưa có CLI hay agent chạy được. Xem [lộ trình](./omi-plugins-roadmap.md).
+> Trạng thái: **Phase 1 — đang dựng khung**. Plugin đã load được nhưng chưa có agent, skill hay CLI. Xem [lộ trình](./omi-plugins-roadmap.md).
 
 ## Yêu cầu
 
@@ -17,6 +17,16 @@ cd omi-plugins
 npm ci
 npm run check
 ```
+
+## Cài plugin
+
+Repo này đồng thời là marketplace một-plugin (`.claude-plugin/marketplace.json`, `source: "./"`):
+
+```text
+/plugin install omi-engineering --marketplace omi-home/omi-plugins
+```
+
+Thử plugin từ source cục bộ không cần cài: `claude --plugin-dir .`. Kiểm tra manifest: `claude plugin validate .claude-plugin/plugin.json --strict` (đã nằm trong `npm test`, tự skip khi không có `claude`).
 
 ## Tài liệu
 
