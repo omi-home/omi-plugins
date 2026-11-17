@@ -1,7 +1,7 @@
 // Typed contracts for issue / workflow / step / comment / cleanup (idea §6, §10–§14).
 // Every document is strict (unknown fields rejected) and versioned via `schemaVersion`.
 import { z } from "zod";
-import { OmiError } from "./errors/errors.ts";
+import { type ErrorCode, OmiError } from "./errors/errors.ts";
 
 export const SCHEMA_VERSION = 1;
 const schemaVersion = z.literal(SCHEMA_VERSION);
@@ -160,6 +160,14 @@ export type ResourceKind = z.infer<typeof ResourceKind>;
 /** `omi doctor` check outcome: only `fail` makes the command exit non-zero. */
 export const CheckStatus = z.enum(["pass", "warn", "fail"]);
 export type CheckStatus = z.infer<typeof CheckStatus>;
+
+/** One diagnostic/gate result (`omi doctor`, ticket validation). `code` classifies a failure. */
+export interface Check {
+  name: string;
+  status: CheckStatus;
+  detail: string;
+  code?: ErrorCode;
+}
 
 export const Severity = z.enum(["critical", "high", "medium", "low", "info"]);
 

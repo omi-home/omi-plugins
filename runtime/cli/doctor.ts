@@ -3,15 +3,13 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { z } from "zod";
+import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import { loadConfig, type OmiConfig } from "../core/config.ts";
-import type { CheckStatus } from "../core/contracts.ts";
+import type { Check } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
 
-export interface Check {
-  name: string;
-  status: CheckStatus;
-  detail: string;
-}
+export type { Check };
 
 const MIN_NODE = "22.18.0";
 /** First Claude Code release that reads AGENTS.md natively (T0.4). */
@@ -83,26 +81,120 @@ function workflows(): Check {
       };
 }
 
-function githubRepo(config: OmiConfig, cwd: string): Check[] {
-  const { owner, repo, privateRepoRiskAccepted } = config.github;
-  const r = run(
-    "gh",
-    ["repo", "view", `${owner}/${repo}`, "--json", "visibility,defaultBranchRef"],
-    cwd,
-  );
-  if (!r.ok) {
-    return [{ name: "github-repo", status: "fail", detail: `cannot read ${owner}/${repo}` }];
+const ENV_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
+  viewer{login}
+  rateLimit{limit remaining resetAt}
+  repository(owner:$owner,name:$repo){visibility viewerPermission defaultBranchRef{name}}
+  repositoryOwner(login:$owner){
+    ... on Organization{projectV2(number:$number){title closed}}
+    ... on User{projectV2(number:$number){title closed}}
   }
-  const info = JSON.parse(r.out) as { visibility: string; defaultBranchRef?: { name: string } };
-  const isPublic = info.visibility === "PUBLIC";
-  const branch = info.defaultBranchRef?.name ?? "";
-  return [
+}`;
+
+const Project = z.strictObject({ title: z.string(), closed: z.boolean() }).nullable();
+const EnvData = z.strictObject({
+  viewer: z.strictObject({ login: z.string() }),
+  rateLimit: z.strictObject({ limit: z.int(), remaining: z.int(), resetAt: z.string() }),
+  repository: z
+    .strictObject({
+      visibility: z.enum(["PUBLIC", "PRIVATE", "INTERNAL"]),
+      viewerPermission: z.enum(["ADMIN", "MAINTAIN", "WRITE", "TRIAGE", "READ"]).nullable(),
+      defaultBranchRef: z.strictObject({ name: z.string() }).nullable(),
+    })
+    .nullable(),
+  repositoryOwner: z.strictObject({ projectV2: Project.optional() }).nullable(),
+});
+
+const failed = (name: string, e: unknown): Check => {
+  const err = e instanceof OmiError ? e : new OmiError("INTERNAL", `${name} check crashed`);
+  return { name, status: "fail", detail: err.message, code: err.code };
+};
+
+/** Auth, permissions, Project access and rate limit in one GraphQL round trip (CR-001/CR-002). */
+export function github(config: OmiConfig | undefined, run: GhRunner = spawnGh): Check[] {
+  if (!config) {
+    try {
+      const v = graphql(
+        "{viewer{login}}",
+        {},
+        z.strictObject({ viewer: z.strictObject({ login: z.string() }) }),
+        "github-auth",
+        run,
+      );
+      return [
+        { name: "github-auth", status: "pass", detail: `authenticated as ${v.viewer.login}` },
+      ];
+    } catch (e) {
+      return [failed("github-auth", e)];
+    }
+  }
+  const { owner, repo, projectNumber, privateRepoRiskAccepted } = config.github;
+  let d: z.infer<typeof EnvData>;
+  try {
+    d = graphql(ENV_QUERY, { owner, repo, number: projectNumber }, EnvData, "github", run);
+  } catch (e) {
+    return [failed("github-auth", e)];
+  }
+  const checks: Check[] = [
+    { name: "github-auth", status: "pass", detail: `authenticated as ${d.viewer.login}` },
+    d.rateLimit.remaining < d.rateLimit.limit / 10
+      ? {
+          name: "github-rate-limit",
+          status: "warn",
+          detail: `${d.rateLimit.remaining}/${d.rateLimit.limit} left until ${d.rateLimit.resetAt}`,
+        }
+      : {
+          name: "github-rate-limit",
+          status: "pass",
+          detail: `${d.rateLimit.remaining}/${d.rateLimit.limit}`,
+        },
+  ];
+  const p = d.repositoryOwner?.projectV2;
+  checks.push(
+    !p
+      ? {
+          name: "github-project",
+          status: "fail",
+          code: "TICKET_NOT_IN_PROJECT",
+          detail: `${owner} Project #${projectNumber} not found or not accessible (token needs the project scope)`,
+        }
+      : p.closed
+        ? {
+            name: "github-project",
+            status: "fail",
+            code: "CONFIG_INVALID",
+            detail: `Project #${projectNumber} "${p.title}" is closed`,
+          }
+        : { name: "github-project", status: "pass", detail: `#${projectNumber} ${p.title}` },
+  );
+  const r = d.repository;
+  if (!r) {
+    checks.push({
+      name: "github-repo",
+      status: "fail",
+      code: "CONFIG_INVALID",
+      detail: `cannot read ${owner}/${repo}`,
+    });
+    return checks;
+  }
+  const perm = r.viewerPermission ?? "NONE";
+  const branch = r.defaultBranchRef?.name ?? "";
+  const isPublic = r.visibility === "PUBLIC";
+  checks.push(
+    ["ADMIN", "MAINTAIN", "WRITE"].includes(perm)
+      ? { name: "github-permission", status: "pass", detail: perm.toLowerCase() }
+      : {
+          name: "github-permission",
+          status: "fail",
+          code: "GITHUB_AUTH",
+          detail: `${perm.toLowerCase()} on ${owner}/${repo}: write access needed for branches, comments and PRs`,
+        },
     {
       name: "github-visibility",
       status: isPublic || privateRepoRiskAccepted ? "pass" : "warn",
       detail: isPublic
         ? "public: server-side branch protection available"
-        : `${info.visibility.toLowerCase()}: no server-side branch protection on GitHub Free${privateRepoRiskAccepted ? " (risk accepted)" : "; set github.privateRepoRiskAccepted after PO approval"}`,
+        : `${r.visibility.toLowerCase()}: no server-side branch protection on GitHub Free${privateRepoRiskAccepted ? " (risk accepted)" : "; set github.privateRepoRiskAccepted after PO approval"}`,
     },
     {
       name: "default-branch",
@@ -112,7 +204,8 @@ function githubRepo(config: OmiConfig, cwd: string): Check[] {
           ? branch
           : `default is '${branch}', expected '${config.git.baseBranch}': PRs will not close issues`,
     },
-  ];
+  );
+  return checks;
 }
 
 export function doctor(cwd: string): Check[] {
@@ -147,16 +240,6 @@ export function doctor(cwd: string): Check[] {
     });
   }
 
-  const auth = run("gh", ["auth", "status", "--hostname", "github.com"], cwd);
-  checks.push(
-    auth.ok
-      ? { name: "github-auth", status: "pass", detail: "gh authenticated to github.com" }
-      : {
-          name: "github-auth",
-          status: "fail",
-          detail: "gh not authenticated: run `gh auth login`",
-        },
-  );
-  if (auth.ok && config) checks.push(...githubRepo(config, cwd));
+  checks.push(...github(config));
   return checks;
 }

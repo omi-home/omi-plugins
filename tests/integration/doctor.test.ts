@@ -9,8 +9,12 @@ import { fileURLToPath } from "node:url";
 import type { Check } from "../../runtime/cli/doctor.ts";
 
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
-const omi = (args: string[], cwd: string) =>
-  spawnSync(process.execPath, [join(pluginRoot, "bin", "omi"), ...args], { cwd, encoding: "utf8" });
+const omi = (args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) =>
+  spawnSync(process.execPath, [join(pluginRoot, "bin", "omi"), ...args], {
+    cwd,
+    encoding: "utf8",
+    env,
+  });
 
 function fixture(files: Record<string, string>) {
   const repo = mkdtempSync(join(tmpdir(), "omi-doctor-"));
@@ -22,8 +26,8 @@ function fixture(files: Record<string, string>) {
   return repo;
 }
 
-const doctor = (repo: string) => {
-  const r = omi(["doctor", "--output", "json"], repo);
+const doctor = (repo: string, env?: NodeJS.ProcessEnv) => {
+  const r = omi(["doctor", "--output", "json"], repo, env);
   const checks = JSON.parse(r.stdout).data.checks as Check[];
   return {
     code: r.status,
@@ -68,6 +72,18 @@ test("valid config: public repo with develop default passes GitHub checks when a
   if (d.check("github-auth")?.status !== "pass") return; // no gh session on this machine
   assert.equal(d.check("github-visibility")?.status, "pass");
   assert.equal(d.check("default-branch")?.status, "pass");
+  assert.equal(d.check("github-permission")?.status, "pass");
+  assert.equal(d.check("github-project")?.status, "pass");
+  assert.equal(d.code, 0, d.stdout);
+});
+
+test("network failure reaching GitHub is transient: exit 75, checks kept (CR-001/CR-002)", () => {
+  const repo = fixture({ "AGENTS.md": "x", ".omi/config.yaml": CONFIG });
+  const d = doctor(repo, { ...process.env, HTTPS_PROXY: "http://127.0.0.1:9", GH_TOKEN: "x" });
+  assert.equal(d.check("github-auth")?.status, "fail");
+  assert.equal(d.check("github-auth")?.code, "NETWORK");
+  assert.equal(d.check("config")?.status, "pass");
+  assert.equal(d.code, 75, d.stdout);
 });
 
 const live = spawnSync("claude", ["--version"]).status === 0 && process.env.OMI_LIVE === "1";

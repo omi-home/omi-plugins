@@ -2,7 +2,7 @@
 // Everything leaving the process goes through redact.
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { OmiError } from "../core/errors/errors.ts";
+import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { type Check, doctor } from "./doctor.ts";
 
@@ -70,8 +70,14 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         return ok({ omi: VERSION }, `omi ${VERSION}\n`);
       case "doctor": {
         const checks = doctor(cwd);
-        const failed = checks.some((c) => c.status === "fail");
-        return ok({ checks }, humanChecks(checks), failed ? EXIT.failed : EXIT.ok);
+        const failed = checks.filter((c) => c.status === "fail");
+        // Retrying helps only when every failure is transient (network, rate limit, 5xx).
+        const code = !failed.length
+          ? EXIT.ok
+          : failed.every((c) => c.code && ERROR_CODES[c.code].transient)
+            ? EXIT.transient
+            : EXIT.failed;
+        return ok({ checks }, humanChecks(checks), code);
       }
       case "":
         throw new OmiError("USAGE_INVALID", "missing command (see `omi help`)");
