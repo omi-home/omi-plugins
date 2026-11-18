@@ -3,8 +3,9 @@
 // carried into it. One GraphQL call, read-only.
 import { z } from "zod";
 import type { OmiConfig } from "../../core/config.ts";
-import { type CarriedFinding, type IssueContextEntry, IssueType } from "../../core/contracts.ts";
+import type { CarriedFinding, IssueContextEntry, IssueType } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
+import { labelType } from "../../core/hierarchy.ts";
 import { redact } from "../../reporting/redact.ts";
 import { type GhRunner, graphql, spawnGh } from "./client.ts";
 
@@ -54,10 +55,7 @@ const Response = z.strictObject({
     .nullable(),
 });
 
-const typeOf = (n: Node): IssueType | null => {
-  const types = n.labels.nodes.map((l) => /^type:(.+)$/.exec(l.name)?.[1]).filter(Boolean);
-  return (types.length === 1 && IssueType.safeParse(types[0]).data) || null;
-};
+const typeOf = (n: Node): IssueType | null => labelType(n.labels.nodes) ?? null;
 
 const SEPARATOR = /^\|(\s*:?-+:?\s*\|)+\s*$/;
 const cut = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
@@ -129,9 +127,21 @@ export function fetchIssueContext(
  * Replaces the body of `<!-- omi:section=<name> -->…<!-- /omi:section=<name> -->`, or appends the
  * section when the body has none. Pure; the markers are the only structure it relies on.
  */
+const markers = (name: string): [string, string] => [
+  `<!-- omi:section=${name} -->`,
+  `<!-- /omi:section=${name} -->`,
+];
+
+/** Text of `<!-- omi:section=<name> -->…<!-- /omi:section=<name> -->`; null when absent. */
+export function sectionOf(body: string, name: string): string | null {
+  const [open, close] = markers(name);
+  const start = body.indexOf(open);
+  const end = start < 0 ? -1 : body.indexOf(close, start);
+  return end < 0 ? null : body.slice(start + open.length, end).trim();
+}
+
 export function upsertSection(body: string, name: string, markdown: string): string {
-  const open = `<!-- omi:section=${name} -->`;
-  const close = `<!-- /omi:section=${name} -->`;
+  const [open, close] = markers(name);
   const block = `${open}\n${markdown.trim()}\n${close}`;
   const start = body.indexOf(open);
   const end = start < 0 ? -1 : body.indexOf(close, start);
@@ -145,14 +155,7 @@ const BodyData = z.strictObject({
   }),
 });
 
-/** Writes one agent-proposed section into the Issue body (spec §6); the text is redacted first. */
-export function writeSection(
-  config: OmiConfig,
-  issue: number,
-  section: string,
-  markdown: string,
-  run: GhRunner = spawnGh,
-): void {
+function readBody(config: OmiConfig, issue: number, run: GhRunner) {
   const { owner, repo } = config.github;
   const found = graphql(
     "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){id body}}}",
@@ -162,6 +165,30 @@ export function writeSection(
     run,
   ).repository.issue;
   if (!found) throw new OmiError("TICKET_INVALID", `issue ${owner}/${repo}#${issue} not found`);
+  return found;
+}
+
+/** `omi issue section get`: one section of the Issue body. */
+export function readSection(
+  config: OmiConfig,
+  issue: number,
+  name: string,
+  run: GhRunner = spawnGh,
+): string {
+  const s = sectionOf(readBody(config, issue, run).body, name);
+  if (s === null) throw new OmiError("TICKET_INVALID", `#${issue} has no section ${name}`);
+  return s;
+}
+
+/** Writes one agent-proposed section into the Issue body (spec §6); the text is redacted first. */
+export function writeSection(
+  config: OmiConfig,
+  issue: number,
+  section: string,
+  markdown: string,
+  run: GhRunner = spawnGh,
+): void {
+  const found = readBody(config, issue, run);
   graphql(
     "mutation($id:ID!,$body:String!){updateIssue(input:{id:$id,body:$body}){issue{id}}}",
     { id: found.id, body: upsertSection(found.body, section, redact(markdown)) },

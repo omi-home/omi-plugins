@@ -5,9 +5,16 @@
 // only completes the steps still missing; a wrong parent or a cycle is refused before any write.
 import { z } from "zod";
 import type { OmiConfig } from "../../core/config.ts";
-import { IssueType } from "../../core/contracts.ts";
+import type { IssueType } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
-import { hierarchyChecks, type Link, loadHierarchy, titleType } from "../../core/hierarchy.ts";
+import {
+  hierarchyChecks,
+  type Link,
+  labelType,
+  loadHierarchy,
+  numberedAs,
+  titleType,
+} from "../../core/hierarchy.ts";
 import { redact } from "../../reporting/redact.ts";
 import { type GhRunner, graphql, spawnGh } from "./client.ts";
 import { NATIVE_TYPE } from "./ticket.ts";
@@ -35,10 +42,7 @@ export interface CreateIssueResult {
 }
 
 const labelsOf = z.strictObject({ nodes: z.array(z.strictObject({ name: z.string() })) });
-const typeOf = (labels: z.infer<typeof labelsOf>): IssueType | undefined => {
-  const t = labels.nodes.map((l) => /^type:(.+)$/.exec(l.name)?.[1]).filter(Boolean);
-  return t.length === 1 ? IssueType.safeParse(t[0]).data : undefined;
-};
+const typeOf = (labels: z.infer<typeof labelsOf>) => labelType(labels.nodes);
 const projectItems = z.strictObject({
   nodes: z.array(
     z.strictObject({
@@ -50,10 +54,12 @@ const projectItems = z.strictObject({
   ),
 });
 const PROJECT_ITEMS =
-  "projectItems(first:20){nodes{project{number owner{... on Organization{login} ... on User{login}}}}}";
+  "projectItems(first:20,includeArchived:false){nodes{project{number owner{... on Organization{login} ... on User{login}}}}}";
 const inProject = (items: z.infer<typeof projectItems>, c: OmiConfig) =>
   items.nodes.some(
-    (n) => n.project.number === c.github.projectNumber && n.project.owner.login === c.github.owner,
+    (n) =>
+      n.project.number === c.github.projectNumber &&
+      n.project.owner.login?.toLowerCase() === c.github.owner.toLowerCase(),
   );
 
 // --- repository facts -------------------------------------------------------------------------
@@ -126,9 +132,7 @@ function listIssues(c: OmiConfig, run: GhRunner): Listed[] {
   return out;
 }
 
-/** `<Prefix>-<NNNN>-` of a title, when it is the prefix of `type`. */
-const numbered = (title: string, type: IssueType) =>
-  new RegExp(`^${titleType(type)}-(\\d{4})-`).exec(title);
+const numbered = numberedAs;
 /** The title without its own type prefix, NFC, trimmed: what a re-run compares. */
 const bare = (title: string, type: IssueType) =>
   title
@@ -235,7 +239,7 @@ const highest = (issues: Listed[], type: IssueType, except: number) =>
     0,
     ...issues
       .filter((i) => i.number !== except)
-      .map((i) => Number(numbered(i.title, type)?.[1] ?? 0)),
+      .map((i) => Number(numbered(i.title, type)?.[2] ?? 0)),
   );
 
 export function createIssue(
@@ -335,16 +339,22 @@ export function createIssue(
   }
 
   // Number after creating, then re-read: two creators racing for one number → the later Issue
-  // takes the next one. ponytail: 3 rounds; a lock if creators ever race harder than that.
+  // takes the next one. ponytail: 3 renumbers, then an error; a lock if creators race harder.
   let title = self.title;
-  for (let round = 0; round < 3; round++) {
+  for (let round = 0; ; round++) {
     const m = numbered(title, input.type);
     const clash =
       m &&
       issues.some(
-        (i) => i.number < (number as number) && numbered(i.title, input.type)?.[1] === m[1],
+        (i) => i.number < (number as number) && numbered(i.title, input.type)?.[2] === m[2],
       );
     if (m && !clash) break;
+    if (round === 3) {
+      throw new OmiError(
+        "POLICY_VIOLATION",
+        `#${number}: ${title} is still taken by a lower Issue after 3 renumbers; retry`,
+      );
+    }
     const next = String(highest(issues, input.type, number) + 1).padStart(4, "0");
     title = `${titleType(input.type)}-${next}-${text}`;
     write(SET_TITLE, { id, title }, "set title", run);
@@ -358,34 +368,4 @@ export function createIssue(
     created: changes.includes("create"),
     changes,
   };
-}
-
-// --- one body section -------------------------------------------------------------------------
-
-const BODY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){body}}}`;
-const BodyData = z.strictObject({
-  repository: z.strictObject({ issue: z.strictObject({ body: z.string() }).nullable() }).nullable(),
-});
-
-/** Text between `<!-- omi:section=<name> -->` and its closing marker; null when absent. */
-export function sectionOf(body: string, name: string): string | null {
-  const open = `<!-- omi:section=${name} -->`;
-  const start = body.indexOf(open);
-  const end = start < 0 ? -1 : body.indexOf(`<!-- /omi:section=${name} -->`, start);
-  return end < 0 ? null : body.slice(start + open.length, end).trim();
-}
-
-export function readSection(
-  c: OmiConfig,
-  issue: number,
-  name: string,
-  run: GhRunner = spawnGh,
-): string {
-  const { owner, repo } = c.github;
-  const found = graphql(BODY, { owner, repo, number: issue }, BodyData, "issue body", run)
-    .repository?.issue;
-  if (!found) throw new OmiError("TICKET_INVALID", `issue ${owner}/${repo}#${issue} not found`);
-  const s = sectionOf(found.body, name);
-  if (s === null) throw new OmiError("TICKET_INVALID", `#${issue} has no section ${name}`);
-  return s;
 }

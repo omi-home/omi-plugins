@@ -3,7 +3,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { GhRunner } from "../../runtime/adapters/github/client.ts";
-import { createIssue, readSection, sectionOf } from "../../runtime/adapters/github/issue.ts";
+import { readSection, sectionOf } from "../../runtime/adapters/github/context.ts";
+import { createIssue } from "../../runtime/adapters/github/issue.ts";
 import type { OmiConfig } from "../../runtime/core/config.ts";
 import type { OmiError } from "../../runtime/core/errors/errors.ts";
 
@@ -140,7 +141,7 @@ function fakeGh(
     }
     if (query.includes("issue(number") && query.includes("body")) {
       const i = issues.get(key(`${vars.owner}/${vars.repo}`, Number(vars.number)));
-      return ok({ repository: { issue: i ? { body: i.body ?? "" } : null } });
+      return ok({ repository: { issue: i ? { id: "I", body: i.body ?? "" } : null } });
     }
     throw new Error(`unexpected query ${query.slice(0, 80)}`);
   };
@@ -267,6 +268,16 @@ test("a parent in another repository must be in the Project", () => {
   const r = createIssue(config, input(at(3, "other")), inside.run);
   assert.ok(inside.writes.includes("parent:o/other#3"));
   assert.equal(r.title, "DevTask-0008-Việc mới");
+});
+
+test("numbering that keeps clashing stops with an error instead of a duplicate", () => {
+  const gh = fakeGh(tree(), {
+    onTitle: () => {
+      const mine = gh.issues.get("o/repo#6") as FakeIssue;
+      (gh.issues.get("o/repo#4") as FakeIssue).title = mine.title.replace("Việc mới", "Khác");
+    },
+  });
+  assert.throws(() => createIssue(config, input(), gh.run), /still taken .* after 3 renumbers/);
 });
 
 test("numbering race: the later Issue moves to the next number; pages are all read", () => {

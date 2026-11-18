@@ -40,7 +40,7 @@ import {
   type CleanupResult,
   commentMarker,
   type IssueRef,
-  IssueType,
+  type IssueType,
   parseContract,
   SCHEMA_VERSION,
   StepComment,
@@ -48,7 +48,13 @@ import {
   type WorkflowEventType,
 } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
-import { hierarchyChecks, type Link, loadHierarchy, titleCheck } from "../core/hierarchy.ts";
+import {
+  hierarchyChecks,
+  type Link,
+  labelType,
+  loadHierarchy,
+  titleCheck,
+} from "../core/hierarchy.ts";
 import { PRE_MERGE, PROJECT_STATUS, transition } from "../core/workflow-engine/fsm.ts";
 import { planWorkflow, type WorkflowPlan } from "../core/workflow-engine/plan.ts";
 import {
@@ -117,10 +123,7 @@ export function repo(cwd: string): { root: string; config: OmiConfig } {
   return { root, config: loadConfig(root) };
 }
 
-const typeOf = (t: Ticket) => {
-  const labels = t.labels.nodes.map((l) => /^type:(.+)$/.exec(l.name)?.[1]).filter(Boolean);
-  return labels.length === 1 ? IssueType.safeParse(labels[0]).data : undefined;
-};
+const typeOf = (t: Ticket) => labelType(t.labels.nodes);
 
 /**
  * Parent chain of `t` inside the configured repository, nearest first. Stops at a repeated

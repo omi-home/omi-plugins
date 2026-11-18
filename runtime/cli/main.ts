@@ -3,8 +3,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { writeSection } from "../adapters/github/context.ts";
-import { createIssue, readSection } from "../adapters/github/issue.ts";
+import { readSection, writeSection } from "../adapters/github/context.ts";
+import { createIssue } from "../adapters/github/issue.ts";
 import { IssueType } from "../core/contracts.ts";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
@@ -121,7 +121,7 @@ const sectionArg = (a: string | undefined) => {
 
 /** `59`, `#59` or `owner/repo#59`. */
 const parentArg = (a: string, home: { owner: string; repo: string }) => {
-  const m = /^(?:([\w.-]+)\/([\w.-]+))?#?(\d+)$/.exec(a);
+  const m = /^(?:([\w.-]+)\/([\w.-]+)#|#?)(\d+)$/.exec(a);
   if (!m || Number(m[3]) < 1)
     throw new OmiError("USAGE_INVALID", "--parent expects n or owner/repo#n");
   return { owner: m[1] ?? home.owner, repo: m[2] ?? home.repo, number: Number(m[3]) };
@@ -199,12 +199,9 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
     const issue =
       NESTED.has(command) || command.startsWith("issue section") ? issueArg(rest.shift()) : 0;
     const section = command.startsWith("issue section") ? sectionArg(rest.shift()) : "";
-    const bodyFile = (required: boolean) => {
+    const bodyFile = (): string => {
       const file = values["body-file"];
-      if (!file) {
-        if (required) throw new OmiError("USAGE_INVALID", "--body-file is required");
-        return undefined;
-      }
+      if (!file) throw new OmiError("USAGE_INVALID", "--body-file is required");
       try {
         return readFileSync(resolve(cwd, file), "utf8");
       } catch {
@@ -289,7 +286,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
           );
         }
         if (!values.title) throw new OmiError("USAGE_INVALID", "--title is required");
-        const body = bodyFile(true) ?? "";
+        const body = bodyFile();
         const { config } = repo(cwd);
         const parent =
           values.parent === undefined ? undefined : parentArg(values.parent, config.github);
@@ -315,7 +312,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         );
       }
       case "issue section set": {
-        const text = bodyFile(true) ?? "";
+        const text = bodyFile();
         writeSection(repo(cwd).config, issue, section, text);
         return ok(
           { issue, section },
@@ -324,7 +321,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         );
       }
       case "pr create": {
-        const body = bodyFile(false);
+        const body = values["body-file"] ? bodyFile() : undefined;
         const r = prCreate({ cwd, title: values.title, body }, issue);
         const human = [
           `pr        ${r.pr.url}${r.created ? "" : " (existing)"}`,

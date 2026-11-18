@@ -68,10 +68,22 @@ export const titleType = (t: IssueType): string =>
 
 export const TITLE_PREFIX = /^([A-Za-z]+)-(\d{4})-/;
 
-export function titleCheck(title: string, type: IssueType): Check {
+/** The one valid `type:*` label of an Issue; undefined when missing, several or unknown. */
+export function labelType(labels: { name: string }[]): IssueType | undefined {
+  const t = labels.map((l) => /^type:(.+)$/.exec(l.name)?.[1]).filter(Boolean);
+  return t.length === 1 ? IssueType.safeParse(t[0]).data : undefined;
+}
+
+/** `TITLE_PREFIX` match of `title` when its prefix is `type`'s. */
+export function numberedAs(title: string, type: IssueType): RegExpExecArray | null {
   const m = TITLE_PREFIX.exec(title);
+  return m?.[1] === titleType(type) ? m : null;
+}
+
+export function titleCheck(title: string, type: IssueType): Check {
+  const m = numberedAs(title, type);
   const want = titleType(type);
-  if (m?.[1] === want) return { name: "title", status: "pass", detail: `${want}-${m[2]}` };
+  if (m) return { name: "title", status: "pass", detail: `${want}-${m[2]}` };
   return fail("title", `title must start with ${want}-<NNNN>- (label type:${type})`);
 }
 
