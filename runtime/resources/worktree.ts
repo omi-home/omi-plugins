@@ -244,6 +244,11 @@ export function ensureTaskWorkspace(
     git(["switch", "--quiet", "--no-track", "-c", branch, baseSha], path);
     git(["remote", "set-url", "origin", origin], path);
     git(["update-ref", `refs/remotes/origin/${base}`, baseSha], path);
+    // A clone (unlike a worktree) does not share the repo's local config: commit as the repo does.
+    for (const key of ["user.name", "user.email"]) {
+      const value = tryGit(["config", "--get", key], repoRoot);
+      if (value) git(["config", key, value], path);
+    }
     const marker: OwnerMarker = {
       schemaVersion: SCHEMA_VERSION,
       repository,
