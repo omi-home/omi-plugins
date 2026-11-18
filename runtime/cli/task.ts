@@ -561,7 +561,10 @@ function cleanupComment(run: RunRow, round: number, receipt: MergeReceipt, r: Cl
  * Done is never shown for unverified cleanup; rerunning resumes where it stopped. `dryRun` only
  * reports what cleanup would do.
  */
-export function taskFinalize(deps: TaskDeps & { dryRun?: boolean }, issue: number): FinalizeResult {
+export function taskFinalize(
+  deps: TaskDeps & { dryRun?: boolean; sleep?: (ms: number) => void },
+  issue: number,
+): FinalizeResult {
   const gh = deps.gh ?? spawnGh;
   const { root, config } = repo(deps.cwd);
   const file = statePath(deps.cwd);
@@ -589,7 +592,12 @@ export function taskFinalize(deps: TaskDeps & { dryRun?: boolean }, issue: numbe
       if (!receipt || receipt.baseRef !== base) {
         throw new OmiError("POLICY_VIOLATION", `${branch} has no PR merged into ${base}`);
       }
-      if (!markedPrimaries(facts.pr?.body ?? "").includes(primary)) {
+      const marked = markedPrimaries(facts.pr?.body ?? "");
+      // PRs opened before `omi pr create` carry no marker: GitHub's closing link is the proof.
+      const named = marked.length
+        ? marked.includes(primary)
+        : closingIssues(facts.pr?.id ?? "", { run: gh, sleep: deps.sleep }).join() === primary;
+      if (!named) {
         throw new OmiError(
           "POLICY_VIOLATION",
           `merged PR #${receipt.number} does not name ${primary}`,

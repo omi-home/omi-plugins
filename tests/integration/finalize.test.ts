@@ -49,6 +49,8 @@ interface Fake {
   comments: { id: number; body: string }[];
   failComments?: number;
   failStatus?: number;
+  /** Legacy PR: no omi:pr-primary marker, only GitHub's closing link to these issues. */
+  closing?: string[];
 }
 
 function fakeGh(f: Fake): GhRunner {
@@ -94,7 +96,7 @@ function fakeGh(f: Fake): GhRunner {
         baseRefName: "develop",
         headRefName: f.branch,
         headRefOid: f.tip,
-        body: prBody("o/repo", 5),
+        body: f.closing ? "Closes #5" : prBody("o/repo", 5),
         mergeCommit: { oid: "c".repeat(40) },
         labels: { nodes: [] },
         commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
@@ -110,6 +112,13 @@ function fakeGh(f: Fake): GhRunner {
           pullRequests: { nodes: f.merged && vars.head === f.branch ? [pr] : [] },
         },
       });
+    }
+    if (query.includes("closingIssuesReferences")) {
+      const nodes = (f.closing ?? []).map((r) => {
+        const [nameWithOwner, num] = r.split("#");
+        return { number: Number(num), repository: { nameWithOwner } };
+      });
+      return ok({ node: { closingIssuesReferences: { nodes } } });
     }
     if (query.includes("updateProjectV2ItemFieldValue")) {
       if (f.failStatus && f.failStatus-- > 0) return down;
@@ -252,6 +261,18 @@ test("PR not merged: refused before any change", () => {
   assert.throws(() => taskFinalize({ cwd: s.repo, gh: s.gh }, 5), { code: "POLICY_VIOLATION" });
   assert.equal(state(s.repo), "WORKSPACE_READY");
   assert.equal(existsSync(s.wt), true);
+});
+
+test("legacy PR without marker: GitHub closing link to the task is accepted, any other is refused", () => {
+  const s = merged();
+  s.f.closing = ["o/repo#6"];
+  const noSleep = { sleep: () => {} };
+  assert.throws(() => taskFinalize({ cwd: s.repo, gh: s.gh, ...noSleep }, 5), {
+    code: "POLICY_VIOLATION",
+  });
+  assert.equal(state(s.repo), "WORKSPACE_READY");
+  s.f.closing = ["o/repo#5"];
+  assert.equal(taskFinalize({ cwd: s.repo, gh: s.gh, ...noSleep }, 5).run.state, "COMPLETED");
 });
 
 test("report not posted: run stays CLEANUP_PENDING, no Done; rerun posts one comment and finishes", () => {
