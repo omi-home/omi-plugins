@@ -148,7 +148,8 @@ function ancestors(config: OmiConfig, t: Ticket, gh: GhRunner, maxDepth: number)
 /**
  * Definition of Ready (#128): Objective section, title ↔ `type:*`, required sections of the type's Issue Form (#130), hierarchy. Checked when work
  * starts (`task start`, `ticket validate`), not again at PR time: a run already under way keeps
- * the rules it started with. Also returns the parent's type, read with the chain (branch prefix).
+ * the rules it started with. Also returns the type of the nearest non-task ancestor, read with
+ * the chain, for the branch prefix.
  */
 function readyGates(
   t: Ticket,
@@ -172,7 +173,8 @@ function readyGates(
   let parent: IssueType | undefined;
   try {
     const chain = ancestors(config, t, gh, h.maxDepth);
-    parent = chain[0]?.type;
+    // A task split under a task keeps its owner's prefix: the nearest ancestor that is not a task.
+    parent = chain.find((l) => !l.type || !EXECUTABLE.includes(l.type))?.type;
     checks.push(...hierarchyChecks({ number: t.number, type }, chain, h));
   } catch (e) {
     const err = e instanceof OmiError ? e : new OmiError("INTERNAL", (e as Error).message);

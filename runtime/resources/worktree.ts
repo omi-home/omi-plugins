@@ -56,17 +56,19 @@ const PREFIX: Partial<Record<IssueType, string>> = {
   "test-task": "test",
   "devops-task": "chore",
 };
+/** Prefix taken from the owning ancestor: tasks that fix a Bug (PO 2026-11-18, #132). */
+const PARENT_PREFIX: Partial<Record<IssueType, string>> = { bug: "bugfix" };
 
 /**
  * `<prefix>/<issue>-<slug>` (spec §7); slug is ASCII, at most 40 chars, without the title's
- * `<IssueType>-<NNNN>-` prefix (already in the issue number). A task under a Bug is the Bug
- * Resolution workflow: `bugfix/` (PO 2026-11-18, #132).
+ * `<IssueType>-<NNNN>-` prefix (already in the issue number). `owner` is the nearest non-task
+ * ancestor's type; it only changes the prefix (PARENT_PREFIX), not the run's workflow.
  */
 export function branchName(
   type: IssueType,
   issue: number,
   title: string,
-  parent?: IssueType,
+  owner?: IssueType,
 ): string {
   const slug = title
     .replace(new RegExp(`^${titleType(type)}-\\d{4}-`), "")
@@ -77,7 +79,7 @@ export function branchName(
     .replace(/[^a-z0-9]+/g, "-")
     .slice(0, 40)
     .replace(/^-+|-+$/g, "");
-  const prefix = parent === "bug" ? "bugfix" : (PREFIX[type] ?? "feature");
+  const prefix = (owner && PARENT_PREFIX[owner]) ?? PREFIX[type] ?? "feature";
   return `${prefix}/${issue}${slug ? `-${slug}` : ""}`;
 }
 

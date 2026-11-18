@@ -356,6 +356,8 @@ test("Definition of Ready: real parent chain checked, wrong pair / title / Objec
     8: typed("dev-task", "DevTask-0008-No objective", 3),
     9: typed("bug", "Bug-0009-B", 3),
     10: typed("dev-task", "DevTask-0010-Sửa B", 9), // fixes Bug #9
+    11: typed("test-task", "TestTask-0011-Repro B", 12), // split under the fix of Bug #9
+    12: typed("dev-task", "DevTask-0012-Sửa B lớn", 9),
   });
   const status = (n: number, name: string) =>
     ticketValidate({ cwd: root, gh: gh.run }, n).find((c) => c.name === name)?.status;
@@ -372,4 +374,5 @@ test("Definition of Ready: real parent chain checked, wrong pair / title / Objec
   // Branch prefix from the parent read with the chain (#132): Bug → bugfix/, Feature → feature/.
   assert.equal(taskStart({ cwd: root, gh: gh.run }, 10).workspace.branch, "bugfix/10-sua-b");
   assert.equal(taskStart({ cwd: root, gh: gh.run }, 5).workspace.branch, "feature/5-t");
+  assert.equal(taskStart({ cwd: root, gh: gh.run }, 11).workspace.branch, "bugfix/11-repro-b");
 });
