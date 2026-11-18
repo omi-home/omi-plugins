@@ -83,7 +83,8 @@ test("network failure reaching GitHub is transient: exit 75, checks kept (CR-001
   assert.equal(d.check("github-auth")?.status, "fail");
   assert.equal(d.check("github-auth")?.code, "NETWORK");
   assert.equal(d.check("config")?.status, "pass");
-  assert.equal(d.code, 75, d.stdout);
+  // Transient only when nothing else failed: a machine without claude (CI) is a plain failure.
+  assert.equal(d.code, d.check("claude")?.status === "pass" ? 75 : 1, d.stdout);
 });
 
 const live = spawnSync("claude", ["--version"]).status === 0 && process.env.OMI_LIVE === "1";

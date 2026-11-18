@@ -234,7 +234,8 @@ test("lease: exclusive until expiry, renewable by its holder", () => {
 });
 
 test("statePath: every worktree of a repo shares one database inside .git", () => {
-  const main = realpathSync(mkdtempSync(join(tmpdir(), "omi-sp-")));
+  // .native expands Windows 8.3 names (RUNNER~1) the way git reports the path.
+  const main = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-sp-")));
   const git = (...a: string[]) => execFileSync("git", a, { cwd: main, stdio: "pipe" });
   git("init", "-q");
   git(
