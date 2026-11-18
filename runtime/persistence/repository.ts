@@ -173,6 +173,13 @@ export function advanceRun(
     db.prepare(
       "INSERT INTO transition (run_id, from_state, to_state, event, at) VALUES (?, ?, ?, ?, ?)",
     ).run(runId, ctx.state, next.state, event.type, now);
+    if (event.type === "UNBLOCK") {
+      // The person cleared what an agent reported as BLOCKED: that step runs again (new
+      // attempt) instead of replaying its report (G6-003, #123). Verdicts still replay.
+      db.prepare(
+        "UPDATE step_run SET state = 'PENDING', updated_at = ? WHERE run_id = ? AND state = 'REPORT_POSTED' AND json_extract(result, '$.status') = 'BLOCKED'",
+      ).run(now, runId);
+    }
     if (verdict && ctx.state === "RUNNING") {
       // A QA rework re-reviews within its round (#56): the round keeps its latest verdict.
       db.prepare(

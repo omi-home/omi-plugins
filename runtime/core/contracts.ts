@@ -376,6 +376,7 @@ export const ReportCategory = z.enum([
   "qa",
   "checks",
   "cleanup",
+  "unblock",
 ]);
 export type ReportCategory = z.infer<typeof ReportCategory>;
 

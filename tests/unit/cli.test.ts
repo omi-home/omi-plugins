@@ -42,6 +42,9 @@ Commands:
   task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
                          write their sections into the Issue body, then Waiting PO. No worktree.
                          Runs agents: spends tokens. --from-source as for task run
+  task unblock <n>       Clear a BLOCKED run of Issue #n (a person decided): resume it through the FSM,
+                         post one report (who, --reason <text>); the next \`task run\` re-runs the step
+                         that reported BLOCKED
   task finalize <n>      After Issue #n's PR is merged: verify the merge receipt, clean the owned
                          worktree, branch and temp dirs safely (no --force), post one cleanup report,
                          then Done + parent roll-up. --dry-run shows the cleanup plan only

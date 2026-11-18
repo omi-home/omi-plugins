@@ -16,9 +16,14 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import type { Ticket } from "../../runtime/adapters/github/ticket.ts";
-import { taskStart, taskStatus, ticketValidate } from "../../runtime/cli/task.ts";
+import { taskStart, taskStatus, taskUnblock, ticketValidate } from "../../runtime/cli/task.ts";
 import { openState, statePath } from "../../runtime/persistence/db.ts";
-import { acquireLease, getRun, transitionRun } from "../../runtime/persistence/repository.ts";
+import {
+  acquireLease,
+  advanceRun,
+  getRun,
+  transitionRun,
+} from "../../runtime/persistence/repository.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -276,4 +281,56 @@ test("new run after a finished one adopts the preserved branch and worktree (#28
   const check = openState(statePath(root));
   assert.equal(getRun(check, first.run.id)?.state, "FAILED");
   check.close();
+});
+
+test("unblock: only a BLOCKED run; FSM resumes it, one report names who and why (#123)", () => {
+  const { root } = repo();
+  const issues = tree();
+  const gh = fakeGh(issues);
+  const posted: string[] = [];
+  const run: GhRunner = (args, input) => {
+    if ((args[3] ?? "").includes("viewer{login}")) {
+      return {
+        status: 0,
+        stdout: JSON.stringify({ data: { viewer: { login: "po" } } }),
+        stderr: "",
+      };
+    }
+    if (args.includes("--paginate")) return { status: 0, stdout: "[[]]", stderr: "" };
+    if (args.includes("POST")) {
+      posted.push(JSON.parse(input ?? "{}").body);
+      return {
+        status: 0,
+        stdout: JSON.stringify({ id: posted.length, html_url: "u", body: posted.at(-1) }),
+        stderr: "",
+      };
+    }
+    return gh.run(args, input);
+  };
+  const started = taskStart({ cwd: root, gh: run }, 5);
+  assert.equal(
+    code(() => taskUnblock({ cwd: root, gh: run }, 5)),
+    "INVALID_TRANSITION",
+  );
+  assert.equal(taskStatus({ cwd: root }, 5).run?.state, "WORKSPACE_READY");
+  assert.equal(posted.length, 0);
+
+  const db = openState(statePath(root));
+  advanceRun(db, started.run.id, { type: "BLOCK" });
+  db.close();
+  (issues[5] as FakeIssue).status = "Blocked";
+  const token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+  const r = taskUnblock({ cwd: root, gh: run, reason: `PO decided; ${token}` }, 5);
+  assert.equal(r.state, "WORKSPACE_READY");
+  assert.equal(r.by, "po");
+  assert.deepEqual(r.status, { issue: "o/repo#5", from: "Blocked", to: "In Progress" });
+  assert.equal(posted.length, 1);
+  assert.match(posted[0] as string, /step=unblock;round=1;attempt=1/);
+  assert.match(posted[0] as string, /Unblocked by GitHub user po; resumes in WORKSPACE_READY/);
+  assert.match(posted[0] as string, /PO decided/);
+  assert.ok(!(posted[0] as string).includes(token));
+  assert.equal(
+    code(() => taskUnblock({ cwd: root, gh: run }, 5)),
+    "INVALID_TRANSITION",
+  );
 });

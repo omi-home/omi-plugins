@@ -622,6 +622,23 @@ test("Manual QA BLOCKED stops for a person", () => {
   assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
 });
 
+test("agent BLOCKED → unblock → run: that step runs again, PASSED steps replay (#123)", () => {
+  const s = setup({ qa: ["BLOCKED", "PASSED"] }, delivery({ manualQa: true }));
+  assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
+  assert.equal(repo.runContext(s.db, "run").resumeFrom, "IN_QA");
+  repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const qa = s.agents.packets.filter((p) => p.role === "manual-qa-engineer");
+  assert.deepEqual(
+    qa.map((p) => [p.stepId, p.attempt]),
+    [
+      ["qa", 1],
+      ["qa", 2],
+    ],
+  );
+  assert.equal(roles(s.agents.calls).filter((r) => r === "code-reviewer").length, 1);
+});
+
 test("Manual QA technical failure: unblocked run resumes in QA and still gets checks (#121)", () => {
   const s = setup({ qa: ["INVALID", "PASSED"] }, delivery({ manualQa: true }));
   assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");

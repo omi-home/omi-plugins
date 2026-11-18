@@ -6,7 +6,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type GhRunner, spawnGh } from "../adapters/github/client.ts";
+import { z } from "zod";
+import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import { writeSection } from "../adapters/github/context.ts";
 import {
   type MergeReceipt,
@@ -227,6 +228,86 @@ export function taskStatus(deps: TaskDeps, issue: number): TaskStatus {
       branch: ownedRefs(db, run.id, "branch")[0] ?? null,
       transitions: transitions(db, run.id),
     };
+  } finally {
+    db.close();
+  }
+}
+
+export interface UnblockResult {
+  run: RunRow;
+  state: WorkflowContext["state"];
+  by: string;
+  status: StatusChange | null;
+}
+
+/**
+ * `omi task unblock <n> [--reason]` (G6-003, #123): a person clears a BLOCKED run through the
+ * FSM (UNBLOCK → its resume point); the step an agent reported BLOCKED runs again on the next
+ * `omi task run`. One report comment names who unblocked it and why. No agent is run.
+ */
+export function taskUnblock(deps: TaskDeps & { reason?: string }, issue: number): UnblockResult {
+  const gh = deps.gh ?? spawnGh;
+  const { config } = repo(deps.cwd);
+  const db = openState(statePath(deps.cwd));
+  const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
+  const lease = `task:${ref.repository}#${issue}`;
+  const session = deps.session ?? randomUUID();
+  try {
+    acquireLease(db, { key: lease, holder: session, ttlMs: START_LEASE_MS });
+    try {
+      const found = liveRun(db, ref);
+      if (found?.state !== "BLOCKED") {
+        throw new OmiError(
+          "INVALID_TRANSITION",
+          `#${issue} is ${found?.state ?? "not running"}: only a BLOCKED run can be unblocked`,
+        );
+      }
+      const by = graphql(
+        "{viewer{login}}",
+        {},
+        z.strictObject({ viewer: z.strictObject({ login: z.string() }) }),
+        "github-auth",
+        gh,
+      ).viewer.login;
+      const { run, context } = advanceRun(db, found.id, { type: "UNBLOCK" });
+      const n = transitions(db, run.id).filter((t) => t.event === "UNBLOCK").length;
+      const body = renderStepReport(
+        parseContract(
+          StepComment,
+          {
+            schemaVersion: SCHEMA_VERSION,
+            issue: ref,
+            workflowRunId: run.id,
+            category: "unblock",
+            workflow: run.workflow,
+            stepId: "unblock",
+            stepTitle: "Gỡ block",
+            round: Math.min(Math.max(context.round, 1), 4),
+            attempt: n, // one comment per unblock
+            executor: "omi-cli",
+            requestedModel: null,
+            actualModel: null,
+            requestedEffort: null,
+            actualEffort: null,
+            status: "PASSED",
+            summary: [
+              `Unblocked by GitHub user ${by}; resumes in ${context.state}.`,
+              `Reason: ${deps.reason?.trim() || "(none given)"}`,
+            ].join("\n"),
+            nextAction: `\`omi task run ${issue}\` re-runs the step that reported BLOCKED.`,
+            executionId: `${run.id}-unblock-${n}`,
+            createdAt: new Date().toISOString(),
+          },
+          "unblock comment",
+        ),
+      );
+      upsertReport(db, { runId: run.id, marker: body.split("\n")[0] as string, body });
+      publishPending(db, run.id, { gh }); // a failure leaves it pending: `task run` posts it
+      const status = setStatus(config, issue, PROJECT_STATUS[context.state], gh);
+      return { run, state: context.state, by, status };
+    } finally {
+      releaseLease(db, { key: lease, holder: session });
+    }
   } finally {
     db.close();
   }

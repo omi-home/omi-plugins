@@ -16,6 +16,7 @@ import {
   taskRun,
   taskStart,
   taskStatus,
+  taskUnblock,
   ticketValidate,
 } from "./task.ts";
 
@@ -51,6 +52,9 @@ Commands:
   task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
                          write their sections into the Issue body, then Waiting PO. No worktree.
                          Runs agents: spends tokens. --from-source as for task run
+  task unblock <n>       Clear a BLOCKED run of Issue #n (a person decided): resume it through the FSM,
+                         post one report (who, --reason <text>); the next \`task run\` re-runs the step
+                         that reported BLOCKED
   task finalize <n>      After Issue #n's PR is merged: verify the merge receipt, clean the owned
                          worktree, branch and temp dirs safely (no --force), post one cleanup report,
                          then Done + parent roll-up. --dry-run shows the cleanup plan only
@@ -106,6 +110,7 @@ const NESTED = new Set([
   "task run",
   "task analyze",
   "task finalize",
+  "task unblock",
   "pr create",
   "pr validate",
   "pr merge",
@@ -216,6 +221,16 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         ];
         return ok(r, lines(human));
       }
+      case "task unblock": {
+        const r = taskUnblock({ cwd, reason: values.reason }, issue);
+        const human = [
+          `run       ${r.run.id} (${r.state}, unblocked by ${r.by})`,
+          ...(r.status
+            ? [`status    ${r.status.issue}: ${r.status.from ?? "unset"} → ${r.status.to}`]
+            : []),
+        ];
+        return ok(r, lines(human));
+      }
       case "pr create": {
         const file = values["body-file"];
         let body: string | undefined;
@@ -302,5 +317,6 @@ const parse = (args: string[]) =>
       "body-file": { type: "string" },
       "dry-run": { type: "boolean" },
       safe: { type: "boolean" },
+      reason: { type: "string" },
     },
   });
