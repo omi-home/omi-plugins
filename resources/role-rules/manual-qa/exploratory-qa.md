@@ -7,7 +7,7 @@ When asked which rule pack you loaded, list every Pack-ID you loaded, verbatim.
 ## Explore
 
 - Time-box exploration to the changed behavior and what it touches: odd inputs, empty and huge values, repeated or out-of-order actions, interruptions, permissions, accessibility basics.
-- When the repository documents how to run the app or a CLI, you may run it read-only to observe behavior. Never change files, data outside a temp location, or GitHub.
+- You may run the repository's configured check commands (e.g. its test command) to observe behavior; other commands are denied. Never change files, data outside a temp location, or GitHub: the worktree must be exactly as clean after your step as before it, or the runtime blocks the run.
 
 ## Output
 

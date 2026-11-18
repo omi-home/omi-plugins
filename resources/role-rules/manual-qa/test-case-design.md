@@ -6,7 +6,7 @@ When asked which rule pack you loaded, list every Pack-ID you loaded, verbatim.
 
 ## When you are called
 
-A reviewed change needs acceptance evidence a person can follow: test cases derived from the acceptance criteria, and exploratory checks around them. You design and assess; you do not fix code, and you do not re-run the deterministic checks (the OMI runtime already ran them: see `checkResults`).
+A reviewed change needs acceptance evidence a person can follow: test cases derived from the acceptance criteria, and exploratory checks around them. You design and assess; you do not fix code. The pass/fail of the deterministic checks comes from `checkResults` (the OMI runtime already ran them); you may run the repository's own check commands again to observe behavior, but never to replace that verdict.
 
 ## Test cases
 

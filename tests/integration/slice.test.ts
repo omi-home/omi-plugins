@@ -34,6 +34,8 @@ interface Script {
   analysisBlocks?: string;
   /** Manual QA verdicts, one per QA run (default PASSED); INVALID cites an absolute path. */
   qa?: (Verdict | "INVALID")[];
+  /** Manual QA leaves a stray file in the worktree (#124). */
+  qaDirties?: boolean;
   /** Engineer leaves an uncommitted file after its first step (release validation). */
   leavesDirt?: boolean;
 }
@@ -96,9 +98,11 @@ function fakeGitHub() {
 function stubAgents(script: Script) {
   const calls: string[] = [];
   const packets: TaskPacket[] = [];
+  const launches: AgentLaunch[] = [];
   const runAgent = (l: AgentLaunch): string => {
     const packet: TaskPacket = JSON.parse(l.stdin.split("\n\n")[1] as string);
     packets.push(packet);
+    launches.push(l);
     const role = packet.role;
     calls.push(`${role}:${packet.round}`);
     const base = {
@@ -129,6 +133,7 @@ function stubAgents(script: Script) {
       };
     } else if (role === "manual-qa-engineer") {
       const q = script.qa?.shift() ?? "PASSED";
+      if (script.qaDirties) writeFileSync(join(packet.worktree, "qa-scratch.txt"), "x");
       const v = q === "INVALID" ? "PASSED" : q;
       result = {
         ...base,
@@ -233,7 +238,7 @@ function stubAgents(script: Script) {
       }),
     ].join("\n");
   };
-  return { calls, packets, runAgent };
+  return { calls, packets, launches, runAgent };
 }
 
 function setup(script: Script = {}, plan?: WorkflowPlan) {
@@ -627,4 +632,23 @@ test("Manual QA technical failure: unblocked run resumes in QA and still gets ch
   const qa = s.agents.packets.filter((p) => p.role === "manual-qa-engineer");
   assert.equal(qa.length, 2);
   assert.equal(qa[1]?.checkResults?.find((c) => c.name === "test")?.outcome, "pass");
+});
+
+test("Manual QA may run the repo's check commands; reviewers may not (PO #124)", () => {
+  const s = setup({}, delivery({ manualQa: true }));
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const check = `Bash(${s.deps.config.checks.test?.run})`;
+  const args = (role: string) =>
+    s.agents.launches.find((l) => l.stdin.includes(`"role": "${role}"`))?.args ?? [];
+  assert.ok(args("manual-qa-engineer").includes(check));
+  assert.ok(!args("manual-qa-engineer").includes("Bash(git commit*)"));
+  assert.ok(!args("code-reviewer").includes(check));
+});
+
+test("Manual QA that leaves the worktree dirty blocks the run, with the reason kept (#124)", () => {
+  const s = setup({ qaDirties: true }, delivery({ manualQa: true }));
+  assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
+  const err = lastStepError(s.deps.evidenceDir);
+  assert.equal(err?.code, "POLICY_VIOLATION");
+  assert.match(err?.message ?? "", /qa-scratch\.txt/);
 });

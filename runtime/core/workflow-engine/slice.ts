@@ -95,6 +95,8 @@ interface StepSpec {
   category: ReportCategory;
   title: string;
   edits: boolean;
+  /** May run the repo's configured check commands without editing (Manual QA, PO #124). */
+  runsChecks?: boolean;
 }
 
 const DEV_BASE: StepSpec = {
@@ -131,6 +133,7 @@ const QA: StepSpec = {
   category: "qa",
   title: "Acceptance QA",
   edits: false,
+  runsChecks: true,
 };
 const DEFAULT_PLAN: DeliveryPlan = {
   kind: "delivery",
@@ -166,8 +169,8 @@ export const spawnAgent = (l: AgentLaunch): string => {
 /** Read-only git for everyone; implementers may also commit and run the repo's own checks. */
 function tools(config: OmiConfig, spec: StepSpec): string[] {
   const read = ["Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)"];
-  if (!spec.edits) return read;
   const checks = Object.values(config.checks).flatMap((c) => (c ? [`Bash(${c.run})`] : []));
+  if (!spec.edits) return spec.runsChecks ? [...read, ...checks] : read;
   return [...read, "Bash(git add*)", "Bash(git commit*)", ...checks];
 }
 
@@ -565,6 +568,22 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
         if (plan.manualQa) {
           const qa = agentStep(d, t, QA, ctx, findings, checks);
           if (!qa) return refresh();
+          // QA may run check commands: the clean worktree release validation saw must stay clean.
+          const dirty = git(["status", "--porcelain", "--untracked-files=all"], t.worktree);
+          if (dirty) {
+            const file = join(
+              d.evidenceDir,
+              `${QA.stepId}${qaSuffix(ctx)}-r${ctx.round}${ERROR_SUFFIX}`,
+            );
+            const message = `Manual QA left the worktree dirty:
+${dirty}`;
+            writeFileSync(
+              file,
+              JSON.stringify(redactDeep({ code: "POLICY_VIOLATION", message }), null, 2),
+            );
+            advance({ type: "BLOCK" });
+            return ctx;
+          }
           for (const u of qa.sectionUpdates) d.writeSection?.(u.section, u.markdown);
           if (qa.status !== "PASSED" && qa.status !== "FAILED") {
             advance({ type: "BLOCK" });
