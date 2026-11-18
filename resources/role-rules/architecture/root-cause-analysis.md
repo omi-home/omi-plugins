@@ -2,7 +2,7 @@
 
 Pack-ID: omi-architecture-rules/v1
 
-When asked which rule pack you loaded, answer with the Pack-ID above verbatim.
+When asked which rule pack you loaded, list every Pack-ID you loaded, verbatim.
 
 ## When you are called
 

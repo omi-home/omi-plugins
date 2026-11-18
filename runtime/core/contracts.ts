@@ -24,6 +24,21 @@ export const Role = z.enum([
 ]);
 export type Role = z.infer<typeof Role>;
 
+/** Roles whose agent cannot edit (agents/*.md disallow Edit/Write): no files, no commit. */
+export const READ_ONLY_ROLES: readonly Role[] = [
+  "business-analyst",
+  "ui-ux-designer",
+  "solution-architect",
+  "code-reviewer",
+];
+
+/** Issue body sections (`<!-- omi:section=… -->`) only their owner role may propose. */
+export const ROLE_SECTION: Partial<Record<Role, string>> = {
+  "business-analyst": "analysis",
+  "ui-ux-designer": "design",
+  "solution-architect": "architecture",
+};
+
 /** Who executed a step: a specialist, the main session, or the deterministic CLI. */
 export const Executor = z.union([Role, z.enum(["coordinator", "omi-cli"])]);
 export type Executor = z.infer<typeof Executor>;

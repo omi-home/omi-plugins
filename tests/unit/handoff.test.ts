@@ -149,6 +149,31 @@ test("acceptStepResult: fake paths, foreign commit, out-of-scope file rejected",
   );
 });
 
+test("acceptStepResult: read-only roles change no files; owned sections only by their owner", () => {
+  const { dir, base } = repo();
+  writeFileSync(join(dir, "a.txt"), "changed by the engineer earlier");
+  const ba = buildTaskPacket({ ...input(dir, base), role: "business-analyst", scope: [] });
+  const code = (extra: Record<string, unknown>) =>
+    codeOf(() => acceptStepResult(ba, result({ role: "business-analyst", ...extra })));
+  const analysis = { section: "analysis", markdown: "### Goal\nx" };
+  assert.equal(
+    acceptStepResult(ba, result({ role: "business-analyst", sectionUpdates: [analysis] }))
+      .sectionUpdates[0]?.section,
+    "analysis",
+  );
+  assert.equal(code({ changedFiles: ["a.txt"] }), "CONTRACT_INVALID"); // really changed, still refused
+  assert.equal(code({ commitSha: base }), "CONTRACT_INVALID");
+  assert.equal(
+    code({ sectionUpdates: [{ section: "architecture", markdown: "x" }] }),
+    "CONTRACT_INVALID",
+  );
+  const be = buildTaskPacket({ ...input(dir, base), scope: [] });
+  assert.equal(
+    codeOf(() => acceptStepResult(be, result({ sectionUpdates: [analysis] }))),
+    "CONTRACT_INVALID",
+  );
+});
+
 test("acceptStepResult: invalid status, wrong identity, junk and oversized output rejected", () => {
   const { dir, base } = repo();
   const p = buildTaskPacket(input(dir, base));

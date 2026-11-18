@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { z } from "zod";
 import {
   parseContract,
+  READ_ONLY_ROLES,
+  ROLE_SECTION,
   SCHEMA_VERSION,
   STEP_RESULT_SCHEMA,
   StepResult,
@@ -119,8 +121,19 @@ export function acceptStepResult(packet: TaskPacket, raw: string): StepResult {
     );
   }
 
-  const changed = changedSince(packet.worktree, packet.baseSha);
   const issues: { path: string; message: string }[] = [];
+  if (READ_ONLY_ROLES.includes(r.role)) {
+    for (const f of r.changedFiles)
+      issues.push({ path: f, message: `${r.role} cannot change files` });
+    if (r.commitSha) issues.push({ path: "commitSha", message: `${r.role} cannot commit` });
+  }
+  for (const u of r.sectionUpdates) {
+    const owner = Object.entries(ROLE_SECTION).find(([, s]) => s === u.section)?.[0];
+    if (owner && owner !== r.role) {
+      issues.push({ path: `section:${u.section}`, message: `owned by ${owner}, not ${r.role}` });
+    }
+  }
+  const changed = changedSince(packet.worktree, packet.baseSha);
   for (const f of r.changedFiles) {
     if (!changed.has(norm(f))) issues.push({ path: f, message: "not changed in the worktree" });
     else if (packet.scope.length && !packet.scope.some((s) => inScope(norm(f), norm(s)))) {
