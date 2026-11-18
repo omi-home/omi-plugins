@@ -114,9 +114,11 @@ export type RollUp = { ready: true } | { ready: false; reason: string };
  * Whether a parent may roll up (close / move on): every child closed AND accepted — Status Done or
  * Cancelled in the Project; a child outside the Project is judged by its close reason — and at
  * least one child really done (all cancelled: a person decides). Children GitHub did not return
- * (`total` above the page) are unverified, so no roll-up. Never closes anything itself.
+ * (`total` above the page) are unverified, so no roll-up. The parent's own scope counts too: an
+ * unticked box under its `## Scope / Acceptance` means work not split into tasks yet (Bug-0001
+ * #162). Never closes anything itself.
  */
-export function rollUp(children: Child[], total: number): RollUp {
+export function rollUp(children: Child[], total: number, body = ""): RollUp {
   const no = (reason: string): RollUp => ({ ready: false, reason });
   if (children.length < total) return no(`${total - children.length} child(ren) not verified`);
   if (!children.length) return no("no children");
@@ -134,5 +136,13 @@ export function rollUp(children: Child[], total: number): RollUp {
     );
   }
   if (!children.some(done)) return no("every child is cancelled: a person decides");
+  const unticked = uncheckedScope(body);
+  if (unticked) return no(`scope not done: ${unticked} unchecked box(es) under Scope / Acceptance`);
   return { ready: true };
+}
+
+/** Unticked `- [ ]` boxes in the `## Scope / Acceptance` section (up to the next `## `). */
+export function uncheckedScope(body: string): number {
+  const section = /^## Scope \/ Acceptance.*$([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body)?.[1];
+  return section?.match(/^\s*[-*] \[ \]/gm)?.length ?? 0;
 }

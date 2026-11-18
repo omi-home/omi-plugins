@@ -53,6 +53,8 @@ interface Fake {
   reason?: Record<number, string>;
   /** Legacy PR: no omi:pr-primary marker, only GitHub's closing link to these issues. */
   closing?: string[];
+  /** Issue body by number (parent scope, Bug-0001 #162). */
+  bodies?: Record<number, string>;
 }
 
 function fakeGh(f: Fake): GhRunner {
@@ -145,6 +147,7 @@ function fakeGh(f: Fake): GhRunner {
           issue: {
             id: `ISSUE_${n}`,
             state: f.open.has(n) ? "OPEN" : "CLOSED",
+            body: f.bodies?.[n] ?? "",
             labels: { nodes: (f.labels[n] ?? []).map((name) => ({ name })) },
             subIssuesSummary: {
               total: kids.length,
@@ -304,6 +307,16 @@ test("closed but unaccepted sibling holds the Feature open; a cancelled one does
   taskFinalize({ cwd: cancelled.repo, gh: cancelled.gh }, 5);
   assert.equal(cancelled.f.status[3], "Done");
   assert.equal(cancelled.f.open.has(3), false);
+});
+
+test("Feature with unticked Scope / Acceptance stays open In Progress, held with the reason", () => {
+  const s = merged();
+  s.f.bodies = { 3: "## Scope / Acceptance\n- [x] prep\n- [ ] implement\n## Definition of Done\n" };
+  const r = taskFinalize({ cwd: s.repo, gh: s.gh }, 5);
+  assert.equal(r.held, "o/repo#3: scope not done: 1 unchecked box(es) under Scope / Acceptance");
+  assert.equal(s.f.status[5], "Done");
+  assert.equal(s.f.status[3], "In Progress");
+  assert.equal(s.f.open.has(3), true);
 });
 
 test("PR not merged: refused before any change", () => {
