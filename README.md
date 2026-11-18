@@ -2,7 +2,7 @@
 
 Plugin Claude Code (`omi-engineering`) và runtime cục bộ xác định cho quy trình Agile theo ticket: GitHub Issue/Project làm nguồn công việc, mỗi task một worktree, vòng review 2 + Architect + 2, báo cáo từng bước lên Issue và dọn tài nguyên sau merge.
 
-> Trạng thái: **Milestone-0008 — Release và đưa vào vận hành**: CLI `omi`, 11 agent specialist, vòng review, Projects as Code và quy trình release đã có; bản phát hành đầu tiên `0.1.0` đang chuẩn bị ([CHANGELOG](./CHANGELOG.md)). Lộ trình: cây Issue trên [GitHub Project #2](https://github.com/orgs/omi-home/projects/2).
+> Có gì trong từng bản: [CHANGELOG](./CHANGELOG.md). Trạng thái và lộ trình: cây Issue trên [GitHub Project #2](https://github.com/orgs/omi-home/projects/2).
 
 ## Support matrix
 

@@ -34,18 +34,18 @@ checks:
 | `review.maxAttempts` | `3` | Lần thử kỹ thuật mỗi bước (lỗi tạm thời không tính là round) |
 | `review.maxValidationFixes` / `maxQaReworks` | `2` / `2` | Số lần sửa sau check/QA fail |
 | `review.maxRounds` | `4` (cố định) | 2 round → Architect → 2 round → Waiting PO |
-| `agents.maxConcurrent` | `3` | 1–3 |
+| `agents.maxConcurrent` | `3` | Dự phòng: runtime hiện chạy agent tuần tự, chưa đọc khoá này |
 | `agents.routing.<role>` | sonnet/medium; opus cho Architect, Code/Security Reviewer | `{ model, effort }` |
-| `checks.<lint\|build\|test…>` | không có | Không khai báo = không có gate xác định |
-| `cleanup.deleteRemoteBranch` | `false` | Xoá branch remote không bao giờ mặc định |
+| `checks.<format\|lint\|build\|test\|scan>` | không có | `{ run, timeoutSec }` (timeout mặc định 600 s); tên khác bị từ chối. Không khai báo = không có gate xác định |
+| `cleanup.deleteRemoteBranch` | `false` | Dự phòng: cleanup hiện không xoá branch remote dù đặt `true` |
 | `cleanup.logRetentionDays` | `14` | Evidence cục bộ |
 
 Policy mặc định của plugin: `config/github/*.yaml` (hierarchy, field/view, status, governance) và `config/risk-policy.yaml`.
 
 ## 3. Quyền GitHub
 
-- `gh auth login`, token có scope `repo` và `project` (thêm scope: `gh auth refresh -s project`). `omi doctor` báo `github-project` FAIL khi thiếu scope `project`.
-- Quyền repo `write` trở lên (branch, comment, PR). `admin` chỉ cần cho `github repo apply`; doctor/`pr validate` cảnh báo token admin vì nó có thể vượt bảo vệ branch.
+- `gh auth login`, token có scope `repo` và `project` (thêm scope: `gh auth refresh -s project`). Thiếu scope `project`: `omi doctor` báo `github-auth` FAIL (INSUFFICIENT_SCOPES); `github-project` FAIL nghĩa là Project không tồn tại, không truy cập được hoặc đã đóng.
+- Quyền repo `write` trở lên (branch, comment, PR). `admin` chỉ cần cho `github repo apply`; `pr validate`/`pr merge` cảnh báo token admin vì nó có thể vượt bảo vệ branch (doctor chỉ in quyền `admin`, không cảnh báo).
 - Project: quyền write trên Project để đổi Status, admin để `project apply` tạo field/view.
 - Marketplace từ máy không có SSH key GitHub: `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`, và `gh auth setup-git`.
 
@@ -62,9 +62,9 @@ Policy mặc định của plugin: `config/github/*.yaml` (hierarchy, field/view
 |---|---|---|
 | Kiểm ticket | `omi ticket validate <n>` | — |
 | Bắt đầu | `omi task start <n>` (branch + worktree riêng) | In Progress (cha Backlog/Ready → In Progress) |
-| Chạy agent | `omi task run <n>` (Feature/CR/FR/NFR: `omi task analyze <n>`) | In Progress / Rework / In QA |
-| Mở PR | `omi pr create <n>` → `develop`, `Closes #<n>` | In Review |
-| Merge | `omi pr validate <n>`, `omi pr merge <n>` (risk:high: PO merge) | — |
+| Chạy agent | `omi task run <n>` (Feature/CR/FR/NFR: `omi task analyze <n>`) | Trong lúc chạy: In Progress / Rework / In QA; dừng ở In Review (PR_PENDING), Waiting PO hoặc Blocked |
+| Mở PR | `omi pr create <n>` → `develop`, `Closes #<n>` | In Review (đặt lại nếu đã ở đó) |
+| Merge | `omi pr validate <n>`, `omi pr merge <n>` | Giữ In Review; `risk:high` → Waiting PO, không merge, PO merge tay |
 | Hoàn tất | `omi task finalize <n>` từ checkout chính sau `git pull` | Done + roll-up cha |
 
 Finding hoãn sang task khác: comment `<!-- omi:carried-findings=<ID> -->` trên Issue đích; `omi issue findings <n>` liệt kê khi bắt đầu. Tổng quan: `omi status`. Cuối phiên: `omi handoff post --body-file <f>`; đầu phiên: `omi handoff show` (skill `omi-resume`).
@@ -73,20 +73,21 @@ Finding hoãn sang task khác: comment `<!-- omi:carried-findings=<ID> -->` trê
 
 | Tình huống | Dấu hiệu | Xử lý |
 |---|---|---|
-| Agent/check báo BLOCKED | Status Blocked, report BLOCKED trên Issue | Người quyết định, rồi `omi task unblock <n> --reason <text>` và `omi task run <n>` |
+| Agent/check báo BLOCKED, hoặc hết `maxAttempts` lỗi tạm thời | Status Blocked, `omi task status <n>` = BLOCKED, report BLOCKED trên Issue | Người quyết định, rồi `omi task unblock <n> --reason <text>` và `omi task run <n>` |
 | Hết 4 round review hoặc Architect báo đổi phạm vi | Status Waiting PO, comment escalation | PO quyết định; worktree được giữ. Không có lệnh resume: PO tạo work item mới (Change Request / DevTask) hoặc đóng Issue. Không chạy round thứ 5 |
 | PR đã merge nhưng cleanup lỗi | `task finalize` exit 1, run CLEANUP_FAILED, Status Blocked | Đọc report cleanup trên Issue; sửa nguyên nhân (worktree bẩn: commit hoặc chuyển thay đổi đi; file đang bị khoá; path lạ) rồi chạy lại `omi task finalize <n>`. Không `--force` |
 | Phiên crash giữa chừng | `omi cleanup scan` thấy attempt mở, report chưa đăng, task đã merge chưa dọn | `omi cleanup apply --safe` |
 | Report không đăng được | outbox pending; bước không tiến | Lỗi tạm thời: chạy lại lệnh; lỗi quyền: sửa token rồi chạy lại |
+| Status Blocked nhưng `task status` là RECOVERY_REQUIRED hoặc FAILED | `task unblock` báo INVALID_TRANSITION | CLI hiện không tự đưa run vào hai state này; không sửa DB tay, báo maintainer kèm `omi task status <n> --output json` |
 | Hai phiên cùng một Issue | `LOCK_HELD` (exit 75) | Đợi phiên kia, không xoá lease |
 
 ## 7. Rate limit và lỗi tạm thời
 
-`GITHUB_RATE_LIMITED`, `GITHUB_UNAVAILABLE`, `NETWORK`, `LOCK_HELD` thoát mã `75`: không đổi state, chạy lại lệnh sau. `omi doctor` cảnh báo khi còn < 10% quota (kèm giờ reset); xem nhanh: `gh api rate_limit`. Lỗi tạm thời là attempt mới, không tính là round review. `GITHUB_AUTH` (401/403/thiếu scope) không tự hết: sửa token.
+Lỗi tạm thời (`GITHUB_RATE_LIMITED`, `GITHUB_UNAVAILABLE`, `NETWORK`, `LOCK_HELD`, `REPORT_NOT_POSTED`, `CRASH_RECOVERED`) thoát mã `75`: chạy lại lệnh sau. Trong `task run`, mỗi lỗi tạm thời là một attempt mới của cùng bước; hết `review.maxAttempts` thì run sang BLOCKED. `omi doctor` cảnh báo khi còn < 10% quota (kèm giờ reset); xem nhanh: `gh api rate_limit`. Attempt không tính là round review. `GITHUB_AUTH` (401/403/thiếu scope) không tự hết: sửa token.
 
 ## 8. Xoá an toàn
 
-- OMI chỉ xoá thứ nó sở hữu và đã xác minh (worktree sạch, branch đã merge theo receipt của GitHub), không bao giờ `--force`, không xoá branch remote (trừ `cleanup.deleteRemoteBranch: true`).
+- OMI chỉ xoá thứ nó sở hữu và đã xác minh (worktree sạch, branch đã merge theo receipt của GitHub), không bao giờ `--force`, không xoá branch remote.
 - Worktree mồ côi (`cleanup scan` báo `orphan`) không bị xoá tự động. Người kiểm tra nội dung trước, rồi `git worktree remove <path>` (không `--force`) và `git branch -d <branch>`.
 - State cục bộ ở `<git-common-dir>/omi/state.sqlite` (dùng chung mọi worktree, không commit). Không xoá khi còn run mở; xoá là mất lịch sử run và outbox chưa đăng.
 
