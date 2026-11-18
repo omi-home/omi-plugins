@@ -198,11 +198,11 @@ test("numbers per type (max + 1), native type, sub-issue and Project", () => {
   assert.equal(r.title, "DevTask-0008-Việc mới");
   assert.equal(r.url, "https://github.com/o/repo/issues/6");
   assert.ok(r.created);
-  assert.deepEqual(r.changes, ["create", "parent", "project", "status", "title"]);
+  assert.deepEqual(r.changes, ["create", "project", "parent", "status", "title"]);
   assert.deepEqual(gh.writes, [
     "create:IT_TASK",
+    "project", // before the sub-issue link: a Project auto-add workflow must not race it
     "parent:o/repo#3",
-    "project",
     "status:Backlog",
     "title:DevTask-0008-Việc mới",
   ]);
@@ -223,7 +223,7 @@ test("re-run is a no-op; a half-done Issue is completed, not duplicated", () => 
   const half = fakeGh({ ...tree(), "o/repo#6": { title: "Việc mới", type: "dev-task" } });
   const r = createIssue(config, input(), half.run);
   assert.equal(r.number, 6);
-  assert.deepEqual(r.changes, ["parent", "project", "status", "title"]);
+  assert.deepEqual(r.changes, ["project", "parent", "status", "title"]);
   assert.equal(half.issues.size, 6);
 
   // Crash after adding to the Project (DevTask-0030 #62): Status still unset → set once.
@@ -254,7 +254,7 @@ test("re-run is a no-op; a half-done Issue is completed, not duplicated", () => 
   // A Project without the initial option (no `omi project apply` yet): Issue still completed.
   const bare = fakeGh(tree(), { statusOptions: ["Todo", "Done"] });
   const made = createIssue(config, input(), bare.run);
-  assert.deepEqual(made.changes, ["create", "parent", "project", "title"]);
+  assert.deepEqual(made.changes, ["create", "project", "parent", "title"]);
   assert.equal(made.title, "DevTask-0008-Việc mới");
 });
 

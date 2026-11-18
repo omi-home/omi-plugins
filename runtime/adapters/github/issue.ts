@@ -347,16 +347,18 @@ export function createIssue(
   }
   const self = issues.find((i) => i.number === number) as Listed;
 
-  if (parent && !self.parent) {
-    write(ADD_SUB, { p: parent.id, c: id }, "add sub-issue", run);
-    changes.push("parent");
-  }
   const item = projectItem(self.projectItems, c);
   let itemId = item?.id;
   if (!item) {
     itemId = graphql(ADD_ITEM, { p: projectId, c: id }, Added, "add to project", run, true)
       .addProjectV2ItemById.item.id;
     changes.push("project");
+  }
+  // After the Project add: a new Project's built-in "auto-add sub-issues" workflow would otherwise
+  // race it and the add fails with "Content already exists in this project".
+  if (parent && !self.parent) {
+    write(ADD_SUB, { p: parent.id, c: id }, "add sub-issue", run);
+    changes.push("parent");
   }
   // Initial Status from the desired state (DevTask-0030 #62); set once, never overwritten.
   // A Project without that option (`omi github project apply` not run) leaves it unset, reported as
