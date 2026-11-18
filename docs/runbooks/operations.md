@@ -7,6 +7,7 @@ Dành cho người vận hành (PO, maintainer) một repo dùng plugin `omi-eng
 Skill `/omi-engineering:omi-start`, hoặc tay theo thứ tự:
 
 0. `omi workspace init [--name <n>] [--repo <path|url>]` — dựng `<name>-workspace/` (`.claude/`, `.omi-plugins/`, `AGENTS.md` của Coordinator) và clone repo vào đó; chạy các bước sau trong workspace. Chạy lại an toàn.
+   Repo đang dùng layout cũ (`.omi/config.yaml`, worktree `../.omi-worktrees/`): chạy `omi workspace migrate --dry-run` rồi `omi workspace migrate` trong repo — dựng workspace, copy config và state sang `.omi-plugins/`; từ chối khi còn run mở hoặc worktree chưa dọn; không xoá gì trong repo, chỉ liệt kê file cũ (`.omi/`, `AGENTS.md`, `.claude/`, `CLAUDE.md`) để gỡ qua một task PR. `omi doctor` báo `layout`/`profiles-file`/`legacy-runs` cho tới khi sạch.
 1. `omi doctor` — Node, git, gh, Claude Code, AGENTS.md, config, quyền GitHub. `omi.config.yaml` chưa có section `github` là bình thường trước bước 2.
 2. `omi github project init [--title <text>]` — tìm/tạo Project, link repo, ghi section `github` vào `.omi-plugins/omi.config.yaml`, cài Issue Forms + PR template vào `.github/` (không ghi đè file có sẵn).
 3. `omi github repo plan --output json > plan.json` → PO duyệt → `omi github repo apply --approved-plan plan.json` (label, bảo vệ `main`/`develop`, merge method; chỉ thêm và siết, không bao giờ xoá hay nới).

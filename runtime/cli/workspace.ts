@@ -5,8 +5,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CONFIG_PATH, readConfigData } from "../core/config.ts";
 import { OmiError } from "../core/errors/errors.ts";
-import { findWorkspace, mainCheckout } from "../core/workspace.ts";
+import { findWorkspace, mainCheckout, STATE_FILE } from "../core/workspace.ts";
+import { openState } from "../persistence/db.ts";
+import { openRuns } from "../persistence/repository.ts";
 import { files } from "./init.ts";
 
 const TEMPLATES = fileURLToPath(new URL("../../templates/workspace/", import.meta.url));
@@ -31,6 +34,8 @@ export function workspaceInit(o: {
   cwd: string;
   name?: string;
   repo?: string;
+  /** Target workspace directory (migrate); default: found above cwd, else next to the repo. */
+  workspace?: string;
 }): WorkspaceInitResult {
   const here = mainCheckout(o.cwd);
   const source = o.repo === undefined ? here : isUrl(o.repo) ? o.repo : resolve(o.cwd, o.repo);
@@ -44,6 +49,7 @@ export function workspaceInit(o: {
   }
   // Inside an existing workspace re-run in place; else next to the repo (or in cwd for --repo).
   const workspace =
+    o.workspace ??
     findWorkspace(o.cwd) ??
     join(o.repo === undefined ? dirname(source) : resolve(o.cwd), `${name}-workspace`);
   const items: WorkspaceItem[] = [];
@@ -87,4 +93,92 @@ export function workspaceInit(o: {
     items.push({ path: f, result: "created" });
   }
   return { workspace, repo: target, items };
+}
+
+export interface MigrateResult {
+  workspace: string;
+  dryRun: boolean;
+  /** What was (or would be) done, in order. */
+  actions: string[];
+  /** Old-layout paths still in the repo: the person removes them in a normal task PR. */
+  remove: string[];
+}
+
+/** Files the old layout kept in the target repo (ADR-0002 D1: none belong there). */
+export const OLD_LAYOUT = [".omi", "AGENTS.md", ".claude", "CLAUDE.md"];
+
+/**
+ * `omi workspace migrate` (DevTask-0056 #169): from a repo on the old layout (`.omi/config.yaml`,
+ * state in the git dir, task worktrees) build `<name>-workspace/` next to it through
+ * `workspace init`, then carry the config and the state over. Refused while a run is open or a
+ * task worktree is left. Never deletes anything in the repo; re-running keeps what exists.
+ */
+export function workspaceMigrate(o: {
+  cwd: string;
+  name?: string;
+  dryRun?: boolean;
+}): MigrateResult {
+  const root = mainCheckout(o.cwd);
+  if (!root) throw new OmiError("USAGE_INVALID", "run workspace migrate inside the repo");
+  const oldConfig = join(root, ".omi", "config.yaml");
+  if (!existsSync(oldConfig)) {
+    throw new OmiError("CONFIG_INVALID", "no .omi/config.yaml in the repo: nothing to migrate");
+  }
+  const oldState = join(
+    git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+    "omi",
+    "state.sqlite",
+  );
+  if (existsSync(oldState)) {
+    const db = openState(oldState);
+    try {
+      const open = openRuns(db);
+      if (open.length) {
+        throw new OmiError(
+          "POLICY_VIOLATION",
+          `finish or finalize the open runs first: ${open.map((r) => `#${r.issue} (${r.state})`).join(", ")}`,
+        );
+      }
+    } finally {
+      db.close();
+    }
+  }
+  const worktrees = git(root, ["worktree", "list", "--porcelain"])
+    .split(/\r?\n/)
+    .filter((l) => l.startsWith("worktree "))
+    .slice(1);
+  if (worktrees.length) {
+    throw new OmiError(
+      "POLICY_VIOLATION",
+      `clean up the task worktrees first: ${worktrees.map((l) => l.slice(9)).join(", ")}`,
+    );
+  }
+
+  const name = o.name ?? basename(root);
+  const workspace = join(dirname(root), `${name}-workspace`);
+  const newConfig = join(workspace, CONFIG_PATH);
+  const newState = join(workspace, STATE_FILE);
+  const remove = OLD_LAYOUT.filter((f) => existsSync(join(root, f)));
+  const configured = existsSync(newConfig) && readConfigData(workspace) !== null;
+  const actions = [
+    `workspace init ${workspace} (clone of ${root})`,
+    configured ? `keep ${newConfig}` : `copy .omi/config.yaml → ${newConfig}`,
+    existsSync(newState) || !existsSync(oldState)
+      ? `keep state (${existsSync(newState) ? newState : "no old state"})`
+      : `copy ${oldState} → ${newState}`,
+  ];
+  if (o.dryRun) return { workspace, dryRun: true, actions, remove };
+
+  workspaceInit({ cwd: root, repo: root, name, workspace });
+  if (!configured) writeFileSync(newConfig, readFileSync(oldConfig));
+  if (!existsSync(newState) && existsSync(oldState)) {
+    // A consistent copy, WAL included, without touching the old file.
+    const db = openState(oldState);
+    try {
+      db.prepare("VACUUM INTO ?").run(newState);
+    } finally {
+      db.close();
+    }
+  }
+  return { workspace, dryRun: false, actions, remove };
 }

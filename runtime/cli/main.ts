@@ -39,7 +39,7 @@ import {
   taskUnblock,
   ticketValidate,
 } from "./task.ts";
-import { workspaceInit } from "./workspace.ts";
+import { workspaceInit, workspaceMigrate } from "./workspace.ts";
 
 const humanScan = (s: ScanResult) => [
   ...s.runs.map(
@@ -111,6 +111,11 @@ Commands:
                          Build <name>-workspace/ (default: next to the repo) with .claude/, .omi-plugins/
                          (omi.config.yaml, omi.config.json) and the Coordinator's AGENTS.md, and clone the
                          repo into it. Re-running reports each item created or kept; never overwrites
+  workspace migrate [--name <n>] [--dry-run]
+                         From a repo on the old layout (.omi/config.yaml, worktrees): build the workspace
+                         with workspace init, copy the config and the state into .omi-plugins/. Refused
+                         while a run is open or a task worktree is left; deletes nothing in the repo and
+                         lists the old files to remove in a task PR. Re-running keeps what exists
   github project init [--title <text>]
                          Bootstrap this repo into OMI: find or create the Project (title, default: repo
                          name), link it, write the github section of .omi-plugins/omi.config.yaml and
@@ -218,6 +223,7 @@ const REPO_WIDE = new Set([
   "handoff show",
   "handoff post",
   "workspace init",
+  "workspace migrate",
 ]);
 
 const describe = (a: ProjectAction) =>
@@ -610,6 +616,16 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
           `workspace ${r.workspace}`,
           ...r.items.map((i) => `${i.result.padEnd(9)} ${i.path}`),
           "next      cd into the workspace, then `omi github project init` (skill omi-start)",
+        ];
+        return ok(r, lines(human));
+      }
+      case "workspace migrate": {
+        const r = workspaceMigrate({ cwd, name: values.name, dryRun: values["dry-run"] });
+        const human = [
+          `workspace ${r.workspace}${r.dryRun ? " (dry run: nothing changed)" : ""}`,
+          ...r.actions.map((a) => `${r.dryRun ? "would" : "done "}     ${a}`),
+          ...r.remove.map((f) => `remove    ${f} (old layout: git rm it in a task PR)`),
+          ...(r.dryRun ? [] : ["next      open Claude Code in the workspace; `omi doctor` there"]),
         ];
         return ok(r, lines(human));
       }
