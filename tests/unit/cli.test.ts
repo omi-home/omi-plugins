@@ -80,6 +80,11 @@ Commands:
                          Build <name>-workspace/ (default: next to the repo) with .claude/, .omi-plugins/
                          (omi.config.yaml, omi.config.json) and the Coordinator's AGENTS.md, and clone the
                          repo into it. Re-running reports each item created or kept; never overwrites
+  workspace migrate [--name <n>] [--dry-run]
+                         From a repo on the old layout (.omi/config.yaml, worktrees): build the workspace
+                         with workspace init, copy the config and the state into .omi-plugins/. Refused
+                         while a run is open or a task worktree is left; deletes nothing in the repo and
+                         lists the old files to remove in a task PR. Re-running keeps what exists
   github project init [--title <text>]
                          Bootstrap this repo into OMI: find or create the Project (title, default: repo
                          name), link it, write the github section of .omi-plugins/omi.config.yaml and

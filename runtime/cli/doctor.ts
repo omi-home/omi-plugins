@@ -2,14 +2,17 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import { loadConfig, type OmiConfig } from "../core/config.ts";
 import type { Check } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
-import { CONFIG_FILE, locate } from "../core/workspace.ts";
+import { CONFIG_FILE, locate, STATE_FILE, WORKSPACE_DIR } from "../core/workspace.ts";
+import { openState } from "../persistence/db.ts";
+import { openRuns, ownedRefs } from "../persistence/repository.ts";
+import { OLD_LAYOUT } from "./workspace.ts";
 
 export type { Check };
 
@@ -123,6 +126,84 @@ function agentsMdLoaded(repoRoot: string): Check {
         detail:
           "AGENTS.md is not in Claude Code's memory files: is builtin cc-plugin-agents-md off?",
       };
+}
+
+const inside = (dir: string, root: string) => {
+  const rel = relative(root, dir);
+  return !rel.startsWith("..") && !isAbsolute(rel);
+};
+
+/**
+ * Workspace layout (ADR-0002 D1, DevTask-0056 #169): the repo holds no OMI file, the machine's
+ * profiles never sit in the repo, and nothing is left of the old layout (state in the git dir,
+ * runs on `.omi-worktrees/`).
+ */
+export function layout(workspace: string, repoRoot: string): Check[] {
+  const checks: Check[] = [];
+  const old = OLD_LAYOUT.filter((f) => existsSync(join(repoRoot, f)));
+  checks.push(
+    inside(workspace, repoRoot)
+      ? {
+          name: "layout",
+          status: "warn",
+          detail: `${WORKSPACE_DIR}/ is inside the repo: run \`omi workspace migrate\``,
+        }
+      : old.length
+        ? {
+            name: "layout",
+            status: "warn",
+            detail: `the repo still holds ${old.join(", ")}: remove them in a task PR (ADR-0002 D1)`,
+          }
+        : { name: "layout", status: "pass", detail: `workspace ${workspace}` },
+  );
+
+  // The OMI plugin's own repo ships an empty sample (no profile) for `workspace init`.
+  const tracked = run(
+    "git",
+    ["ls-files", "--", "*omi.config.json", ":(exclude)templates/workspace/.omi-plugins/"],
+    repoRoot,
+  );
+  const profiles = join(workspace, WORKSPACE_DIR, "omi.config.json");
+  checks.push(
+    tracked.ok && tracked.out
+      ? { name: "profiles-file", status: "fail", detail: `tracked in the repo: ${tracked.out}` }
+      : inside(workspace, repoRoot) && existsSync(profiles)
+        ? { name: "profiles-file", status: "fail", detail: `${profiles} is inside the repo` }
+        : { name: "profiles-file", status: "pass", detail: "omi.config.json outside the repo" },
+  );
+
+  const common = run("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], repoRoot);
+  const oldState = common.ok ? join(common.out, "omi", "state.sqlite") : undefined;
+  const state = join(workspace, STATE_FILE);
+  let stale: string[] = [];
+  if (existsSync(state)) {
+    const db = openState(state);
+    try {
+      stale = openRuns(db)
+        .filter((r) =>
+          ownedRefs(db, r.id, "worktree").some((p) => /[\\/]\.omi-worktrees[\\/]/.test(p)),
+        )
+        .map((r) => `#${r.issue}`);
+    } finally {
+      db.close();
+    }
+  }
+  checks.push(
+    stale.length
+      ? {
+          name: "legacy-runs",
+          status: "warn",
+          detail: `open runs on old .omi-worktrees/: ${stale.join(", ")} (finalize them with the previous OMI)`,
+        }
+      : oldState && existsSync(oldState)
+        ? {
+            name: "legacy-runs",
+            status: "warn",
+            detail: `old state ${oldState} is no longer read: run \`omi workspace migrate\` or remove it`,
+          }
+        : { name: "legacy-runs", status: "pass", detail: "no old-layout state or runs" },
+  );
+  return checks;
 }
 
 function workflows(): Check {
@@ -284,21 +365,30 @@ export function doctor(cwd: string): Check[] {
     workflows(),
   ];
 
+  let loc: { workspace: string; root: string } | undefined;
+  let locErr: unknown;
+  try {
+    loc = locate(cwd);
+  } catch (e) {
+    locErr = e;
+  }
   const top = run("git", ["rev-parse", "--show-toplevel"], cwd);
-  if (!top.ok) {
+  const repoRoot = loc?.root ?? (top.ok ? top.out : undefined);
+  if (!repoRoot) {
     checks.push({ name: "repository", status: "fail", detail: "not inside a git repository" });
     return checks;
   }
-  const repoRoot = top.out;
-  const instr = instructions(repoRoot);
+  // The Coordinator's AGENTS.md lives at the workspace root (ADR-0002 D1).
+  const home = loc?.workspace ?? repoRoot;
+  const instr = instructions(home);
   checks.push({ name: "repository", status: "pass", detail: repoRoot }, instr);
-  if (instr.status === "pass") checks.push(agentsMdLoaded(repoRoot));
+  if (instr.status === "pass") checks.push(agentsMdLoaded(home));
 
   let config: OmiConfig | undefined;
   try {
-    const { workspace } = locate(repoRoot);
-    config = loadConfig(workspace);
-    checks.push({ name: "config", status: "pass", detail: join(workspace, CONFIG_FILE) });
+    if (!loc) throw locErr;
+    config = loadConfig(loc.workspace);
+    checks.push({ name: "config", status: "pass", detail: join(loc.workspace, CONFIG_FILE) });
   } catch (e) {
     const err = e instanceof OmiError ? e : new OmiError("INTERNAL", "config check crashed");
     const issues = (err.details as { issues?: { path: string; message: string }[] })?.issues;
@@ -308,6 +398,7 @@ export function doctor(cwd: string): Check[] {
       detail: [err.message, ...(issues ?? []).map((i) => `${i.path}: ${i.message}`)].join("; "),
     });
   }
+  if (loc) checks.push(...layout(loc.workspace, repoRoot));
 
   checks.push(...github(config));
   return checks;
