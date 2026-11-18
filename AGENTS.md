@@ -12,10 +12,10 @@ File này là chỉ dẫn canonical cho mọi phiên Claude Code làm việc **t
 ## Quy trình bắt buộc
 
 1. Mỗi thay đổi gắn với đúng **một** Issue thực thi trong Project #2.
-2. Branch `<loại>/<issue>-<slug>` tạo từ `origin/develop` vừa fetch; làm việc trong worktree riêng ngoài checkout chính (`../.omi-worktrees/omi-plugins/<issue>/`). Không commit thẳng `main`/`develop`.
+2. Branch `<loại>/<issue>-<slug>` tạo từ `origin/develop` vừa fetch; làm việc trong task workspace `<workspace>-task-<run>/omi-plugins/` (clone riêng, `omi task start` tạo). Không commit thẳng `main`/`develop`.
 3. PR → `develop`, body có `Closes #<issue>`; release là PR `develop → main` kèm Release Issue.
 4. Mỗi bước hoàn tất có một comment báo cáo trên Issue (role/model/effort/round/status; effort thực tế ghi `unknown`).
-5. Sau merge: dọn worktree và branch local an toàn, không `--force`, không xóa branch remote tự động.
+5. Sau merge: dọn task workspace an toàn (`omi task finalize`), không `--force`, không xóa branch remote tự động.
 6. Status trên Project #2 không tự đổi: bắt đầu → In Progress, mở PR → In Review, merge + dọn → Done. Cập nhật luôn status cha: khi task con bắt đầu, Feature/Milestone cha đang Backlog/Ready → In Progress (`omi task start` tự làm theo chuỗi parent); Feature đóng + Done khi task con cuối cùng đóng; Milestone In Review trong lúc chạy gate, chỉ Done khi PO chấp nhận.
 7. Finding hoặc giới hạn được hoãn sang task khác phải comment ngay lên Issue đích (marker `<!-- omi:carried-findings=<T-id> -->`, bảng nguồn · finding · việc cần làm), kiểm tra Issue đích trên cây Issue của Project #2 trước khi ghi. Khi bắt đầu task, đọc các comment này và đưa vào phạm vi.
 8. Issue mới: title `<IssueType>-<NNNN>-<Tiêu đề>` — type viết đầy đủ dạng PascalCase, khớp label `type:*` (`Feature`, `DevTask`, `DocumentationTask`, `ChangeRequest`, `FunctionalRequirement`…), `NNNN` là số thứ tự 4 chữ số riêng theo type (lớn nhất hiện có + 1). Title và body viết tiếng Việt, thuật ngữ kỹ thuật/quy trình giữ tiếng Anh (Business, Definition of Done, Acceptance Criteria, reproduce…); heading section và marker `<!-- omi:… -->` giữ nguyên (spec §6).
@@ -28,7 +28,7 @@ npm run check     # lint + typecheck + test (phải xanh trước khi mở PR)
 npm run format    # tự sửa format/lint
 OMI_LIVE=1 npm test  # thêm probe chạy agent thật (tốn token): canary rule pack, model quan sát được
 node bin/omi doctor  # kiểm tra môi trường, AGENTS.md, workspace `.omi-plugins/omi.config.yaml`, GitHub (thêm --output json)
-node bin/omi ticket validate <n>  # gate ticket-first cho Issue #n (chỉ đọc); `task start`/`task status` tạo/xem run + worktree
+node bin/omi ticket validate <n>  # gate ticket-first cho Issue #n (chỉ đọc); `task start`/`task status` tạo/xem run + task workspace
 node bin/omi pr create <n> --body-file <f>  # push branch task, tạo/dùng lại PR → develop, kiểm base/head/Issue chính, In Review
 node bin/omi issue create --type <t> --parent <n> --title <text> --body-file <f>  # tạo Issue đánh số theo type, gắn sub-issue + Project (chạy lại an toàn)
 node bin/omi github project init|plan|apply|validate  # bootstrap Project + config + template; field/view/workflow desired-state (skill omi-start)

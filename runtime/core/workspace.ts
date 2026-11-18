@@ -2,7 +2,7 @@
 // Config and state live in `.omi-plugins/`, outside the target repo.
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { OmiError } from "./errors/errors.ts";
 
 export const WORKSPACE_DIR = ".omi-plugins";
@@ -50,6 +50,15 @@ export function mainCheckout(cwd: string): string | undefined {
  */
 export function locate(cwd: string): { workspace: string; root: string } {
   const root = mainCheckout(cwd);
+  // Inside a task workspace clone `<workspace>-task-<runId>/<repo>/`: the workspace's own repo.
+  const task = root ? /^(.+)-task-[^\\/]+$/.exec(dirname(root)) : null;
+  if (root && task?.[1] && isDir(join(task[1], WORKSPACE_DIR))) {
+    // (A checkout that is its own workspace, as in tests, is its own main checkout.)
+    return {
+      workspace: task[1],
+      root: mainCheckout(task[1]) ?? join(task[1], basename(root)),
+    };
+  }
   if (root) {
     const workspace = findWorkspace(root);
     if (!workspace) throw NO_WORKSPACE(root);

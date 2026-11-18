@@ -10,6 +10,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +31,7 @@ import {
   releaseLease,
   startStep,
 } from "../../runtime/persistence/repository.ts";
-import { ensureWorktree } from "../../runtime/resources/worktree.ts";
+import { ensureTaskWorkspace } from "../../runtime/resources/worktree.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -231,7 +232,14 @@ function merged() {
     workflow: "dev-task",
   }).id;
   advanceRun(db, runId, { type: "TICKET_VALID" });
-  const ws = ensureWorktree(db, { repoRoot: repo, config, issue: 5, branch: "feature/5-x", runId });
+  const ws = ensureTaskWorkspace(db, {
+    repoRoot: repo,
+    workspace: repo, // the checkout holds .omi-plugins/: it is its own workspace here
+    config,
+    issue: 5,
+    branch: "feature/5-x",
+    runId,
+  });
   advanceRun(db, runId, { type: "WORKSPACE_CREATED" });
   db.close();
   writeFileSync(join(ws.path, "a.txt"), "a\n");
@@ -404,17 +412,16 @@ test("apply --safe: merged-but-uncleaned run is finalized once; a second apply h
   assert.throws(() => cleanupApply({ cwd: s.repo, gh: s.gh }), { code: "USAGE_INVALID" });
 });
 
-test("crash mid-cleanup (worktree gone, branch left, CLEANUP_PENDING): apply finishes it", () => {
+test("crash mid-cleanup (task workspace gone, CLEANUP_PENDING): apply finishes it", () => {
   const s = merged();
   const db = db5(s.repo);
   advanceRun(db, "run5", { type: "MERGE_VERIFIED" });
   advanceRun(db, "run5", { type: "CLEANUP_STARTED" });
   db.close();
-  git(s.repo, "worktree", "remove", s.wt);
+  rmSync(dirname(s.wt), { recursive: true });
   const r = cleanupApply({ cwd: s.repo, gh: s.gh, safe: true });
   assert.equal(r.outcomes[0]?.error, null);
   assert.equal(state(s.repo), "COMPLETED");
-  assert.equal(git(s.repo, "branch", "--list", "feature/5-x"), "");
 });
 
 test("report persisted but crash before/after POST: replay leaves exactly one comment", () => {
@@ -452,11 +459,11 @@ test("attempt left open by a crash: closed as CRASH_RECOVERED and retryable; a l
   db3.close();
 });
 
-test("orphan worktree under the OMI root is reported and left alone", () => {
+test("orphan task workspace next to the workspace is reported and left alone", () => {
   const s = merged();
   s.f.merged = false;
-  const orphan = join(dirname(s.wt), "77");
-  git(s.repo, "worktree", "add", "-q", "-b", "feature/77-foreign", orphan, "origin/develop");
+  const orphan = `${s.repo}-task-77-dead`;
+  mkdirSync(orphan);
   const scan = cleanupScan({ cwd: s.repo, gh: s.gh });
   assert.equal(scan.orphans.length, 1);
   cleanupApply({ cwd: s.repo, gh: s.gh, safe: true });

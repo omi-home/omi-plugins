@@ -1,6 +1,6 @@
 # OMI Engineering Plugin
 
-Plugin Claude Code (`omi-engineering`) và runtime cục bộ xác định cho quy trình Agile theo ticket: GitHub Issue/Project làm nguồn công việc, mỗi task một worktree, vòng review 2 + Architect + 2, báo cáo từng bước lên Issue và dọn tài nguyên sau merge.
+Plugin Claude Code (`omi-engineering`) và runtime cục bộ xác định cho quy trình Agile theo ticket: GitHub Issue/Project làm nguồn công việc, mỗi task một task workspace (clone riêng), vòng review 2 + Architect + 2, báo cáo từng bước lên Issue và dọn tài nguyên sau merge.
 
 > Có gì trong từng bản: [CHANGELOG](./CHANGELOG.md). Trạng thái và lộ trình: cây Issue trên [GitHub Project #2](https://github.com/orgs/omi-home/projects/2).
 
@@ -29,10 +29,10 @@ node bin/omi doctor  # môi trường, AGENTS.md, `.omi-plugins/omi.config.yaml`
 Một thay đổi đi theo đúng quy trình trong [AGENTS.md](./AGENTS.md):
 
 1. Chọn một Issue thực thi trên [Project #2](https://github.com/orgs/omi-home/projects/2) (hoặc tạo bằng `node bin/omi issue create`), kiểm bằng `node bin/omi ticket validate <n>` và đọc `node bin/omi issue findings <n>`.
-2. `node bin/omi task start <n>` — branch `<loại>/<n>-<slug>` từ `origin/develop` và worktree riêng trong `../.omi-worktrees/omi-plugins/<n>/`; làm việc trong worktree đó.
+2. `node bin/omi task start <n>` — task workspace `<workspace>-task-<run>/omi-plugins/`: clone của repo trên branch `<loại>/<n>-<slug>` cắt từ `origin/develop` vừa fetch; làm việc trong clone đó.
 3. Code + test (`tests/<loại>/**/*.test.ts`, `node:test`), `npm run check` xanh, commit.
 4. `node bin/omi pr create <n> --body-file <f>` — PR → `develop` có `Closes #<n>`; comment báo cáo bước lên Issue.
-5. Sau merge: `git pull` trong checkout chính, `node bin/omi task finalize <n>` — dọn worktree/branch an toàn, Done.
+5. Sau merge: `git pull` trong checkout chính, `node bin/omi task finalize <n>` — dọn task workspace an toàn (chỉ khi receipt merge khớp tip của clone), Done.
 
 Kẹt ở đâu: [runbook — escalation và khôi phục](./docs/runbooks/operations.md#6-escalation-và-khôi-phục).
 
