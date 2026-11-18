@@ -173,12 +173,16 @@ export function advanceRun(
     db.prepare(
       "INSERT INTO transition (run_id, from_state, to_state, event, at) VALUES (?, ?, ?, ?, ?)",
     ).run(runId, ctx.state, next.state, event.type, now);
-    if (event.type === "UNBLOCK") {
-      // The person cleared what an agent reported as BLOCKED: that step runs again (new
-      // attempt) instead of replaying its report (G6-003, #123). Verdicts still replay.
+    if (event.type === "UNBLOCK" || event.type === "PO_RESUME") {
+      // A person cleared the hold. The step whose result caused it is the last one reported
+      // (BLOCKED, or an engineer that did not pass): it runs again as a new attempt instead of
+      // replaying that result (G6-003, #123). Earlier steps and PASSED results still replay.
+      const posted: StepState = "REPORT_POSTED";
+      const pending: StepState = "PENDING";
+      const passed: StepState = "PASSED";
       db.prepare(
-        "UPDATE step_run SET state = 'PENDING', updated_at = ? WHERE run_id = ? AND state = 'REPORT_POSTED' AND json_extract(result, '$.status') = 'BLOCKED'",
-      ).run(now, runId);
+        "UPDATE step_run SET state = ?, updated_at = ? WHERE id = (SELECT max(id) FROM step_run WHERE run_id = ?) AND state = ? AND json_extract(result, '$.status') <> ?",
+      ).run(pending, now, runId, posted, passed);
     }
     if (verdict && ctx.state === "RUNNING") {
       // A QA rework re-reviews within its round (#56): the round keeps its latest verdict.

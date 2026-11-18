@@ -502,6 +502,19 @@ test("critical security finding escalates to the PO at once", () => {
   assert.equal(s.agents.calls.length, 3); // no rework round
 });
 
+test("PO resume after a critical finding re-runs the Security Reviewer, not its old report (#123)", () => {
+  const s = setup({ security: "CRITICAL" }, delivery({ security: true }));
+  assert.equal(runSlice(s.deps, s.target).state, "WAITING_PO");
+  repo.advanceRun(s.db, "run", { type: "PO_RESUME" });
+  assert.equal(runSlice(s.deps, s.target).state, "WAITING_PO");
+  const sec = s.agents.packets.filter((p) => p.role === "security-reviewer");
+  assert.deepEqual(
+    sec.map((p) => p.attempt),
+    [1, 2],
+  );
+  assert.equal(roles(s.agents.calls).filter((r) => r === "code-reviewer").length, 1);
+});
+
 test("Bug Resolution: a fix without a regression test is a failed gate, not a review", () => {
   const s = setup(
     { addsTestFrom: "implement-fix1" },

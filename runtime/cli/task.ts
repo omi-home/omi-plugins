@@ -38,6 +38,7 @@ import { loadConfig, type OmiConfig } from "../core/config.ts";
 import {
   type Check,
   type CleanupResult,
+  commentMarker,
   type IssueRef,
   IssueType,
   parseContract,
@@ -47,7 +48,7 @@ import {
   type WorkflowEventType,
 } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
-import { PRE_MERGE, PROJECT_STATUS } from "../core/workflow-engine/fsm.ts";
+import { PRE_MERGE, PROJECT_STATUS, transition } from "../core/workflow-engine/fsm.ts";
 import { planWorkflow, type WorkflowPlan } from "../core/workflow-engine/plan.ts";
 import {
   lastStepError,
@@ -63,6 +64,7 @@ import {
   advanceRun,
   claimedRefs,
   createRun,
+  enqueueReport,
   getRun,
   latestRun,
   liveRun,
@@ -262,6 +264,9 @@ export function taskUnblock(deps: TaskDeps & { reason?: string }, issue: number)
           `#${issue} is ${found?.state ?? "not running"}: only a BLOCKED run can be unblocked`,
         );
       }
+      // Everything that can fail runs before the run moves: a refused unblock changes nothing.
+      // Earlier reports first, so the blocking step is REPORT_POSTED when UNBLOCK reopens it.
+      publishPending(db, found.id, { gh });
       const by = graphql(
         "{viewer{login}}",
         {},
@@ -269,40 +274,41 @@ export function taskUnblock(deps: TaskDeps & { reason?: string }, issue: number)
         "github-auth",
         gh,
       ).viewer.login;
-      const { run, context } = advanceRun(db, found.id, { type: "UNBLOCK" });
-      const n = transitions(db, run.id).filter((t) => t.event === "UNBLOCK").length;
-      const body = renderStepReport(
-        parseContract(
-          StepComment,
-          {
-            schemaVersion: SCHEMA_VERSION,
-            issue: ref,
-            workflowRunId: run.id,
-            category: "unblock",
-            workflow: run.workflow,
-            stepId: "unblock",
-            stepTitle: "Gỡ block",
-            round: Math.min(Math.max(context.round, 1), 4),
-            attempt: n, // one comment per unblock
-            executor: "omi-cli",
-            requestedModel: null,
-            actualModel: null,
-            requestedEffort: null,
-            actualEffort: null,
-            status: "PASSED",
-            summary: [
-              `Unblocked by GitHub user ${by}; resumes in ${context.state}.`,
-              `Reason: ${deps.reason?.trim() || "(none given)"}`,
-            ].join("\n"),
-            nextAction: `\`omi task run ${issue}\` re-runs the step that reported BLOCKED.`,
-            executionId: `${run.id}-unblock-${n}`,
-            createdAt: new Date().toISOString(),
-          },
-          "unblock comment",
-        ),
+      const next = transition(runContext(db, found.id), { type: "UNBLOCK" }); // pure: may throw
+      const n = transitions(db, found.id).filter((t) => t.event === "UNBLOCK").length + 1;
+      const comment = parseContract(
+        StepComment,
+        {
+          schemaVersion: SCHEMA_VERSION,
+          issue: ref,
+          workflowRunId: found.id,
+          category: "unblock",
+          workflow: found.workflow,
+          stepId: "unblock",
+          stepTitle: "Gỡ block",
+          round: Math.min(Math.max(next.round, 1), 4),
+          attempt: n, // one comment per unblock
+          executor: "omi-cli",
+          requestedModel: null,
+          actualModel: null,
+          requestedEffort: null,
+          actualEffort: null,
+          status: "PASSED",
+          summary: [
+            `Unblocked by GitHub user ${by}; resumes in ${next.state}.`,
+            `Reason: ${deps.reason?.trim() || "(none given)"}`,
+          ].join("\n"),
+          nextAction: `\`omi task run ${issue}\` re-runs the step that blocked the run.`,
+          executionId: `${found.id}-unblock-${n}`,
+          createdAt: new Date().toISOString(),
+        },
+        "unblock comment",
       );
-      upsertReport(db, { runId: run.id, marker: body.split("\n")[0] as string, body });
+      const body = renderStepReport(comment);
+      const { run, context } = advanceRun(db, found.id, { type: "UNBLOCK" });
+      enqueueReport(db, { runId: run.id, marker: commentMarker(comment), body });
       publishPending(db, run.id, { gh }); // a failure leaves it pending: `task run` posts it
+      // A failure here leaves the board behind; `omi task run` sets it from the run state.
       const status = setStatus(config, issue, PROJECT_STATUS[context.state], gh);
       return { run, state: context.state, by, status };
     } finally {
