@@ -86,7 +86,7 @@ import {
 import { publishPending } from "../reporting/outbox.ts";
 import { renderStepReport } from "../reporting/render.ts";
 import { applyRetention, cleanupRun } from "../resources/cleanup.ts";
-import { branchName, ensureWorktree, git, type Workspace } from "../resources/worktree.ts";
+import { branchName, ensureTaskWorkspace, git, type Workspace } from "../resources/worktree.ts";
 
 export interface TaskDeps {
   cwd: string;
@@ -221,7 +221,7 @@ export interface StartResult {
 
 export function taskStart(deps: TaskDeps, issue: number): StartResult {
   const gh = deps.gh ?? spawnGh;
-  const { root, config } = repo(deps.cwd);
+  const { root, workspace: omiWorkspace, config } = repo(deps.cwd);
   const db = openState(statePath(deps.cwd));
   const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
   const lease = `task:${ref.repository}#${issue}`;
@@ -249,8 +249,9 @@ export function taskStart(deps: TaskDeps, issue: number): StartResult {
       // A resumed task keeps its branch even if the Issue title changed since.
       const branch =
         ownedRefs(db, run.id, "branch")[0] ?? branchName(type, issue, ticket.title, ready.parent);
-      const workspace = ensureWorktree(db, {
+      const workspace = ensureTaskWorkspace(db, {
         repoRoot: root,
+        workspace: omiWorkspace,
         config,
         issue,
         branch,
@@ -430,6 +431,7 @@ export function taskRun(
         {
           run: start.run,
           worktree: start.workspace.path,
+          taskRoot: dirname(start.workspace.path),
           baseSha: start.workspace.baseSha,
           plan,
         },
@@ -830,7 +832,7 @@ export function taskFinalize(
   issue: number,
 ): FinalizeResult {
   const gh = deps.gh ?? spawnGh;
-  const { root, config } = repo(deps.cwd);
+  const { config } = repo(deps.cwd);
   const file = statePath(deps.cwd);
   const db = openState(file);
   const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
@@ -874,7 +876,7 @@ export function taskFinalize(
           `merged PR #${receipt.number} does not name ${primary}`,
         );
       }
-      const cleanOpts = { repoRoot: root, runId, receipt, tempRoot: dirname(file) };
+      const cleanOpts = { runId, receipt, tempRoot: dirname(file) };
       if (deps.dryRun) {
         const cleanup = cleanupRun(db, { ...cleanOpts, dryRun: true });
         return { run, receipt, cleanup, report: null, status: [] };

@@ -139,11 +139,12 @@ const tree = (): Record<number, FakeIssue> => ({
 });
 
 test("start: run + worktree + In Progress rolled up the parent chain; repeat is a no-op", () => {
-  const { base, root } = repo();
+  const { root } = repo();
   const gh = fakeGh(tree());
   const first = taskStart({ cwd: root, gh: gh.run }, 5);
   assert.equal(first.run.state, "WORKSPACE_READY");
-  assert.equal(first.workspace.path, join(base, ".omi-worktrees", "repo", "5"));
+  // Task workspace: `<workspace>-task-<runId>/<repo>` (this checkout is its own workspace).
+  assert.equal(first.workspace.path, join(`${root}-task-${first.run.id}`, "repo"));
   assert.equal(first.workspace.branch, "feature/5-task-5");
   assert.equal(git(first.workspace.path, "branch", "--show-current"), "feature/5-task-5");
   assert.deepEqual(
@@ -157,7 +158,7 @@ test("start: run + worktree + In Progress rolled up the parent chain; repeat is 
   assert.deepEqual(again.status, []);
   assert.deepEqual(gh.mutations, [5, 3, 1]);
 
-  // Status works from inside the task worktree too (state DB is shared via the common dir).
+  // Status works from inside the task workspace clone too (it finds the workspace beside it).
   const st = taskStatus({ cwd: first.workspace.path }, 5);
   assert.equal(st.run?.id, first.run.id);
   assert.equal(st.branch, "feature/5-task-5");

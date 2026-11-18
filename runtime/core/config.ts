@@ -49,7 +49,6 @@ export const OmiConfig = z.strictObject({
     .strictObject({
       baseBranch: z.string().min(1).default("develop"),
       releaseBranch: z.string().min(1).default("main"),
-      worktreeRoot: z.string().min(1).default("../.omi-worktrees"),
       mergeMethod: z.enum(["squash", "merge", "rebase"]).default("squash"),
     })
     .prefault({}),

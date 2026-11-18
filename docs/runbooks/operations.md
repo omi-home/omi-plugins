@@ -30,7 +30,6 @@ checks:
 |---|---|---|
 | `github.privateRepoRiskAccepted` | `false` | Chỉ bật khi PO chấp nhận repo private không có bảo vệ phía server (mục 4) |
 | `git.baseBranch` / `git.releaseBranch` | `develop` / `main` | Task PR → base; release PR base → release |
-| `git.worktreeRoot` | `../.omi-worktrees` | Worktree: `<root>/<repo>/<issue>/` |
 | `git.mergeMethod` | `squash` | Phải được repo cho phép |
 | `review.maxAttempts` | `3` | Lần thử kỹ thuật mỗi bước (lỗi tạm thời không tính là round) |
 | `review.maxValidationFixes` / `maxQaReworks` | `2` / `2` | Số lần sửa sau check/QA fail |
@@ -62,7 +61,7 @@ Policy mặc định của plugin: `config/github/*.yaml` (hierarchy, field/view
 | Bước | Lệnh | Status Project |
 |---|---|---|
 | Kiểm ticket | `omi ticket validate <n>` | — |
-| Bắt đầu | `omi task start <n>` (branch + worktree riêng) | In Progress (cha Backlog/Ready → In Progress) |
+| Bắt đầu | `omi task start <n>` (task workspace: clone + branch riêng) | In Progress (cha Backlog/Ready → In Progress) |
 | Chạy agent | `omi task run <n>` (Feature/CR/FR/NFR: `omi task analyze <n>`) | Trong lúc chạy: In Progress / Rework / In QA; dừng ở In Review (PR_PENDING), Waiting PO hoặc Blocked |
 | Mở PR | `omi pr create <n>` → `develop`, `Closes #<n>` | In Review (đặt lại nếu đã ở đó) |
 | Merge | `omi pr validate <n>`, `omi pr merge <n>` | Giữ In Review; `risk:high` → Waiting PO, không merge, PO merge tay |
@@ -75,8 +74,8 @@ Finding hoãn sang task khác: comment `<!-- omi:carried-findings=<ID> -->` trê
 | Tình huống | Dấu hiệu | Xử lý |
 |---|---|---|
 | Agent/check báo BLOCKED, hoặc hết `maxAttempts` lỗi tạm thời | Status Blocked, `omi task status <n>` = BLOCKED, report BLOCKED trên Issue | Người quyết định, rồi `omi task unblock <n> --reason <text>` và `omi task run <n>` |
-| Hết 4 round review hoặc Architect báo đổi phạm vi | Status Waiting PO, comment escalation | PO quyết định; worktree được giữ. Không có lệnh resume: PO tạo work item mới (Change Request / DevTask) hoặc đóng Issue. Không chạy round thứ 5 |
-| PR đã merge nhưng cleanup lỗi | `task finalize` exit 1, run CLEANUP_FAILED, Status Blocked | Đọc report cleanup trên Issue; sửa nguyên nhân (worktree bẩn: commit hoặc chuyển thay đổi đi; file đang bị khoá; path lạ) rồi chạy lại `omi task finalize <n>`. Không `--force` |
+| Hết 4 round review hoặc Architect báo đổi phạm vi | Status Waiting PO, comment escalation | PO quyết định; task workspace được giữ. Không có lệnh resume: PO tạo work item mới (Change Request / DevTask) hoặc đóng Issue. Không chạy round thứ 5 |
+| PR đã merge nhưng cleanup lỗi | `task finalize` exit 1, run CLEANUP_FAILED, Status Blocked | Đọc report cleanup trên Issue; sửa nguyên nhân (clone bẩn hoặc chưa push: commit/push hoặc chuyển thay đổi đi; file lạ trong task workspace; file đang bị khoá; path lạ) rồi chạy lại `omi task finalize <n>`. Không `--force` |
 | Phiên crash giữa chừng | `omi cleanup scan` thấy attempt mở, report chưa đăng, task đã merge chưa dọn | `omi cleanup apply --safe` |
 | Report không đăng được | outbox pending; bước không tiến | Lỗi tạm thời: chạy lại lệnh; lỗi quyền: sửa token rồi chạy lại |
 | Status Blocked nhưng `task status` là RECOVERY_REQUIRED hoặc FAILED | `task unblock` báo INVALID_TRANSITION | CLI hiện không tự đưa run vào hai state này; không sửa DB tay, báo maintainer kèm `omi task status <n> --output json` |
@@ -88,9 +87,9 @@ Lỗi tạm thời (`GITHUB_RATE_LIMITED`, `GITHUB_UNAVAILABLE`, `NETWORK`, `LOC
 
 ## 8. Xoá an toàn
 
-- OMI chỉ xoá thứ nó sở hữu và đã xác minh (worktree sạch, branch đã merge theo receipt của GitHub), không bao giờ `--force`, không xoá branch remote.
-- Worktree mồ côi (`cleanup scan` báo `orphan`) không bị xoá tự động. Người kiểm tra nội dung trước, rồi `git worktree remove <path>` (không `--force`) và `git branch -d <branch>`.
-- State cục bộ ở `<workspace>/.omi-plugins/state.sqlite` (dùng chung mọi worktree, ngoài repo). Không xoá khi còn run mở; xoá là mất lịch sử run và outbox chưa đăng.
+- OMI chỉ xoá thứ nó sở hữu và đã xác minh (task workspace sạch, chỉ chứa file OMI sinh ra, tip của clone khớp receipt merge của GitHub), không bao giờ `--force`, không xoá branch remote.
+- Task workspace mồ côi (`cleanup scan` báo `orphan`: `<workspace>-task-*` không thuộc run nào đang mở) không bị xoá tự động. Người kiểm tra nội dung (commit chưa push?) rồi tự xoá thư mục.
+- State cục bộ ở `<workspace>/.omi-plugins/state.sqlite` (dùng chung mọi task workspace, ngoài repo). Không xoá khi còn run mở; xoá là mất lịch sử run và outbox chưa đăng.
 
 ## 9. Release
 

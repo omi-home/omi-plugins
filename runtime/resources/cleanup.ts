@@ -1,11 +1,12 @@
-// Safe cleanup of one run's owned resources (spec §14, T0.8). Only what `resource_owner` says
-// the run owns is ever touched; each step is check-then-act on observable state, so a replay
-// after a crash skips what is already done. Nothing is forced: a dirty, locked, symlinked or
-// foreign worktree, a live process or an unverified merge stops the cleanup (CLEANUP_FAILED)
-// and every remaining resource is kept for reconciliation.
+// Safe cleanup of one run's owned resources (spec §14, T0.8, ADR-0002 D3). Only what
+// `resource_owner` says the run owns is ever touched; each step is check-then-act on observable
+// state, so a replay after a crash skips what is already done. Nothing is forced: a dirty,
+// symlinked or foreign task workspace, a live process or a missing merge receipt for the clone's
+// tip (nothing unpushed is ever deleted) stops the cleanup (CLEANUP_FAILED) and every remaining
+// resource is kept for reconciliation.
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { MergeReceipt } from "../adapters/github/merge.ts";
 import {
   type CleanupResult,
@@ -24,13 +25,12 @@ import {
   releaseLease,
   releaseResource,
 } from "../persistence/repository.ts";
-import { git, listWorktrees, readMarker, same, tryGit } from "./worktree.ts";
+import { git, readMarker, same, tryGit } from "./worktree.ts";
 
 type StepName = CleanupResult["steps"][number]["name"];
 type Step = CleanupResult["steps"][number];
 
 export interface CleanupOptions {
-  repoRoot: string;
   runId: string;
   /** GitHub merge receipt of the task PR; without it nothing destructive happens. */
   receipt: MergeReceipt | undefined;
@@ -45,6 +45,8 @@ export interface CleanupOptions {
 }
 
 const LEASE_MS = 10 * 60_000;
+/** What OMI writes into a task workspace root next to the clone (role files, config dir). */
+export const GENERATED = [".claude", ".omi-home", "AGENTS.md", "REPORT.md"];
 
 export const pidAlive = (pid: number): boolean => {
   try {
@@ -114,9 +116,12 @@ function steps(db: Db, o: CleanupOptions, issue: IssueRef): CleanupResult {
     "prune-worktrees",
     "verify-freed",
   ];
-  const tip = branch
-    ? tryGit(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`], o.repoRoot)
-    : undefined;
+  // The branch lives only in the run's clone (the task workspace), never in the main checkout.
+  const clone = worktree && existsSync(worktree) ? worktree : undefined;
+  const tip =
+    branch && clone
+      ? tryGit(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`], clone)
+      : undefined;
 
   try {
     // verify-merge: GitHub receipt for this branch and this tip, never `git branch --merged`.
@@ -182,69 +187,63 @@ function steps(db: Db, o: CleanupOptions, issue: IssueRef): CleanupResult {
     }
     for (const dir of temps) release("temp-dir", dir);
 
-    // verify-clean-worktree
-    const listed = worktree
-      ? listWorktrees(o.repoRoot).find((w) => same(w.path, worktree))
-      : undefined;
-    if (!worktree) skip("verify-clean-worktree", "no owned worktree");
-    else if (!listed) {
-      if (existsSync(worktree)) {
-        failed("verify-clean-worktree", `${worktree} exists but is not a registered worktree`);
+    // verify-clean-worktree: our clone, on our branch, clean, and nothing but OMI's own files
+    // around it in the task workspace root.
+    const root = worktree ? dirname(worktree) : undefined;
+    if (!worktree || !root) skip("verify-clean-worktree", "no owned task workspace");
+    else if (!clone) skip("verify-clean-worktree", "task workspace already removed");
+    else {
+      if (lstatSync(clone).isSymbolicLink() || lstatSync(root).isSymbolicLink()) {
+        failed("verify-clean-worktree", "task workspace path is a symlink");
       }
-      skip("verify-clean-worktree", "worktree already removed");
-    } else {
-      if (lstatSync(worktree).isSymbolicLink())
-        failed("verify-clean-worktree", "worktree path is a symlink");
-      if (listed.locked) failed("verify-clean-worktree", "worktree is locked (git worktree lock)");
-      if (listed.branch !== branch) {
-        failed(
-          "verify-clean-worktree",
-          `worktree is on ${listed.branch ?? "a detached HEAD"}, not ${branch}`,
-        );
+      const top = tryGit(["rev-parse", "--show-toplevel"], clone);
+      if (!top || !same(top, clone)) {
+        failed("verify-clean-worktree", `${clone} is not a clone`);
       }
-      const marker = readMarker(worktree);
+      const on = tryGit(["symbolic-ref", "--quiet", "--short", "HEAD"], clone);
+      if (on !== branch) {
+        failed("verify-clean-worktree", `clone is on ${on ?? "a detached HEAD"}, not ${branch}`);
+      }
+      const marker = readMarker(clone);
       if (!marker || marker.repository !== issue.repository || marker.issue !== issue.number) {
         failed("verify-clean-worktree", "ownership marker missing or for another task");
       }
-      if (git(["status", "--porcelain", "--untracked-files=all"], worktree)) {
-        failed("verify-clean-worktree", "worktree has uncommitted or untracked files");
+      if (git(["status", "--porcelain", "--untracked-files=all"], clone)) {
+        failed("verify-clean-worktree", "clone has uncommitted or untracked files");
       }
-      done("verify-clean-worktree", worktree);
+      const extra = readdirSync(root).filter(
+        (f) => f !== basename(clone) && !GENERATED.includes(f),
+      );
+      if (extra.length) {
+        failed("verify-clean-worktree", `task workspace holds unknown files: ${extra.join(", ")}`);
+      }
+      done("verify-clean-worktree", clone);
     }
 
-    // remove-worktree: no --force; git itself refuses anything unexpected.
-    if (listed && worktree) {
-      act("remove-worktree", `git worktree remove ${worktree}`, () => {
-        const err = tryGit(["worktree", "remove", worktree], o.repoRoot);
-        if (err === undefined)
-          failed("remove-worktree", "git worktree remove refused (files in use?)");
+    // remove-worktree: the whole task workspace; its branch goes with the clone.
+    if (clone && root) {
+      act("remove-worktree", `remove task workspace ${root}`, () => {
+        try {
+          rmSync(root, { recursive: true, maxRetries: 3 });
+        } catch {
+          failed("remove-worktree", `could not remove ${root} (files in use?)`);
+        }
       });
     } else skip("remove-worktree", "nothing to remove");
 
-    // remove-local-branch: -D only after the tip matched the merge receipt above.
-    if (branch && tip) {
-      act("remove-local-branch", `delete ${branch} (${tip.slice(0, 12)}, verified merged)`, () => {
-        if (tryGit(["branch", "-D", branch], o.repoRoot) === undefined) {
-          failed("remove-local-branch", `git branch -D ${branch} refused`);
-        }
-      });
-    } else skip("remove-local-branch", branch ? "branch already deleted" : "no owned branch");
+    // remove-local-branch: only in the clone, removed with it.
+    if (branch && tip)
+      done("remove-local-branch", `${branch} (${tip.slice(0, 12)}) went with the clone`);
+    else skip("remove-local-branch", branch ? "branch already deleted" : "no owned branch");
 
-    act("prune-worktrees", "git worktree prune", () => git(["worktree", "prune"], o.repoRoot));
+    skip("prune-worktrees", "task workspaces are clones: no worktree to prune");
 
     // verify-freed: observable state, then release ownership.
     if (!o.dryRun) {
-      if (worktree && existsSync(worktree)) failed("verify-freed", `${worktree} still exists`);
-      if (
-        branch &&
-        tryGit(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], o.repoRoot) !==
-          undefined
-      ) {
-        failed("verify-freed", `branch ${branch} still exists`);
-      }
+      if (root && existsSync(root)) failed("verify-freed", `${root} still exists`);
       if (worktree) release("worktree", worktree);
       if (branch) release("branch", branch);
-      done("verify-freed", "worktree and branch gone; ownership released");
+      done("verify-freed", "task workspace and branch gone; ownership released");
     } else skip("verify-freed", "dry-run");
   } catch (e) {
     if (!(e instanceof Stop)) throw e;

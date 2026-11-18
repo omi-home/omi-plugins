@@ -26,6 +26,7 @@ import {
 import { publishPending } from "../../reporting/outbox.ts";
 import { redactDeep } from "../../reporting/redact.ts";
 import { renderStepReport } from "../../reporting/render.ts";
+import { writeRoleFiles } from "../../resources/role-files.ts";
 import { git } from "../../resources/worktree.ts";
 import type { OmiConfig } from "../config.ts";
 import {
@@ -85,6 +86,8 @@ export interface SliceTarget {
   run: RunRow;
   worktree: string;
   baseSha: string;
+  /** Task workspace root around the clone (ADR-0002 D2): role files are written there. */
+  taskRoot?: string;
   /** Defaults to the original slice: Backend Engineer, Feature Implementation. */
   plan?: WorkflowPlan;
 }
@@ -221,6 +224,15 @@ function agentStep(
       const file = join(d.evidenceDir, `${spec.stepId}-r${ctx.round}-a${attempt}.packet.json`);
       writeFileSync(file, JSON.stringify(packet, null, 2));
       addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "task-packet", path: file });
+      if (t.taskRoot) {
+        writeRoleFiles({
+          taskRoot: t.taskRoot,
+          pluginRoot: d.pluginRoot,
+          role: spec.role,
+          category: spec.category,
+          edits: spec.edits,
+        });
+      }
       const started = Date.now();
       const stdout = (d.runAgent ?? spawnAgent)(
         buildAgentLaunch({

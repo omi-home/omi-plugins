@@ -1,10 +1,10 @@
-// Task worktree manager (spec §7): one owned branch + worktree per Issue, cut from a freshly
-// fetched origin/<base>, outside the main checkout, reused on repeated starts.
+// Task workspace manager (spec §7, ADR-0002 D2/D3): one owned branch + clone per run, cut from a
+// freshly fetched origin/<base>, next to the OMI workspace, reused on repeated starts.
 //
 // Ownership is recorded twice: SQLite `resource_owner` (claimed BEFORE any git mutation, so a
 // crash mid-setup is recoverable) and a marker in the worktree's private git dir
 // (`<git-dir>/omi-owner.json`). The marker never sits in the working tree, so it needs no
-// `.git/info/exclude` entry and never blocks `git worktree remove` (T0.3/T0.8).
+// `.git/info/exclude` entry and never makes the clone dirty (T0.3/T0.8).
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -14,7 +14,7 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { classify } from "../adapters/github/client.ts";
 import type { OmiConfig } from "../core/config.ts";
@@ -25,6 +25,7 @@ import type { Db } from "../persistence/db.ts";
 import {
   acquireLease,
   claimResource,
+  ownedRefs,
   releaseLease,
   resourceOwner,
 } from "../persistence/repository.ts";
@@ -159,33 +160,8 @@ export function listWorktrees(repoRoot: string): Listed[] {
     });
 }
 
-/**
- * Resolves the worktree path for an Issue: `<worktreeRoot>/<repo>/<issue>` relative to the main
- * checkout, through the real path of the nearest existing ancestor (symlinks/junctions in the
- * root are normalized), and never inside the main checkout.
- */
-export function worktreePath(repoRoot: string, config: OmiConfig, issue: number): string {
-  const root = realpathSync.native(repoRoot);
-  const wanted = resolve(root, config.git.worktreeRoot, config.github.repo, String(issue));
-  let existing = wanted;
-  const rest: string[] = [];
-  while (!existsSync(existing)) {
-    rest.unshift(basename(existing));
-    existing = dirname(existing);
-  }
-  // The target itself must not be a link: we would operate on whatever it points at.
-  if (!rest.length && lstatSync(existing).isSymbolicLink()) {
-    throw new OmiError("OWNERSHIP_MISMATCH", "worktree path is a symlink", { path: wanted });
-  }
-  const path = rest.length
-    ? join(realpathSync.native(existing), ...rest)
-    : realpathSync.native(existing);
-  const rel = relative(root, path);
-  if (!rel || (!rel.startsWith("..") && !isAbsolute(rel))) {
-    throw new OmiError("CONFIG_INVALID", "git.worktreeRoot must be outside the main checkout");
-  }
-  return path;
-}
+/** `<workspace>-task-<runId>/` (ADR-0002 D2): sibling of the workspace, one per run. */
+export const taskWorkspaceRoot = (workspace: string, runId: string) => `${workspace}-task-${runId}`;
 
 const markerFile = (wt: string) => {
   const gitDir = git(["rev-parse", "--git-dir"], wt);
@@ -205,13 +181,22 @@ export function readMarker(wt: string): OwnerMarker | undefined {
 }
 
 /**
- * Creates or reuses the task worktree for `issue`. Idempotent for the same run: a second start
- * returns the existing workspace with its original base SHA. Anything not provably ours
- * (foreign directory, branch checked out elsewhere, other marker) is OWNERSHIP_MISMATCH.
+ * Creates or reuses the task workspace for `issue` (ADR-0002 D3): `<workspace>-task-<runId>/<repo>/`
+ * is a full clone of the local repo on a new branch cut from a freshly fetched origin/<base>,
+ * with `origin` pointing at GitHub. The local base branch is never touched (Spike-0009 Q7: the
+ * clone starts from the fetched origin/<base> commit, not the local branch). Idempotent for the
+ * same run; anything not provably ours is OWNERSHIP_MISMATCH.
  */
-export function ensureWorktree(
+export function ensureTaskWorkspace(
   db: Db,
-  o: { repoRoot: string; config: OmiConfig; issue: number; branch: string; runId: string },
+  o: {
+    repoRoot: string;
+    workspace: string;
+    config: OmiConfig;
+    issue: number;
+    branch: string;
+    runId: string;
+  },
 ): Workspace {
   const { config, issue, branch, runId } = o;
   const repository = `${config.github.owner}/${config.github.repo}`;
@@ -222,43 +207,20 @@ export function ensureWorktree(
     throw new OmiError("POLICY_VIOLATION", `task work never happens on ${branch}`);
   }
   const repoRoot = realpathSync.native(o.repoRoot);
-  const path = worktreePath(repoRoot, config, issue);
+  // A resumed run keeps the clone it (or the run it adopted) already owns.
+  const path =
+    ownedRefs(db, runId, "worktree")[0] ??
+    join(taskWorkspaceRoot(realpathSync.native(o.workspace), runId), basename(repoRoot));
   const lease = `worktree:${repository}#${issue}`;
   acquireLease(db, { key: lease, holder: runId, ttlMs: LEASE_MS });
   try {
-    const listed = listWorktrees(repoRoot);
-    const here = listed.find((w) => same(w.path, path));
-    const elsewhere = listed.find((w) => w.branch === branch && !same(w.path, path));
-    if (elsewhere) {
-      throw new OmiError(
-        "OWNERSHIP_MISMATCH",
-        `branch ${branch} is checked out in another worktree`,
-        {
-          path: elsewhere.path,
-        },
-      );
-    }
-    if (here)
-      return reuse(db, here, { repository, issue, branch, runId, base: config.git.baseBranch });
     if (existsSync(path)) {
-      throw new OmiError(
-        "OWNERSHIP_MISMATCH",
-        "worktree path exists but is not a registered worktree",
-        {
-          path,
-        },
-      );
+      return reuse(db, path, { repository, issue, branch, runId, base: config.git.baseBranch });
     }
-
-    const branchExists = tryGit(
-      ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`],
-      repoRoot,
-    );
-    if (branchExists !== undefined && resourceOwner(db, "branch", branch) !== runId) {
-      throw new OmiError(
-        "OWNERSHIP_MISMATCH",
-        `branch ${branch} already exists and is not owned by this run`,
-      );
+    if (existsSync(dirname(path)) && lstatSync(dirname(path)).isSymbolicLink()) {
+      throw new OmiError("OWNERSHIP_MISMATCH", "task workspace root is a symlink", {
+        path: dirname(path),
+      });
     }
     // Claim first: after a crash below, the next start can prove the leftovers are ours.
     claimResource(db, { runId, kind: "branch", ref: branch });
@@ -274,27 +236,34 @@ export function ensureWorktree(
       repoRoot,
     );
     if (!baseSha) throw new OmiError("CONFIG_INVALID", `origin/${base} does not exist`);
+    const origin = git(["remote", "get-url", "origin"], repoRoot);
 
     mkdirSync(dirname(path), { recursive: true });
-    git(
-      branchExists !== undefined
-        ? ["worktree", "add", path, branch]
-        : ["worktree", "add", "--no-track", "-b", branch, path, baseSha],
-      repoRoot,
-    );
+    // A local clone shares (hardlinks) every object, so the fetched base commit is there.
+    git(["clone", "--quiet", "--no-checkout", repoRoot, path], dirname(path));
+    git(["switch", "--quiet", "--no-track", "-c", branch, baseSha], path);
+    git(["remote", "set-url", "origin", origin], path);
+    git(["update-ref", `refs/remotes/origin/${base}`, baseSha], path);
+    // A clone (unlike a worktree) does not share the repo's local config: commit as the repo does.
+    for (const key of ["user.name", "user.email"]) {
+      const value = tryGit(["config", "--get", key], repoRoot);
+      if (value) git(["config", key, value], path);
+    }
     const marker: OwnerMarker = {
       schemaVersion: SCHEMA_VERSION,
       repository,
       issue,
       branch,
-      // A recovered branch keeps the commit it was cut from.
-      baseSha:
-        branchExists !== undefined ? git(["merge-base", branch, baseSha], repoRoot) : baseSha,
+      baseSha,
       runId,
       createdAt: new Date().toISOString(),
     };
-    writeFileSync(markerFile(path), `${JSON.stringify(marker, null, 2)}\n`);
-    return { path, branch, baseSha: marker.baseSha, reused: false, dirty: false };
+    writeFileSync(
+      markerFile(path),
+      `${JSON.stringify(marker, null, 2)}
+`,
+    );
+    return { path, branch, baseSha, reused: false, dirty: false };
   } finally {
     releaseLease(db, { key: lease, holder: runId });
   }
@@ -302,36 +271,33 @@ export function ensureWorktree(
 
 function reuse(
   db: Db,
-  w: Listed,
+  path: string,
   o: { repository: string; issue: number; branch: string; runId: string; base: string },
 ): Workspace {
-  if (w.prunable || !existsSync(w.path)) {
+  if (lstatSync(path).isSymbolicLink()) {
+    throw new OmiError("OWNERSHIP_MISMATCH", "task workspace path is a symlink", { path });
+  }
+  const top = tryGit(["rev-parse", "--show-toplevel"], path);
+  if (!top || !same(top, path)) {
+    throw new OmiError("OWNERSHIP_MISMATCH", "task workspace exists but is not a clone", { path });
+  }
+  const on = tryGit(["symbolic-ref", "--quiet", "--short", "HEAD"], path);
+  if (on !== o.branch) {
     throw new OmiError(
       "OWNERSHIP_MISMATCH",
-      "registered worktree is missing on disk: run git worktree prune",
-      {
-        path: w.path,
-      },
+      `task workspace is on ${on ?? "a detached HEAD"}, expected ${o.branch}`,
+      { path },
     );
   }
-  if (w.branch !== o.branch) {
-    throw new OmiError(
-      "OWNERSHIP_MISMATCH",
-      `worktree is on ${w.branch ?? "a detached HEAD"}, expected ${o.branch}`,
-      {
-        path: w.path,
-      },
-    );
-  }
-  let marker = readMarker(w.path);
+  let marker = readMarker(path);
   if (!marker) {
-    // Crash between `worktree add` and the marker write: only adopt what SQLite says we claimed.
-    if (resourceOwner(db, "worktree", w.path) !== o.runId) {
-      throw new OmiError("OWNERSHIP_MISMATCH", "worktree has no OMI ownership marker", {
-        path: w.path,
+    // Crash between the clone and the marker write: only adopt what SQLite says we claimed.
+    if (resourceOwner(db, "worktree", path) !== o.runId) {
+      throw new OmiError("OWNERSHIP_MISMATCH", "task workspace has no OMI ownership marker", {
+        path,
       });
     }
-    const baseSha = git(["merge-base", o.branch, `refs/remotes/origin/${o.base}`], w.path);
+    const baseSha = git(["merge-base", o.branch, `refs/remotes/origin/${o.base}`], path);
     marker = {
       schemaVersion: SCHEMA_VERSION,
       repository: o.repository,
@@ -341,25 +307,30 @@ function reuse(
       runId: o.runId,
       createdAt: new Date().toISOString(),
     };
-    writeFileSync(markerFile(w.path), `${JSON.stringify(marker, null, 2)}\n`);
+    writeFileSync(
+      markerFile(path),
+      `${JSON.stringify(marker, null, 2)}
+`,
+    );
   }
   if (
     marker.repository !== o.repository ||
     marker.issue !== o.issue ||
     marker.branch !== o.branch
   ) {
-    throw new OmiError("OWNERSHIP_MISMATCH", "worktree belongs to another task", {
-      path: w.path,
+    throw new OmiError("OWNERSHIP_MISMATCH", "task workspace belongs to another task", {
+      path,
       owner: `${marker.repository}#${marker.issue}`,
     });
   }
   if (marker.runId !== o.runId) {
     // Same task resumed by a new run (one live run per Issue): the marker follows the owner.
     writeFileSync(
-      markerFile(w.path),
-      `${JSON.stringify({ ...marker, runId: o.runId }, null, 2)}\n`,
+      markerFile(path),
+      `${JSON.stringify({ ...marker, runId: o.runId }, null, 2)}
+`,
     );
   }
-  const dirty = git(["status", "--porcelain", "--untracked-files=all"], w.path) !== "";
-  return { path: w.path, branch: o.branch, baseSha: marker.baseSha, reused: true, dirty };
+  const dirty = git(["status", "--porcelain", "--untracked-files=all"], path) !== "";
+  return { path, branch: o.branch, baseSha: marker.baseSha, reused: true, dirty };
 }

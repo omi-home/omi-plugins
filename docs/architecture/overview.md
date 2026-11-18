@@ -28,7 +28,7 @@ Ký hiệu `spec §N` (trong code, ADR, Issue) trỏ tới section `§N` trong p
 | GitHub Project + Issues | cây công việc, trạng thái, PR, comment audit | GitHub |
 | CI / hooks | kiểm tra độc lập với agent | bằng chứng CI |
 
-Luồng chính (D1): Coordinator → `omi` CLI → `claude -p --agent omi-engineering:<role>` (cwd = worktree của task) → kết quả có cấu trúc → CLI lưu SQLite và đăng comment.
+Luồng chính (D1): Coordinator → `omi` CLI → `claude -p --agent omi-engineering:<role>` (cwd = clone trong task workspace, ADR-0002 D2) → kết quả có cấu trúc → CLI lưu SQLite và đăng comment.
 
 > [ADR-0002](../decisions/ADR-0002-workspace-va-profile-thuc-thi-claude-code.md) thay luồng này: workspace đồng cấp với repo, task workspace (clone) và profile thực thi Claude Code. Sơ đồ trên là as-built cho tới khi Feature-0024 #156 và Feature-0021 #137 hoàn thành.
 
@@ -118,7 +118,7 @@ omi-plugins/
 │   │   ├── git/
 │   │   └── process/
 │   ├── reporting/                      # renderer, outbox, reconciliation
-│   ├── resources/                      # worktree, cache, cleanup ownership
+│   ├── resources/                      # task workspace (clone), role files, cleanup ownership
 │   └── persistence/                    # SQLite migrations and repositories
 ├── config/
 │   ├── model-routing.yaml
@@ -186,5 +186,5 @@ omi-plugins/
 
 - TypeScript chạy trực tiếp trên Node ≥ 22.18 (type stripping, không build); `tsc` chỉ typecheck.
 - Contract: zod là nguồn duy nhất cho TS type và validator runtime (`runtime/core/contracts.ts`, `config.ts`). Mọi tài liệu đều strict và có `schemaVersion`. Lỗi được phân loại trong `runtime/core/errors/errors.ts`: loại `transient` tính là attempt, không tính là round.
-- Dữ liệu cục bộ nằm trong workspace, ngoài repo đích (ADR-0002 D1): config dự án ở `<workspace>/.omi-plugins/omi.config.yaml`; state SQLite (`node:sqlite`, WAL, migration theo `user_version`) ở `<workspace>/.omi-plugins/state.sqlite`. Mọi worktree của repo dùng chung một DB, và DB không bao giờ bị commit.
+- Dữ liệu cục bộ nằm trong workspace, ngoài repo đích (ADR-0002 D1): config dự án ở `<workspace>/.omi-plugins/omi.config.yaml`; state SQLite (`node:sqlite`, WAL, migration theo `user_version`) ở `<workspace>/.omi-plugins/state.sqlite`. Mọi task workspace dùng chung một DB, và DB không bao giờ bị commit.
 - Test: `node:test`. Lint/format: Biome. Một lệnh: `npm run check`.
