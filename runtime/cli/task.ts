@@ -48,7 +48,12 @@ import {
 import { OmiError } from "../core/errors/errors.ts";
 import { PRE_MERGE, PROJECT_STATUS } from "../core/workflow-engine/fsm.ts";
 import { planWorkflow, type WorkflowPlan } from "../core/workflow-engine/plan.ts";
-import { runAnalysis, runSlice, type SliceDeps } from "../core/workflow-engine/slice.ts";
+import {
+  lastStepError,
+  runAnalysis,
+  runSlice,
+  type SliceDeps,
+} from "../core/workflow-engine/slice.ts";
 import { type Db, openState, statePath } from "../persistence/db.ts";
 import {
   acquireLease,
@@ -232,6 +237,8 @@ export interface RunResult {
   state: WorkflowContext["state"];
   round: number;
   status: StatusChange | null;
+  /** Why the last agent attempt failed technically, when the run ended BLOCKED (#121). */
+  error?: { code: string; message: string; file: string };
 }
 
 /**
@@ -257,6 +264,7 @@ export function taskRun(
   const session = deps.session ?? randomUUID();
   try {
     acquireLease(db, { key: lease, holder: session, ttlMs: RUN_LEASE_MS });
+    const evidenceDir = join(dirname(file), "evidence", start.run.id);
     try {
       const ctx = runSlice(
         {
@@ -264,7 +272,7 @@ export function taskRun(
           config,
           gh,
           pluginRoot: PLUGIN_ROOT,
-          evidenceDir: join(dirname(file), "evidence", start.run.id),
+          evidenceDir,
           runAgent: deps.runAgent,
           fromSource: deps.fromSource,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),
@@ -282,6 +290,7 @@ export function taskRun(
         state: ctx.state,
         round: ctx.round,
         status,
+        ...blockedBy(ctx.state, evidenceDir),
       };
     } finally {
       releaseLease(db, { key: lease, holder: session });
@@ -290,6 +299,11 @@ export function taskRun(
     db.close();
   }
 }
+
+const blockedBy = (state: WorkflowContext["state"], evidenceDir: string) => {
+  const error = state === "BLOCKED" ? lastStepError(evidenceDir) : undefined;
+  return error ? { error } : {};
+};
 
 /** Workflow plan from the Issue's type and labels, plus its parent's type (Bug → Bug Resolution). */
 function planFor(config: OmiConfig, ticket: Ticket, gh: GhRunner): WorkflowPlan {
@@ -343,13 +357,14 @@ export function taskAnalyze(
       });
       if (run.state === "CREATED") run = step(db, run, "TICKET_VALID");
       setStatus(config, issue, "Analysis", gh);
+      const evidenceOf = (id: string) => join(dirname(file), "evidence", id);
       const ctx = runAnalysis(
         {
           db,
           config,
           gh,
           pluginRoot: PLUGIN_ROOT,
-          evidenceDir: join(dirname(file), "evidence", run.id),
+          evidenceDir: evidenceOf(run.id),
           runAgent: deps.runAgent,
           fromSource: deps.fromSource,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),
@@ -363,7 +378,13 @@ export function taskAnalyze(
         ctx.state === "BLOCKED" ? "Blocked" : "Waiting PO",
         gh,
       );
-      return { run: getRun(db, run.id) as RunRow, state: ctx.state, round: ctx.round, status };
+      return {
+        run: getRun(db, run.id) as RunRow,
+        state: ctx.state,
+        round: ctx.round,
+        status,
+        ...blockedBy(ctx.state, evidenceOf(run.id)),
+      };
     } finally {
       releaseLease(db, { key: lease, holder: session });
     }

@@ -3,7 +3,7 @@
 // transport failures retried as attempts, bad claims blocked, crash-resume without re-running.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -12,7 +12,7 @@ import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { parseConfig } from "../../runtime/core/config.ts";
 import type { TaskPacket } from "../../runtime/core/contracts.ts";
 import type { DeliveryPlan, WorkflowPlan } from "../../runtime/core/workflow-engine/plan.ts";
-import { runAnalysis, runSlice } from "../../runtime/core/workflow-engine/slice.ts";
+import { lastStepError, runAnalysis, runSlice } from "../../runtime/core/workflow-engine/slice.ts";
 import { openState } from "../../runtime/persistence/db.ts";
 import * as repo from "../../runtime/persistence/repository.ts";
 
@@ -32,8 +32,8 @@ interface Script {
   security?: Verdict | "CRITICAL";
   /** This analyst stops with an open question. */
   analysisBlocks?: string;
-  /** Manual QA verdicts, one per QA run (default PASSED). */
-  qa?: Verdict[];
+  /** Manual QA verdicts, one per QA run (default PASSED); INVALID cites an absolute path. */
+  qa?: (Verdict | "INVALID")[];
   /** Engineer leaves an uncommitted file after its first step (release validation). */
   leavesDirt?: boolean;
 }
@@ -128,10 +128,12 @@ function stubAgents(script: Script) {
           : { sectionUpdates: [{ section, markdown: `### ${section} by ${role}` }] }),
       };
     } else if (role === "manual-qa-engineer") {
-      const v = script.qa?.shift() ?? "PASSED";
+      const q = script.qa?.shift() ?? "PASSED";
+      const v = q === "INVALID" ? "PASSED" : q;
       result = {
         ...base,
         status: v,
+        ...(q === "INVALID" ? { evidencePaths: ["/abs/.git/omi/evidence/test.log"] } : {}),
         summary: `qa ${packet.stepId}`,
         ...(v === "PASSED"
           ? { sectionUpdates: [{ section: "qa", markdown: "### Test cases" }] }
@@ -408,6 +410,11 @@ test("a fake changed-file claim blocks the run; nothing is reported for it", () 
   const ctx = runSlice(s.deps, s.target);
   assert.deepEqual([ctx.state, ctx.resumeFrom], ["BLOCKED", "RUNNING"]);
   assert.equal(s.gh.comments.length, 0);
+  // The reason is kept for the CLI (G6-002, #121), not only the error code.
+  const err = lastStepError(s.deps.evidenceDir);
+  assert.equal(err?.code, "CONTRACT_INVALID");
+  assert.match(err?.message ?? "", /claims do not match the worktree/);
+  assert.match(readFileSync(err?.file ?? "", "utf8"), /src\/never\.txt/);
 });
 
 test("crash before the report is posted: rerun posts it without re-running the agent", () => {
@@ -608,4 +615,16 @@ test("release validation: uncommitted work is a QA failure the engineer fixes", 
 test("Manual QA BLOCKED stops for a person", () => {
   const s = setup({ qa: ["BLOCKED"] }, delivery({ manualQa: true }));
   assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
+});
+
+test("Manual QA technical failure: unblocked run resumes in QA and still gets checks (#121)", () => {
+  const s = setup({ qa: ["INVALID", "PASSED"] }, delivery({ manualQa: true }));
+  assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
+  assert.equal(lastStepError(s.deps.evidenceDir)?.code, "CONTRACT_INVALID");
+  // A new invocation after the unblock has no in-memory checks of the first one.
+  repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const qa = s.agents.packets.filter((p) => p.role === "manual-qa-engineer");
+  assert.equal(qa.length, 2);
+  assert.equal(qa[1]?.checkResults?.find((c) => c.name === "test")?.outcome, "pass");
 });

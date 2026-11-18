@@ -5,7 +5,7 @@
 // agent process (ADR-0001 D1) → verified result → persisted with its report → report posted
 // before the next step. The FSM decides every move; agents only recommend.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AgentLaunch, buildAgentLaunch, observeRun } from "../../adapters/claude/launch.ts";
 import type { GhRunner } from "../../adapters/github/client.ts";
@@ -24,6 +24,7 @@ import {
   stepResult,
 } from "../../persistence/repository.ts";
 import { publishPending } from "../../reporting/outbox.ts";
+import { redactDeep } from "../../reporting/redact.ts";
 import { renderStepReport } from "../../reporting/render.ts";
 import { git } from "../../resources/worktree.ts";
 import type { OmiConfig } from "../config.ts";
@@ -58,6 +59,26 @@ export interface SliceDeps {
   now?: () => Date;
   /** Writes a `<!-- omi:section=… -->` of the Issue body (the Manual QA test cases). */
   writeSection?: (section: string, markdown: string) => void;
+}
+
+/** Suffix of the file that keeps why an agent attempt failed technically (G6-002, #121). */
+export const ERROR_SUFFIX = ".error.json";
+
+/** The newest technical failure recorded in `evidenceDir`, for the CLI to show on BLOCKED. */
+export function lastStepError(
+  evidenceDir: string,
+): { code: string; message: string; file: string } | undefined {
+  if (!existsSync(evidenceDir)) return undefined;
+  const file = readdirSync(evidenceDir)
+    .filter((f) => f.endsWith(ERROR_SUFFIX))
+    .map((f) => join(evidenceDir, f))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+  if (!file) return undefined;
+  const { code, message } = JSON.parse(readFileSync(file, "utf8")) as {
+    code: string;
+    message: string;
+  };
+  return { code, message, file };
 }
 
 export interface SliceTarget {
@@ -255,6 +276,12 @@ function agentStep(
       };
     } catch (e) {
       const err = e instanceof OmiError ? e : new OmiError("INTERNAL", (e as Error).message);
+      // The reason survives the attempt (G6-002, #121): the DB keeps only the code.
+      mkdirSync(d.evidenceDir, { recursive: true });
+      const file = join(d.evidenceDir, `${spec.stepId}-r${ctx.round}-a${attempt}${ERROR_SUFFIX}`);
+      const failure = { code: err.code, message: err.message, details: err.details ?? null };
+      writeFileSync(file, JSON.stringify(redactDeep(failure), null, 2));
+      addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "log", path: file });
       failAttempt(db, { stepRunId: step.id, attempt, errorCode: err.code });
       const next = advanceRun(
         db,
@@ -358,7 +385,7 @@ function releaseStep(
   t: SliceTarget,
   ctx: WorkflowContext,
   checkedHead: string | null,
-): Finding[] {
+): { findings: Finding[]; checks?: CheckRun[] } {
   const started = Date.now();
   const head = git(["rev-parse", "HEAD"], t.worktree);
   const findings: Finding[] = [];
@@ -380,6 +407,7 @@ function releaseStep(
     });
   }
   const recheck = head !== checkedHead;
+  let checks: CheckRun[] | undefined;
   if (recheck) {
     const gate = checksStep(d, t, ctx, [], {
       stepId: "release-checks",
@@ -387,6 +415,7 @@ function releaseStep(
       next: "Release validation.",
     });
     findings.push(...gate.findings);
+    checks = gate.results; // e.g. after a resume, Manual QA still gets this HEAD's checks (#121)
   }
   const stepId = `release-validation${qaSuffix(ctx)}`;
   const comment = parseContract(
@@ -423,7 +452,7 @@ function releaseStep(
     body: renderStepReport(comment),
   });
   publishPending(d.db, t.run.id, { gh: d.gh });
-  return findings;
+  return { findings, checks };
 }
 
 /**
@@ -527,8 +556,9 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
       }
       case "IN_QA": {
         const release = releaseStep(d, t, ctx, checkedHead);
-        if (release.length) {
-          findings = release;
+        checks = release.checks ?? checks;
+        if (release.findings.length) {
+          findings = release.findings;
           advance({ type: "QA_FAILED" });
           break;
         }

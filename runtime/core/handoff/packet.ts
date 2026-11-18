@@ -23,11 +23,16 @@ export const MAX_RESULT_CHARS = 64 * 1024;
 
 export type TaskPacketInput = Omit<TaskPacket, "schemaVersion" | "outputSchema">;
 
-/** Validates a packet; caller supplies the run's owned worktree and the GitHub context. */
+/**
+ * Validates a packet; caller supplies the run's owned worktree and the GitHub context.
+ * Check log paths are dropped: they live outside the worktree, agents cannot read them, and an
+ * agent citing one as evidence gets its result rejected (G6-001, #121).
+ */
 export function buildTaskPacket(input: TaskPacketInput): TaskPacket {
+  const checkResults = input.checkResults?.map((c) => ({ ...c, logPath: null }));
   const packet = parseContract(
     TaskPacket,
-    { ...input, schemaVersion: SCHEMA_VERSION, outputSchema: STEP_RESULT_SCHEMA },
+    { ...input, checkResults, schemaVersion: SCHEMA_VERSION, outputSchema: STEP_RESULT_SCHEMA },
     "task packet",
   );
   if (!existsSync(packet.worktree) || !statSync(packet.worktree).isDirectory()) {

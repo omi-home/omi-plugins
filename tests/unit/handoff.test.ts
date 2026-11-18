@@ -19,6 +19,7 @@ import {
   acceptStepResult,
   buildTaskPacket,
   MAX_RESULT_CHARS,
+  packetPrompt,
   type TaskPacketInput,
 } from "../../runtime/core/handoff/packet.ts";
 
@@ -82,6 +83,15 @@ const result = (extra: Record<string, unknown> = {}) =>
     summary: "done",
     ...extra,
   });
+
+test("buildTaskPacket: check log paths outside the worktree never reach the agent (G6-001)", () => {
+  const { dir, base } = repo();
+  const log = join(dir, ".git", "omi", "evidence", "checks-r1-1", "test.log");
+  const check = { name: "test", outcome: "pass", exitCode: 0, summary: "", logPath: log } as const;
+  const p = buildTaskPacket({ ...input(dir, base), checkResults: [check] });
+  assert.deepEqual(p.checkResults, [{ ...check, logPath: null }]);
+  assert.doesNotMatch(packetPrompt(p), /test\.log/);
+});
 
 test("buildTaskPacket: valid packet carries the output schema; missing role / bad worktree rejected", () => {
   const { dir, base } = repo();

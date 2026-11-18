@@ -201,6 +201,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
           ...(r.status
             ? [`status    ${r.status.issue}: ${r.status.from ?? "unset"} → ${r.status.to}`]
             : []),
+          ...(r.error ? [`error     ${r.error.code}: ${r.error.message} (${r.error.file})`] : []),
         ];
         return ok(r, lines(human));
       }
@@ -211,6 +212,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
           ...(r.status
             ? [`status    ${r.status.issue}: ${r.status.from ?? "unset"} → ${r.status.to}`]
             : []),
+          ...(r.error ? [`error     ${r.error.code}: ${r.error.message} (${r.error.file})`] : []),
         ];
         return ok(r, lines(human));
       }
