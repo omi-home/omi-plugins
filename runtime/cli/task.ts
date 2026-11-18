@@ -1,10 +1,9 @@
 // `omi ticket validate`, `omi task start`, `omi task status` (spec §7–§8): ticket gates →
 // run (FSM CREATED → TICKET_VALIDATED → WORKSPACE_READY) → owned worktree → Project status.
 // No LLM call anywhere in setup.
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
