@@ -84,6 +84,8 @@ export interface ActualBranch {
   rules: Rule[] | null;
   /** Settings a full PUT could not carry over without loss (push restrictions…). */
   blocker?: string;
+  /** Why the protection could not be read (no admin rights). */
+  unreadable?: string;
 }
 
 export interface ActualRepo {
@@ -94,7 +96,8 @@ export interface ActualRepo {
 
 export type RepoAction =
   | ({ kind: "create-label" } & Label)
-  | ({ kind: "update-label" } & Label)
+  /** `current`: the label's name on GitHub (renamed when only its case differs). */
+  | ({ kind: "update-label"; current: string } & Label)
   | { kind: "protect"; branch: string; enable: Rule[] }
   | { kind: "merge-methods"; set: Partial<RepoConfig["merge"]> }
   /** Needs a person: apply never does it. */
@@ -119,8 +122,12 @@ export function planRepo(
   for (const want of desired.labels) {
     const have = actual.labels.find((l) => key(l.name) === key(want.name));
     if (!have) actions.push({ kind: "create-label", ...want });
-    else if (have.color.toLowerCase() !== want.color || have.description !== want.description) {
-      actions.push({ kind: "update-label", ...want, name: have.name });
+    else if (
+      have.name !== want.name ||
+      have.color.toLowerCase() !== want.color ||
+      have.description !== want.description
+    ) {
+      actions.push({ kind: "update-label", ...want, current: have.name });
     }
   }
   const seen = new Set<string>();
@@ -137,7 +144,9 @@ export function planRepo(
     const b = actual.branches.find((x) => x.name === name);
     if (!b?.exists)
       actions.push({ kind: "manual", what: `branch ${name}`, reason: "does not exist" });
-    else if (b.rules === null) {
+    else if (b.unreadable) {
+      actions.push({ kind: "manual", what: `protection of ${name}`, reason: b.unreadable });
+    } else if (b.rules === null) {
       actions.push({
         kind: "unsupported",
         what: `protection of ${name}`,

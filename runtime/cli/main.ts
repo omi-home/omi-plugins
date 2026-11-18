@@ -174,6 +174,9 @@ const humanPlan = (actions: FieldAction[], extra: string[], drift: StatusDrift[]
   ...drift.map((d) => `drift     ${d.issue} ${d.status ?? "unset"}: ${d.reason}`),
 ];
 
+const repoPrefix = (a: RepoAction) =>
+  a.kind === "manual" || a.kind === "unsupported" ? a.kind.padEnd(11) : "pending    ";
+
 const describeRepo = (a: RepoAction) =>
   a.kind === "create-label" || a.kind === "update-label"
     ? `${a.kind === "create-label" ? "create" : "update"} label ${a.name} (#${a.color} ${a.description})`
@@ -426,10 +429,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       case "github repo plan": {
         const r = repoPlan(repo(cwd).config);
         const human = [
-          ...r.actions.map(
-            (a) =>
-              `${a.kind === "manual" || a.kind === "unsupported" ? a.kind.padEnd(9) : "pending  "} ${describeRepo(a)}`,
-          ),
+          ...r.actions.map((a) => `${repoPrefix(a)} ${describeRepo(a)}`),
           ...(r.actions.length ? [] : ["repo      in the desired state"]),
           ...r.foreign.map((l) => `foreign   label ${l} (not managed: kept)`),
         ];
@@ -448,7 +448,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         const human = [
           ...r.applied.map((a) => `applied   ${describeRepo(a)}`),
           ...(r.applied.length ? [] : ["applied   nothing (already in the desired state)"]),
-          ...r.plan.actions.map((a) => `${a.kind.padEnd(9)} ${describeRepo(a)}`),
+          ...r.plan.actions.map((a) => `${repoPrefix(a)} ${describeRepo(a)}`),
         ];
         return ok(r, lines(human), r.plan.actions.length ? EXIT.failed : EXIT.ok);
       }

@@ -16,6 +16,7 @@ import {
   type Rule,
   writable,
 } from "../../core/repo-config.ts";
+import { redactDeep } from "../../reporting/redact.ts";
 import { classify, type GhRunner, spawnGh } from "./client.ts";
 
 function api(run: GhRunner, args: string[], what: string, body?: unknown): unknown {
@@ -51,6 +52,7 @@ const Protection = z.looseObject({
       checks: z
         .array(z.looseObject({ context: z.string(), app_id: z.int().nullable().optional() }))
         .optional(),
+      contexts: z.array(z.string()).optional(),
     })
     .nullable()
     .optional(),
@@ -135,6 +137,9 @@ const branchesOf = (c: OmiConfig) => ({ release: c.git.releaseBranch, base: c.gi
 
 function readRepo(c: OmiConfig, run: GhRunner) {
   const repo = parseContract(Repo, api(run, [repoPath(c)], "repository"), "repository");
+  const admin = repo.permissions?.admin ?? false;
+  /** Protection as read, reused by apply's PUT (no second read). */
+  const protections = new Map<string, Protection | null>();
   const labels: Label[] = parseContract(
     Labels,
     api(run, ["--paginate", "--slurp", `${repoPath(c)}/labels?per_page=100`], "labels"),
@@ -143,9 +148,14 @@ function readRepo(c: OmiConfig, run: GhRunner) {
     .flat()
     .map((l) => ({ name: l.name, color: l.color, description: l.description ?? "" }));
   const branches: ActualBranch[] = [...new Set(Object.values(branchesOf(c)))].map((name) => {
+    // Branch protection is readable by admins only.
+    if (!admin) {
+      return { name, exists: true, rules: [], unreadable: "reading protection needs admin rights" };
+    }
     const r = readProtection(c, name, run);
     if (r === "unsupported") return { name, exists: true, rules: null };
     if (!r.exists) return { name, exists: false, rules: [] };
+    protections.set(name, r.protection);
     return { name, exists: true, rules: rulesOf(r.protection), blocker: blockerOf(r.protection) };
   });
   const merge = {
@@ -153,7 +163,7 @@ function readRepo(c: OmiConfig, run: GhRunner) {
     mergeCommit: repo.allow_merge_commit,
     rebase: repo.allow_rebase_merge,
   };
-  return { admin: repo.permissions?.admin ?? false, actual: { labels, branches, merge } };
+  return { admin, protections, actual: { labels, branches, merge } };
 }
 
 /** Read-only diff of the configured repository against the desired state. */
@@ -175,10 +185,15 @@ function protectionBody(cur: Protection | null, enable: Rule[]) {
     required_status_checks: sc
       ? {
           strict: sc.strict,
-          checks: (sc.checks ?? []).map((x) => ({
-            context: x.context,
-            ...(x.app_id == null ? {} : { app_id: x.app_id }),
-          })),
+          // Legacy shape (contexts only) is sent back as it came: no check is dropped.
+          ...(sc.checks
+            ? {
+                checks: sc.checks.map((x) => ({
+                  context: x.context,
+                  ...(x.app_id == null ? {} : { app_id: x.app_id }),
+                })),
+              }
+            : { contexts: sc.contexts ?? [] }),
         }
       : null,
     enforce_admins: on("enforce-admins"),
@@ -203,19 +218,16 @@ function protectionBody(cur: Protection | null, enable: Rule[]) {
   };
 }
 
-const ApprovedPlan = z.looseObject({ actions: z.array(z.unknown()) });
+const PlanFile = z.strictObject({ actions: z.array(z.unknown()), foreign: z.array(z.string()) });
+const ApprovedPlan = z.union([
+  z.strictObject({ ok: z.boolean(), command: z.literal("github repo plan"), data: PlanFile }),
+  PlanFile,
+]);
 
 /** The plan inside `omi github repo plan --output json` (the envelope or its `data`). */
 export function approvedActions(json: unknown): unknown[] {
-  const env = z.looseObject({ data: z.unknown() }).safeParse(json);
-  const r = ApprovedPlan.safeParse(env.success && env.data.data ? env.data.data : json);
-  if (!r.success) {
-    throw new OmiError(
-      "USAGE_INVALID",
-      "--approved-plan is not the output of `omi github repo plan --output json`",
-    );
-  }
-  return r.data.actions;
+  const r = parseContract(ApprovedPlan, json, "--approved-plan");
+  return "data" in r ? r.data.actions : r.actions;
 }
 
 /**
@@ -229,11 +241,12 @@ export function repoApply(
   run: GhRunner = spawnGh,
   desired: RepoConfig = loadRepoConfig(),
 ): { applied: RepoAction[]; plan: RepoPlan } {
-  const { admin, actual } = readRepo(c, run);
+  const { admin, protections, actual } = readRepo(c, run);
   const plan = planRepo(desired, actual, branchesOf(c));
   const todo = plan.actions.filter(writable);
   if (!todo.length) return { applied: [], plan };
-  if (JSON.stringify(plan.actions) !== JSON.stringify(approved)) {
+  // The approved file went through redaction on output: compare the same form.
+  if (JSON.stringify(redactDeep(plan.actions)) !== JSON.stringify(approved)) {
     throw new OmiError(
       "POLICY_VIOLATION",
       "the repository plan changed since it was approved: run `omi github repo plan` and approve again",
@@ -256,20 +269,16 @@ export function repoApply(
     } else if (a.kind === "update-label") {
       api(
         run,
-        [`${repoPath(c)}/labels/${encodeURIComponent(a.name)}`, "--method", "PATCH"],
+        [`${repoPath(c)}/labels/${encodeURIComponent(a.current)}`, "--method", "PATCH"],
         `update label ${a.name}`,
-        { color: a.color, description: a.description },
+        { new_name: a.name, color: a.color, description: a.description },
       );
     } else if (a.kind === "protect") {
-      const cur = readProtection(c, a.branch, run);
-      if (cur === "unsupported" || !cur.exists) {
-        throw new OmiError("POLICY_VIOLATION", `protection of ${a.branch} changed during apply`);
-      }
       api(
         run,
         [branchPath(c, a.branch), "--method", "PUT"],
         `protect ${a.branch}`,
-        protectionBody(cur.protection, a.enable),
+        protectionBody(protections.get(a.branch) ?? null, a.enable),
       );
     } else if (a.kind === "merge-methods") {
       const body: Record<string, boolean> = {};

@@ -4,7 +4,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { GhRunner } from "../../runtime/adapters/github/client.ts";
-import { repoApply, repoPlan, repoValidate } from "../../runtime/adapters/github/repo.ts";
+import {
+  approvedActions,
+  repoApply,
+  repoPlan,
+  repoValidate,
+} from "../../runtime/adapters/github/repo.ts";
 import { type OmiConfig, parseConfig } from "../../runtime/core/config.ts";
 import type { OmiError } from "../../runtime/core/errors/errors.ts";
 import { loadRepoConfig } from "../../runtime/core/repo-config.ts";
@@ -95,7 +100,8 @@ function fakeRepo(state: State) {
       if (method === "PATCH") {
         const name = decodeURIComponent(path.split("/labels/")[1] as string);
         const l = state.labels.find((x) => x.name === name);
-        Object.assign(l ?? {}, body);
+        const { new_name, ...rest } = body;
+        Object.assign(l ?? {}, rest, new_name ? { name: new_name } : {});
         writes.push(`label~:${name}`);
         return ok(l);
       }
@@ -151,7 +157,7 @@ test("a plan that changed since approval is refused before any write", () => {
 test("stricter existing protection and extra settings survive the PUT", () => {
   const state = seed();
   state.protection.develop = {
-    required_status_checks: { strict: true, checks: [{ context: "ci", app_id: null }] },
+    required_status_checks: { strict: true, contexts: ["ci"] },
     required_pull_request_reviews: {
       required_approving_review_count: 2,
       dismiss_stale_reviews: true,
@@ -173,7 +179,7 @@ test("stricter existing protection and extra settings survive the PUT", () => {
   });
   repoApply(config(), plan.actions, gh.run);
   const body = gh.bodies.develop as Record<string, unknown>;
-  assert.deepEqual(body.required_status_checks, { strict: true, checks: [{ context: "ci" }] });
+  assert.deepEqual(body.required_status_checks, { strict: true, contexts: ["ci"] });
   assert.equal(
     (body.required_pull_request_reviews as Record<string, unknown>).required_approving_review_count,
     2,
@@ -208,6 +214,11 @@ test("permission denied: no admin is refused before writing; a 403 write is an a
   state.admin = false;
   const gh = fakeRepo(state);
   const plan = repoPlan(config(), gh.run);
+  // Protection is admin-only: reported as manual, not a cryptic 404.
+  assert.deepEqual(
+    plan.actions.filter((a) => a.kind === "manual").map((a) => ("reason" in a ? a.reason : "")),
+    ["reading protection needs admin rights", "reading protection needs admin rights"],
+  );
   assert.throws(
     () => repoApply(config(), plan.actions, gh.run),
     (e: OmiError) => e.code === "GITHUB_AUTH" && /no admin rights/.test(e.message),
@@ -221,4 +232,26 @@ test("permission denied: no admin is refused before writing; a 403 write is an a
     () => repoApply(config(), repoPlan(config(), d.run).actions, d.run),
     (e: OmiError) => e.code === "GITHUB_AUTH",
   );
+});
+
+test("a label differing only in case is renamed; the approved plan matches after redaction", () => {
+  const state = seed();
+  state.labels.push({
+    name: "Security",
+    color: "ee0701",
+    description: "Security Reviewer is mandatory",
+  });
+  const gh = fakeRepo(state);
+  const plan = repoPlan(config(), gh.run);
+  const rename = plan.actions.find((a) => a.kind === "update-label");
+  assert.deepEqual(rename && "current" in rename ? [rename.current, rename.name] : [], [
+    "Security",
+    "security",
+  ]);
+  // As saved from `--output json`: the envelope, redacted.
+  const file = JSON.parse(JSON.stringify({ ok: false, command: "github repo plan", data: plan }));
+  repoApply(config(), approvedActions(file), gh.run);
+  assert.ok(state.labels.some((l) => l.name === "security"));
+  assert.ok(!state.labels.some((l) => l.name === "Security"));
+  assert.throws(() => approvedActions({ actions: [], foreign: [], extra: 1 }), /--approved-plan/);
 });
