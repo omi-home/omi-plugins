@@ -47,6 +47,30 @@ test("rollUp: only closed and accepted children; cancelled ones allowed but not 
   assert.equal(no([]), "no children");
 });
 
+test("rollUp: unticked Scope / Acceptance of the parent holds it (Bug-0001 #162)", () => {
+  const body = [
+    "## Objective",
+    "- [ ] not scope",
+    "## Scope / Acceptance",
+    "### Design",
+    "- [ ] a",
+    "- [x] b",
+    "  * [ ] nested",
+    "## Definition of Done",
+    "- [ ] Mọi Issue con đóng",
+  ].join("\r\n"); // GitHub returns CRLF bodies
+  assert.deepEqual(rollUp([kid("#1")], 1, body), {
+    ready: false,
+    reason: "scope not done: 2 unchecked box(es) under Scope / Acceptance",
+  });
+  assert.deepEqual(rollUp([kid("#1")], 1, body.replaceAll("[ ]", "[x]")), { ready: true });
+  assert.deepEqual(rollUp([kid("#1")], 1, "## Scope / Acceptance (from roadmap)\n- [ ] last"), {
+    ready: false,
+    reason: "scope not done: 1 unchecked box(es) under Scope / Acceptance",
+  });
+  assert.deepEqual(rollUp([kid("#1")], 1, "## Steps to Reproduce\n- [ ] x"), { ready: true });
+});
+
 /** Issues by "owner/repo#n" → what they are blocked by. */
 function fakeGraph(edges: Record<string, string[]>, totals: Record<string, number> = {}) {
   const added: string[] = [];

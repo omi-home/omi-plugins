@@ -206,7 +206,7 @@ export function setStatus(
 
 const PARENT_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String){
   repository(owner:$owner,name:$repo){ issue(number:$number){
-    id state labels(first:30){nodes{name}} subIssuesSummary{total completed}
+    id state labels(first:30){nodes{name}} body subIssuesSummary{total completed}
     subIssues(first:100,after:$after){ pageInfo{ hasNextPage endCursor }
       nodes{ number state stateReason repository{nameWithOwner}
         projectItems(first:20){ totalCount nodes{ project{ number owner{... on Organization{login} ... on User{login}} }
@@ -240,6 +240,7 @@ const ParentData = z.strictObject({
         .strictObject({
           id: z.string(),
           state: z.enum(["OPEN", "CLOSED"]),
+          body: z.string().optional(),
           labels: z.strictObject({ nodes: z.array(z.strictObject({ name: z.string() })) }),
           subIssuesSummary: z.strictObject({ total: z.int(), completed: z.int() }),
           subIssues: z.strictObject({
@@ -330,7 +331,7 @@ export function markFinished(
   for (let depth = 0; at && depth < MAX_DEPTH; depth++) {
     const info = readParent(config, at, run);
     if (!info) break;
-    const verdict = rollUp(info.children, info.subIssuesSummary.total);
+    const verdict = rollUp(info.children, info.subIssuesSummary.total, info.body);
     if (!verdict.ready) {
       return { changes, held: `${at.owner}/${at.repo}#${at.number}: ${verdict.reason}` };
     }
