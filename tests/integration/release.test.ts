@@ -138,6 +138,9 @@ test("newer compares X.Y.Z numerically", () => {
   assert.equal(newer("1.0.0", "1.0.0"), false);
   assert.equal(newer("1.0.0-rc.1", "0.9.0"), true);
   assert.equal(newer("x", "0.1.0"), false);
+  assert.equal(newer("1.0.0", "1.0.0-rc.1"), true);
+  assert.equal(newer("1.0.0-rc.10", "1.0.0-rc.9"), true);
+  assert.equal(newer("1.0.0-rc.1", "1.0.0"), false);
 });
 
 test("release check: green when develop carries a new, consistent, changelogged version", () => {

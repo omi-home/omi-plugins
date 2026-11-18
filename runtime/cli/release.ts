@@ -15,9 +15,13 @@ import { labelType } from "../core/hierarchy.ts";
 import { git } from "../resources/worktree.ts";
 import { repo } from "./task.ts";
 
-const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/;
+const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
+const PLUGIN_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
-/** Numeric order of the `X.Y.Z` cores; prerelease suffixes only make a version not newer. */
+/**
+ * Is `a` a later version than `b`? X.Y.Z numerically; on equal cores a release beats its
+ * prereleases. ponytail: prereleases compare as numeric-aware strings, not by semver identifiers.
+ */
 export function newer(a: string, b: string): boolean {
   const [x, y] = [SEMVER.exec(a), SEMVER.exec(b)];
   if (!x || !y) return false;
@@ -25,7 +29,8 @@ export function newer(a: string, b: string): boolean {
     const d = Number(x[i]) - Number(y[i]);
     if (d) return d > 0;
   }
-  return false;
+  if (!x[4] || !y[4]) return !x[4] && Boolean(y[4]);
+  return x[4].localeCompare(y[4], "en", { numeric: true }) > 0;
 }
 
 export const tagName = (plugin: string, version: string) => `${plugin}--v${version}`;
@@ -53,12 +58,29 @@ function manifest(root: string, rev: string): { name: string; version: string; p
     }
   };
   const plugin = read(".claude-plugin/plugin.json");
+  if (!PLUGIN_NAME.test(String(plugin.name ?? ""))) {
+    throw new OmiError("CONFIG_INVALID", `plugin.json name at ${rev} is not a plugin name`);
+  }
   return {
     name: String(plugin.name ?? ""),
     version: String(plugin.version ?? ""),
     pkg: String(read("package.json").version ?? ""),
   };
 }
+
+const versionProblem = (m: { version: string; pkg: string }) =>
+  !SEMVER.test(m.version)
+    ? `plugin.json version "${m.version}" is not semver X.Y.Z`
+    : m.pkg !== m.version
+      ? `plugin.json ${m.version} ≠ package.json ${m.pkg}`
+      : undefined;
+
+/** Highest released version among the `<plugin>--v*` tags, except `skip`. */
+const latestOf = (tags: Map<string, string>, plugin: string, skip?: string) =>
+  [...tags.keys()]
+    .filter((t) => t !== skip)
+    .map((t) => t.slice(`${plugin}--v`.length))
+    .reduce<string | undefined>((a, v) => (!a || newer(v, a) ? v : a), undefined);
 
 const pass = (name: string, detail: string): Check => ({ name, status: "pass", detail });
 const fail = (name: string, detail: string): Check => ({
@@ -77,7 +99,10 @@ function releaseTicket(cwd: string, issue: number, gh: GhRunner) {
   return { root, config, ticket };
 }
 
-/** `omi release check <n>`: may `develop` be released under Release Issue #n? Changes nothing. */
+/**
+ * `omi release check <n>`: may `develop` be released under Release Issue #n? Writes nothing on
+ * GitHub or in the working tree; only fetches `develop` and `main` to read what they hold.
+ */
 export function releaseCheck(deps: { cwd: string; gh?: GhRunner }, issue: number): Check[] {
   const gh = deps.gh ?? spawnGh;
   const { root, config, ticket } = releaseTicket(deps.cwd, issue, gh);
@@ -88,12 +113,9 @@ export function releaseCheck(deps: { cwd: string; gh?: GhRunner }, issue: number
   git(["fetch", "--quiet", "origin", head, base], root);
   const rev = `origin/${head}`;
   const m = manifest(root, rev);
+  const problem = versionProblem(m);
   checks.push(
-    !SEMVER.test(m.version)
-      ? fail("version", `plugin.json version "${m.version}" is not semver X.Y.Z`)
-      : m.pkg !== m.version
-        ? fail("version", `plugin.json ${m.version} ≠ package.json ${m.pkg}`)
-        : pass("version", `${m.name} ${m.version} on ${rev}`),
+    problem ? fail("version", problem) : pass("version", `${m.name} ${m.version} on ${rev}`),
   );
   let changelog = "";
   try {
@@ -107,9 +129,7 @@ export function releaseCheck(deps: { cwd: string; gh?: GhRunner }, issue: number
   );
   const tags = remoteTags(root, m.name);
   const tag = tagName(m.name, m.version);
-  const latest = [...tags.keys()]
-    .map((t) => t.slice(`${m.name}--v`.length))
-    .reduce<string | undefined>((a, v) => (!a || newer(v, a) ? v : a), undefined);
+  const latest = latestOf(tags, m.name);
   checks.push(
     tags.has(tag)
       ? fail("tag", `${tag} already exists on origin: bump the version`)
@@ -117,11 +137,12 @@ export function releaseCheck(deps: { cwd: string; gh?: GhRunner }, issue: number
         ? fail("tag", `${m.version} is not newer than the latest release ${latest}`)
         : pass("tag", `${tag} free${latest ? ` (latest ${latest})` : " (first release)"}`),
   );
-  const ahead = git(["rev-list", "--count", `origin/${base}..${rev}`], root);
+  // Trees, not commits: after a squash-merged release develop keeps commits main lacks.
+  const tree = (r: string) => git(["rev-parse", `${r}^{tree}`], root);
   checks.push(
-    ahead === "0"
-      ? fail("ahead", `${head} has nothing that ${base} lacks`)
-      : pass("ahead", `${ahead} commit(s) ${head} → ${base}`),
+    tree(`origin/${base}`) === tree(rev)
+      ? fail("ahead", `${head} has no change that ${base} lacks`)
+      : pass("ahead", `${head} differs from ${base}`),
   );
   if (!ticket.parent) {
     checks.push(fail("milestone", `#${issue} has no parent Milestone`));
@@ -159,19 +180,25 @@ export function releaseTag(deps: { cwd: string; gh?: GhRunner }, issue: number):
   const { root, config, ticket } = releaseTicket(deps.cwd, issue, gh);
   const { baseBranch: head, releaseBranch: base } = config.git;
   const primary = `${config.github.owner}/${config.github.repo}#${issue}`;
-  const pr = prFacts(config, { head, base, states: ["MERGED"] }, gh).pr;
-  if (!pr || pr.baseRefName !== base || !markedPrimaries(pr.body).includes(primary)) {
+  const pr = prFacts(config, { head, base, states: ["MERGED"] }, gh).prs.find(
+    (p) => p.baseRefName === base && markedPrimaries(p.body).includes(primary),
+  );
+  if (!pr) {
     throw new OmiError("POLICY_VIOLATION", `no merged ${head} → ${base} PR for ${primary}`);
   }
   const commit = pr.mergeCommit?.oid;
   if (!commit) throw new OmiError("POLICY_VIOLATION", `${pr.url} has no merge commit`);
   git(["fetch", "--quiet", "origin", base], root);
   const m = manifest(root, commit);
-  if (!SEMVER.test(m.version)) {
-    throw new OmiError("CONFIG_INVALID", `plugin.json version "${m.version}" is not semver`);
-  }
+  const problem = versionProblem(m);
+  if (problem) throw new OmiError("CONFIG_INVALID", `${problem} at ${commit.slice(0, 12)}`);
   const tag = tagName(m.name, m.version);
-  const existing = remoteTags(root, m.name).get(tag);
+  const tags = remoteTags(root, m.name);
+  const existing = tags.get(tag);
+  const latest = latestOf(tags, m.name, tag);
+  if (!existing && latest && !newer(m.version, latest)) {
+    throw new OmiError("POLICY_VIOLATION", `${m.version} is not newer than the latest ${latest}`);
+  }
   if (existing && existing !== commit) {
     throw new OmiError("POLICY_VIOLATION", `${tag} already points at ${existing.slice(0, 12)}`);
   }

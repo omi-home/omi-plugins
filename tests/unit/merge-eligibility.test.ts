@@ -28,6 +28,7 @@ function facts(pr: Record<string, unknown> = {}, repo: Partial<PrFacts> = {}): P
       commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
       ...pr,
     } as PrFacts["pr"],
+    prs: [],
     count: 1,
     isPrivate: false,
     admin: false,

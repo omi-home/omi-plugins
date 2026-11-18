@@ -69,6 +69,8 @@ const Facts = z.strictObject({
 
 export interface PrFacts {
   pr: PrNode | undefined;
+  /** Newest first: `pr` and the older ones (≤ 5). */
+  prs: PrNode[];
   /** Every PR from the head in the requested states (more than one is a policy violation). */
   count: number;
   isPrivate: boolean;
@@ -100,6 +102,7 @@ export function prFacts(
   }
   return {
     pr: data.pullRequests.nodes[0],
+    prs: data.pullRequests.nodes,
     count: data.pullRequests.nodes.length,
     isPrivate: data.isPrivate,
     admin: data.viewerPermission === "ADMIN",

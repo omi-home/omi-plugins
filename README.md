@@ -32,7 +32,6 @@ Không có `#<tag>` thì marketplace theo branch mặc định (`develop`, chưa
 - **Update:** marketplace ghim theo tag không tự lên bản mới. Đổi tag: `claude plugin marketplace remove omi-plugins`, `add` lại với `#omi-engineering--v<mới>`, `install` lại, rồi khởi động lại Claude Code.
 - **Rollback:** như update, với tag cũ. State cục bộ (`<git-common-dir>/omi/state.sqlite`) chỉ migrate tiến và bản cũ từ chối DB mới hơn ("upgrade OMI"): sao lưu file đó trước khi update, khôi phục bản sao lưu khi lùi qua một migration.
 
-Đã kiểm chứng (Claude Code 2.1.325, config cô lập, DevTask-0035 #70): cài từ tag, lên tag mới, lùi về tag cũ; `omi version` chạy từ cache plugin.
 
 Thử plugin từ source cục bộ không cần cài: `claude --plugin-dir .`. Kiểm tra manifest: `claude plugin validate .claude-plugin/plugin.json --strict` (đã nằm trong `npm test`, tự skip khi không có `claude`).
 
