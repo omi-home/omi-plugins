@@ -39,7 +39,7 @@ export const POLICY: Policy = {
   maxQaReworks: 2,
 };
 
-/** The run policy a repo configured (`review` in `.omi/config.yaml`). */
+/** The run policy a repo configured (`review` in `.omi-plugins/omi.config.yaml`). */
 export const policyFrom = (c: OmiConfig): Policy => ({ ...c.review });
 
 /** Project Status shown for an executable Issue in each workflow state (DocumentationTask-0007 #99). */

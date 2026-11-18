@@ -405,7 +405,7 @@ export function findOrCreateProject(
   if (found.length > 1) {
     throw new OmiError(
       "CONFIG_INVALID",
-      `${found.length} Projects of ${owner} are titled '${title}': set github.projectNumber in .omi/config.yaml`,
+      `${found.length} Projects of ${owner} are titled '${title}': set github.projectNumber in .omi-plugins/omi.config.yaml`,
     );
   }
   if (found[0]) return { ...found[0], created: false };

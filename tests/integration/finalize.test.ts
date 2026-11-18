@@ -215,9 +215,9 @@ function merged() {
   const repo = join(base, "repo");
   git(repo, "config", "user.email", "t@example.invalid");
   git(repo, "config", "user.name", "t");
-  mkdirSync(join(repo, ".omi"));
+  mkdirSync(join(repo, ".omi-plugins"));
   writeFileSync(
-    join(repo, ".omi", "config.yaml"),
+    join(repo, ".omi-plugins", "omi.config.yaml"),
     "github:\n  owner: o\n  repo: repo\n  projectNumber: 2\n",
   );
   git(repo, "add", ".");
