@@ -5,6 +5,8 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import {
+  FINDING_PREFIX,
+  PASSED_REQUIRES,
   parseContract,
   READ_ONLY_ROLES,
   ROLE_SECTION,
@@ -12,6 +14,7 @@ import {
   STEP_RESULT_SCHEMA,
   StepResult,
   TaskPacket,
+  VERDICT_ROLES,
 } from "../contracts.ts";
 import { OmiError } from "../errors/errors.ts";
 
@@ -132,6 +135,31 @@ export function acceptStepResult(packet: TaskPacket, raw: string): StepResult {
     if (owner && owner !== r.role) {
       issues.push({ path: `section:${u.section}`, message: `owned by ${owner}, not ${r.role}` });
     }
+  }
+  const prefix = FINDING_PREFIX[r.role];
+  for (const f of r.findings) {
+    if (prefix && !f.id.startsWith(`${prefix}-`)) {
+      issues.push({ path: `finding:${f.id}`, message: `${r.role} findings are ${prefix}-NNN` });
+    }
+  }
+  const serious = r.findings.filter((f) => ["critical", "high", "medium"].includes(f.severity));
+  if (r.status === "PASSED" && VERDICT_ROLES.includes(r.role) && serious.length) {
+    issues.push({ path: "status", message: `PASSED with ${serious.length} medium+ finding(s)` });
+  }
+  if (r.role === "security-reviewer" && r.status !== "BLOCKED") {
+    if (r.findings.some((f) => f.severity === "critical")) {
+      issues.push({
+        path: "status",
+        message: "a critical security finding must escalate (BLOCKED)",
+      });
+    }
+  }
+  const needs = r.status === "PASSED" ? PASSED_REQUIRES[r.role] : undefined;
+  if (needs === "files" && !r.changedFiles.length) {
+    issues.push({ path: "changedFiles", message: `${r.role} PASSED without changing a file` });
+  }
+  if (needs === "section" && !r.sectionUpdates.some((u) => u.section === ROLE_SECTION[r.role])) {
+    issues.push({ path: "sectionUpdates", message: `${r.role} PASSED without its section` });
   }
   const changed = changedSince(packet.worktree, packet.baseSha);
   for (const f of r.changedFiles) {

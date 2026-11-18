@@ -30,6 +30,8 @@ export const READ_ONLY_ROLES: readonly Role[] = [
   "ui-ux-designer",
   "solution-architect",
   "code-reviewer",
+  "security-reviewer",
+  "manual-qa-engineer",
 ];
 
 /** Issue body sections (`<!-- omi:section=… -->`) only their owner role may propose. */
@@ -37,6 +39,33 @@ export const ROLE_SECTION: Partial<Record<Role, string>> = {
   "business-analyst": "analysis",
   "ui-ux-designer": "design",
   "solution-architect": "architecture",
+  "manual-qa-engineer": "qa",
+};
+
+/** Finding id prefix per role: one owner per kind of finding, no duplicated review lenses. */
+export const FINDING_PREFIX: Partial<Record<Role, string>> = {
+  "business-analyst": "BA",
+  "ui-ux-designer": "UX",
+  "solution-architect": "ARC",
+  "code-reviewer": "CR",
+  "security-reviewer": "SEC",
+  "manual-qa-engineer": "QA",
+  "automation-qa-engineer": "AQA",
+};
+
+/** Roles whose PASSED means "no medium+ finding left". */
+export const VERDICT_ROLES: readonly Role[] = [
+  "code-reviewer",
+  "security-reviewer",
+  "manual-qa-engineer",
+];
+
+/** What a PASSED result must carry: the role's own section, or changed files. */
+export const PASSED_REQUIRES: Partial<Record<Role, "section" | "files">> = {
+  "business-analyst": "section",
+  "ui-ux-designer": "section",
+  "manual-qa-engineer": "section",
+  "automation-qa-engineer": "files", // authors tests; never called just to run them
 };
 
 /** Who executed a step: a specialist, the main session, or the deterministic CLI. */

@@ -14,6 +14,7 @@ import {
   TOTAL_CHARS,
 } from "../../runtime/adapters/github/context.ts";
 import { parseConfig } from "../../runtime/core/config.ts";
+import type { Role } from "../../runtime/core/contracts.ts";
 import {
   acceptStepResult,
   buildTaskPacket,
@@ -161,8 +162,9 @@ test("acceptStepResult: read-only roles change no files; owned sections only by 
       .sectionUpdates[0]?.section,
     "analysis",
   );
-  assert.equal(code({ changedFiles: ["a.txt"] }), "CONTRACT_INVALID"); // really changed, still refused
-  assert.equal(code({ commitSha: base }), "CONTRACT_INVALID");
+  const own = { sectionUpdates: [analysis] };
+  assert.equal(code({ ...own, changedFiles: ["a.txt"] }), "CONTRACT_INVALID"); // really changed
+  assert.equal(code({ ...own, commitSha: base }), "CONTRACT_INVALID");
   assert.equal(
     code({ sectionUpdates: [{ section: "architecture", markdown: "x" }] }),
     "CONTRACT_INVALID",
@@ -171,6 +173,49 @@ test("acceptStepResult: read-only roles change no files; owned sections only by 
   assert.equal(
     codeOf(() => acceptStepResult(be, result({ sectionUpdates: [analysis] }))),
     "CONTRACT_INVALID",
+  );
+});
+
+test("acceptStepResult: review lenses, verdicts, security escalation, QA must produce", () => {
+  const { dir, base } = repo();
+  const as = (role: Role, extra: Record<string, unknown>) =>
+    codeOf(() =>
+      acceptStepResult(
+        buildTaskPacket({ ...input(dir, base), role, scope: [] }),
+        result({ role, ...extra }),
+      ),
+    );
+  const f = (id: string, severity: string) => ({ id, severity, observed: "o", expected: "e" });
+  // One owner per lens: a code reviewer cannot raise security findings.
+  assert.equal(
+    as("code-reviewer", { status: "FAILED", findings: [f("SEC-001", "high")] }),
+    "CONTRACT_INVALID",
+  );
+  assert.equal(
+    as("code-reviewer", { status: "FAILED", findings: [f("CR-001", "high")] }),
+    "no-throw",
+  );
+  // PASSED means no medium+ finding left.
+  assert.equal(as("code-reviewer", { findings: [f("CR-001", "medium")] }), "CONTRACT_INVALID");
+  assert.equal(as("code-reviewer", { findings: [f("CR-001", "low")] }), "no-throw");
+  // Critical security → BLOCKED (PO escalation), never FAILED/PASSED.
+  const crit = { findings: [f("SEC-001", "critical")] };
+  assert.equal(as("security-reviewer", { ...crit, status: "FAILED" }), "CONTRACT_INVALID");
+  assert.equal(
+    as("security-reviewer", { ...crit, status: "BLOCKED", blockerReason: "PO" }),
+    "no-throw",
+  );
+  assert.equal(
+    as("security-reviewer", { status: "FAILED", findings: [f("SEC-002", "high")] }),
+    "no-throw",
+  );
+  // Automation QA authors tests: PASSED without a changed file is "just ran the tests".
+  assert.equal(as("automation-qa-engineer", {}), "CONTRACT_INVALID");
+  // Manual QA reports through its `qa` section, never by editing.
+  assert.equal(as("manual-qa-engineer", {}), "CONTRACT_INVALID");
+  assert.equal(
+    as("manual-qa-engineer", { sectionUpdates: [{ section: "qa", markdown: "### Test cases" }] }),
+    "no-throw",
   );
 });
 

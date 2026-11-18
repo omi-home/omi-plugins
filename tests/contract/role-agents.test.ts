@@ -95,6 +95,29 @@ test("role → resource pack map follows the spec baseline; shared knowledge is 
     "resources/role-rules/database/schema-design.md",
     "resources/role-rules/database/database-migration.md",
   ]);
+  const rr = (p: string) => `resources/role-rules/${p}.md`;
+  assert.deepEqual(packs("code-reviewer"), [
+    rr("code-review/semantic-code-review"),
+    rr("code-review/architecture-compliance"),
+  ]);
+  assert.deepEqual(packs("security-reviewer"), [
+    rr("security-review/threat-assessment"),
+    rr("security-review/security-review"),
+  ]);
+  assert.deepEqual(packs("manual-qa-engineer"), [
+    rr("manual-qa/test-case-design"),
+    rr("manual-qa/exploratory-qa"),
+  ]);
+  assert.deepEqual(packs("automation-qa-engineer"), [
+    rr("automation-qa/automated-test-authoring"),
+    rr("automation-qa/test-maintenance"),
+  ]);
+  assert.deepEqual(packs("devops-engineer"), [
+    rr("devops/ci-cd-engineering"),
+    rr("devops/deployment-design"),
+    rr("devops/observability"),
+  ]);
+  assert.deepEqual(agents.map((a) => a.name).sort(), [...Role.options].sort(), "all eleven roles");
   // A role loads only its own pack folder plus shared/.
   for (const a of agents) {
     const folders = new Set(a.packs.map((p) => p.split("/").slice(0, -1).join("/")));
@@ -105,6 +128,16 @@ test("role → resource pack map follows the spec baseline; shared knowledge is 
     !resourceFiles.some(
       (f) => f.startsWith("resources/role-rules/") && f.endsWith("/api-contracts.md"),
     ),
+  );
+});
+
+test("code review leaves security to the Security Reviewer (no duplicated lens)", () => {
+  const cr = read("resources/role-rules/code-review/semantic-code-review.md");
+  assert.match(cr, /Security is the Security Reviewer's job/);
+  assert.doesNotMatch(cr, /security problems \(secrets, injection/);
+  assert.match(
+    read("resources/role-rules/automation-qa/automated-test-authoring.md"),
+    /never called just to run existing tests/,
   );
 });
 
