@@ -1,0 +1,70 @@
+# OMI Issue Form (DevTask-0047 #130). Required fields are the sections `omi ticket validate` checks.
+name: Spike
+description: Điều tra có timebox, đầu ra là kết luận.
+title: Spike-NNNN-
+labels:
+  - type:spike
+body:
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: Kết quả cần đạt, một hai câu.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context / Parent
+      description: Issue cha (sẽ gắn native sub-issue), bối cảnh, link quyết định.
+    validations:
+      required: false
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: Câu hỏi cần trả lời.
+    validations:
+      required: true
+  - type: textarea
+    id: timebox
+    attributes:
+      label: Timebox
+      description: Giới hạn thời gian/công sức.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Expected Output
+      description: "Đầu ra: kết luận, ADR, prototype, Issue mới."
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope / Acceptance
+      description: Phạm vi và Acceptance Criteria dạng checklist `- [ ]`.
+    validations:
+      required: false
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Issue chặn (native blocked-by link).
+      value: "Blocked by: none"
+    validations:
+      required: false
+  - type: textarea
+    id: definition-of-done
+    attributes:
+      label: Definition of Done
+      description: Điều kiện để đóng Issue.
+      value: |-
+        - [ ] Tests and static checks passed
+        - [ ] Independent review passed
+        - [ ] Per-step comment(s) posted
+        - [ ] PR linked to this issue, merged into `develop`
+        - [ ] Worktree cleanup verified and reported
+    validations:
+      required: false

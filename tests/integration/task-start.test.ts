@@ -101,7 +101,7 @@ function fakeGh(issues: Record<number, FakeIssue>, opts: { failMutations?: numbe
         number: n,
         title: `DevTask-${String(n).padStart(4, "0")}-Task ${n}`,
         state: "OPEN",
-        body: "## Objective\nx\n\n## Acceptance\n- [ ] done",
+        body: "## Objective\nx\n\n## Scope / Acceptance\n- [ ] done",
         issueType: { name: "Task" },
         labels: { totalCount: 1, nodes: [{ name: "type:dev-task" }] },
         parent: parent && {
@@ -344,7 +344,7 @@ test("Definition of Ready: real parent chain checked, wrong pair / title / Objec
     ticket: {
       title,
       labels: { totalCount: 1, nodes: [{ name: `type:${type}` }] },
-      ...(title.includes("No objective") ? { body: "## Acceptance\n- [ ] done" } : {}),
+      ...(title.includes("No objective") ? { body: "## Scope / Acceptance\n- [ ] done" } : {}),
     },
   });
   const gh = fakeGh({

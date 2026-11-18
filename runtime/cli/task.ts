@@ -55,6 +55,7 @@ import {
   loadHierarchy,
   titleCheck,
 } from "../core/hierarchy.ts";
+import { sectionsCheck } from "../core/issue-forms.ts";
 import { PRE_MERGE, PROJECT_STATUS, transition } from "../core/workflow-engine/fsm.ts";
 import { planWorkflow, type WorkflowPlan } from "../core/workflow-engine/plan.ts";
 import {
@@ -145,7 +146,7 @@ function ancestors(config: OmiConfig, t: Ticket, gh: GhRunner, maxDepth: number)
 }
 
 /**
- * Definition of Ready (#128): Objective section, title ↔ `type:*`, hierarchy. Checked when work
+ * Definition of Ready (#128): Objective section, title ↔ `type:*`, required sections of the type's Issue Form (#130), hierarchy. Checked when work
  * starts (`task start`, `ticket validate`), not again at PR time: a run already under way keeps
  * the rules it started with.
  */
@@ -163,7 +164,7 @@ function readyGates(t: Ticket, config: OmiConfig, gh: GhRunner): Check[] {
   const type = typeOf(t);
   if (!type) return checks; // the type gate reports it
   const h = loadHierarchy();
-  checks.push(titleCheck(t.title, type));
+  checks.push(titleCheck(t.title, type), sectionsCheck(t.body, type));
   try {
     checks.push(
       ...hierarchyChecks({ number: t.number, type }, ancestors(config, t, gh, h.maxDepth), h),

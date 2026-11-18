@@ -1,0 +1,2 @@
+# Every Issue starts from an OMI Issue Form (one per type): no blank issues.
+blank_issues_enabled: false

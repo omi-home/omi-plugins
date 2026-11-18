@@ -169,7 +169,7 @@ function fakeGh(f: Fake) {
         number: n,
         title: `${titleType(type as IssueType)}-${String(n).padStart(4, "0")}-Task ${n}`,
         state: "OPEN",
-        body: "## Objective\nx\n\n## Acceptance\n- [ ] done",
+        body: "## Objective\nx\n\n## Scope / Acceptance\n- [ ] done",
         issueType: { name: "Task" },
         labels: { totalCount: 1, nodes: [{ name: `type:${type}` }] },
         parent: null,

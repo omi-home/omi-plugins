@@ -1,0 +1,67 @@
+# OMI Issue Form (DevTask-0047 #130). Required fields are the sections `omi ticket validate` checks.
+name: ChangeRequest
+description: Thay đổi so với phạm vi/quyết định đã duyệt.
+title: ChangeRequest-NNNN-
+labels:
+  - type:change-request
+body:
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: Kết quả cần đạt, một hai câu.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context / Parent
+      description: Issue cha (sẽ gắn native sub-issue), bối cảnh, link quyết định.
+    validations:
+      required: false
+  - type: textarea
+    id: current-state
+    attributes:
+      label: Current State
+      description: "Hiện trạng: phạm vi hoặc hành vi đang có."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Thay đổi đề xuất.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: "Ảnh hưởng: phạm vi, tiến độ, rủi ro, Issue liên quan."
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision
+      description: Quyết định của PO (điền khi duyệt).
+    validations:
+      required: false
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Issue chặn (native blocked-by link).
+      value: "Blocked by: none"
+    validations:
+      required: false
+  - type: textarea
+    id: definition-of-done
+    attributes:
+      label: Definition of Done
+      description: Điều kiện để đóng Issue.
+      value: |-
+        - [ ] PO quyết định
+        - [ ] Issue con được tạo hoặc cập nhật
+    validations:
+      required: false
