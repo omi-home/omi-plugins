@@ -1,10 +1,10 @@
 // Local transactional state (spec §13) on the built-in node:sqlite driver.
-// One database per repository, inside the git common dir: shared by every worktree, never committed.
-import { execFileSync } from "node:child_process";
+// One database per workspace, in .omi-plugins/: shared by every worktree, outside the repo.
 import { mkdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { OmiError } from "../core/errors/errors.ts";
+import { locate, STATE_FILE } from "../core/workspace.ts";
 import { migrate } from "./migrations.ts";
 
 export type Db = DatabaseSync;
@@ -12,19 +12,9 @@ export type Db = DatabaseSync;
 const SQLITE_BUSY = 5;
 const SQLITE_CONSTRAINT = 19;
 
-/** `<git-common-dir>/omi/state.sqlite` for the repository containing `cwd`. */
+/** `<workspace>/.omi-plugins/state.sqlite` for the workspace containing `cwd` (ADR-0002 D1). */
 export function statePath(cwd: string): string {
-  let common: string;
-  try {
-    common = execFileSync("git", ["rev-parse", "--git-common-dir"], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    throw new OmiError("CONFIG_INVALID", "not inside a git repository");
-  }
-  return join(resolve(cwd, common), "omi", "state.sqlite");
+  return join(locate(cwd).workspace, STATE_FILE);
 }
 
 /** Opens (creating if needed) and migrates the state database. */

@@ -16,6 +16,7 @@ function checkout(remote = "git@github.com:acme/app.git") {
   const dir = mkdtempSync(join(tmpdir(), "omi-init-"));
   execFileSync("git", ["init", "-q"], { cwd: dir });
   execFileSync("git", ["remote", "add", "origin", remote], { cwd: dir });
+  mkdirSync(join(dir, ".omi-plugins")); // the checkout is its own workspace here
   return dir;
 }
 
@@ -63,6 +64,8 @@ test("fresh repo: create + link + config + templates; second run writes nothing"
   const dir = checkout();
   mkdirSync(join(dir, ".github"));
   writeFileSync(join(dir, ".github", "PULL_REQUEST_TEMPLATE.md"), "ours\n");
+  // `workspace init` leaves a comment-only template: init adds the github section, keeps the rest.
+  writeFileSync(join(dir, ".omi-plugins", "omi.config.yaml"), "# checks: here\n");
   const gh = fakeGh();
 
   const r = projectInit({ cwd: dir, title: "App delivery" }, gh.run);
@@ -74,6 +77,10 @@ test("fresh repo: create + link + config + templates; second run writes nothing"
     projectNumber: 7,
     privateRepoRiskAccepted: false,
   });
+  assert.match(
+    readFileSync(join(dir, ".omi-plugins", "omi.config.yaml"), "utf8"),
+    /# checks: here/,
+  );
   assert.ok(r.templates.copied.includes(".github/ISSUE_TEMPLATE/dev-task.yml"));
   assert.deepEqual(r.templates.kept, [".github/PULL_REQUEST_TEMPLATE.md"]);
   assert.equal(readFileSync(join(dir, ".github", "PULL_REQUEST_TEMPLATE.md"), "utf8"), "ours\n");
@@ -120,12 +127,11 @@ test("refused, nothing written: ambiguous title, missing configured Project, oth
     () => projectInit({ cwd: twice, title: " " }, dup.run),
     (e: OmiError) => e.code === "USAGE_INVALID",
   );
-  assert.equal(existsSync(join(twice, ".omi")), false);
+  assert.equal(existsSync(join(twice, ".omi-plugins", "omi.config.yaml")), false);
 
   const gone = checkout();
-  mkdirSync(join(gone, ".omi"));
   writeFileSync(
-    join(gone, ".omi", "config.yaml"),
+    join(gone, ".omi-plugins", "omi.config.yaml"),
     "github:\n  owner: acme\n  repo: app\n  projectNumber: 9\n",
   );
   assert.throws(

@@ -30,7 +30,7 @@ test("golden: help and version, human and json", () => {
     `Usage: omi <command> [--output human|json]
 
 Commands:
-  doctor                 Check tools, repository, AGENTS.md, .omi/config.yaml and GitHub access
+  doctor                 Check tools, repository, AGENTS.md, workspace config and GitHub access
   status [--milestone <n>]
                          Read-only overview of a Milestone (default: the active one): its Issues by
                          Project Status with open PRs, local runs and leftovers, Status drift and
@@ -76,10 +76,15 @@ Commands:
                          (<!-- omi:carried-findings=... --> comments: source | finding | action)
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
+  workspace init [--name <n>] [--repo <path|url>]
+                         Build <name>-workspace/ (default: next to the repo) with .claude/, .omi-plugins/
+                         (omi.config.yaml, omi.config.json) and the Coordinator's AGENTS.md, and clone the
+                         repo into it. Re-running reports each item created or kept; never overwrites
   github project init [--title <text>]
                          Bootstrap this repo into OMI: find or create the Project (title, default: repo
-                         name), link it, write .omi/config.yaml and install templates/github/ into .github/
-                         where missing. Re-running changes nothing; never overwrites a file
+                         name), link it, write the github section of .omi-plugins/omi.config.yaml and
+                         install templates/github/ into .github/ where missing. Re-running changes nothing;
+                         never overwrites a file
   github project plan    Diff the Project's custom fields (config/github/project.yaml), views, built-in
                          workflows and Insights (views.yaml) and list items whose Status their type does
                          not use (status-transitions.yaml). Read-only; exits 1 while anything is pending,

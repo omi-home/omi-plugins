@@ -1,10 +1,9 @@
 // `omi ticket validate`, `omi task start`, `omi task status` (spec §7–§8): ticket gates →
 // run (FSM CREATED → TICKET_VALIDATED → WORKSPACE_READY) → owned worktree → Project status.
 // No LLM call anywhere in setup.
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
@@ -64,6 +63,7 @@ import {
   runSlice,
   type SliceDeps,
 } from "../core/workflow-engine/slice.ts";
+import { locate } from "../core/workspace.ts";
 import { type Db, openState, statePath } from "../persistence/db.ts";
 import {
   acquireLease,
@@ -108,20 +108,10 @@ const START_LEASE_MS = 10 * 60_000;
 const RUN_LEASE_MS = 6 * 60 * 60_000;
 const PLUGIN_ROOT = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 
-export function repo(cwd: string): { root: string; config: OmiConfig } {
-  let common: string;
-  try {
-    common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    throw new OmiError("CONFIG_INVALID", "not inside a git repository");
-  }
-  // Main checkout, even when called from inside a task worktree.
-  const root = dirname(resolve(common));
-  return { root, config: loadConfig(root) };
+export function repo(cwd: string): { root: string; workspace: string; config: OmiConfig } {
+  // Main checkout, even when called from inside a task worktree or at the workspace root.
+  const { root, workspace } = locate(cwd);
+  return { root, workspace, config: loadConfig(workspace) };
 }
 
 const typeOf = (t: Ticket) => labelType(t.labels.nodes);

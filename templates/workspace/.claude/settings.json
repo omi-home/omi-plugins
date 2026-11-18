@@ -1,0 +1,10 @@
+{
+  "extraKnownMarketplaces": {
+    "omi-plugins": {
+      "source": { "source": "github", "repo": "omi-home/omi-plugins" }
+    }
+  },
+  "enabledPlugins": {
+    "omi-engineering@omi-plugins": true
+  }
+}

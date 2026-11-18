@@ -1,7 +1,7 @@
 // T2.2 state store: migrations, rollback, restart, transaction failure, CAS, ownership, leases.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -233,9 +233,12 @@ test("lease: exclusive until expiry, renewable by its holder", () => {
   repo.acquireLease(db, { key, holder: "C", ttlMs: 1, now: 1700 });
 });
 
-test("statePath: every worktree of a repo shares one database inside .git", () => {
+test("statePath: the repo, its task worktrees and the workspace root share .omi-plugins/state.sqlite", () => {
   // .native expands Windows 8.3 names (RUNNER~1) the way git reports the path.
-  const main = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-sp-")));
+  const ws = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-sp-")));
+  mkdirSync(join(ws, ".omi-plugins"));
+  const main = join(ws, "app");
+  mkdirSync(main);
   const git = (...a: string[]) => execFileSync("git", a, { cwd: main, stdio: "pipe" });
   git("init", "-q");
   git(
@@ -249,9 +252,13 @@ test("statePath: every worktree of a repo shares one database inside .git", () =
     "-m",
     "s",
   );
-  git("worktree", "add", "-q", "-b", "t", `${main}-wt`);
-  const expected = join(main, ".git", "omi", "state.sqlite");
+  // Task worktrees live outside the workspace: found through the main checkout.
+  git("worktree", "add", "-q", "-b", "t", `${ws}-wt`);
+  const expected = join(ws, ".omi-plugins", "state.sqlite");
   assert.equal(statePath(main), expected);
-  assert.equal(statePath(`${main}-wt`), expected);
+  assert.equal(statePath(`${ws}-wt`), expected);
+  assert.equal(statePath(ws), expected);
   assert.throws(() => statePath(tmpdir()), code("CONFIG_INVALID"));
+  mkdirSync(join(ws, "other", ".git"), { recursive: true });
+  assert.throws(() => statePath(ws), /exactly one repo/);
 });

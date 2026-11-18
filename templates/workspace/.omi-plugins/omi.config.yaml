@@ -1,0 +1,8 @@
+# OMI policy for this workspace (ADR-0002 D1); replaces <repo>/.omi/config.yaml.
+# `omi github project init` adds the github section (owner, repo, projectNumber).
+# Then add the repo's checks, e.g.:
+# checks:
+#   lint: { run: npm run lint }
+#   build: { run: npm run typecheck }
+#   test: { run: npm test }
+# Every setting and its default: runtime/core/config.ts of the OMI plugin.

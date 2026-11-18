@@ -126,7 +126,7 @@ omi-plugins/
 │   ├── branching-policy.yaml
 │   ├── resource-policy.yaml
 │   ├── risk-policy.yaml                # Low/Medium/High merge tiers: `omi pr validate|merge`
-│   └── github/                         # governance defaults; target repo overrides in .omi/config.yaml
+│   └── github/                         # governance defaults; workspace overrides in .omi-plugins/omi.config.yaml
 │       ├── project.yaml                # custom fields + initial Status (`omi github project plan|apply`)
 │       ├── issue-types.yaml
 │       ├── issue-hierarchy.yaml        # allowed parent → child matrix
@@ -186,5 +186,5 @@ omi-plugins/
 
 - TypeScript chạy trực tiếp trên Node ≥ 22.18 (type stripping, không build); `tsc` chỉ typecheck.
 - Contract: zod là nguồn duy nhất cho TS type và validator runtime (`runtime/core/contracts.ts`, `config.ts`). Mọi tài liệu đều strict và có `schemaVersion`. Lỗi được phân loại trong `runtime/core/errors/errors.ts`: loại `transient` tính là attempt, không tính là round.
-- Dữ liệu cục bộ trong repo đích: config dự án ở `.omi/config.yaml`; state SQLite (`node:sqlite`, WAL, migration theo `user_version`) ở `<git-common-dir>/omi/state.sqlite`. Mọi worktree của repo dùng chung một DB, và DB không bao giờ bị commit.
+- Dữ liệu cục bộ nằm trong workspace, ngoài repo đích (ADR-0002 D1): config dự án ở `<workspace>/.omi-plugins/omi.config.yaml`; state SQLite (`node:sqlite`, WAL, migration theo `user_version`) ở `<workspace>/.omi-plugins/state.sqlite`. Mọi worktree của repo dùng chung một DB, và DB không bao giờ bị commit.
 - Test: `node:test`. Lint/format: Biome. Một lệnh: `npm run check`.

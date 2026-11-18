@@ -23,7 +23,7 @@ git clone https://github.com/omi-home/omi-plugins.git
 cd omi-plugins
 npm ci
 npm run check        # lint + typecheck + test, phải xanh
-node bin/omi doctor  # môi trường, AGENTS.md, .omi/config.yaml, quyền GitHub
+node bin/omi doctor  # môi trường, AGENTS.md, `.omi-plugins/omi.config.yaml` của workspace, quyền GitHub
 ```
 
 Một thay đổi đi theo đúng quy trình trong [AGENTS.md](./AGENTS.md):
@@ -48,7 +48,7 @@ claude plugin install omi-engineering@omi-plugins   # --scope project để chia
 Không có `#<tag>` thì marketplace theo branch mặc định (`develop`, chưa phát hành). Máy không có SSH key GitHub: đặt `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`.
 
 - **Update:** marketplace ghim theo tag không tự lên bản mới. Đổi tag: `claude plugin marketplace remove omi-plugins`, `add` lại với `#omi-engineering--v<mới>`, `install` lại, rồi khởi động lại Claude Code.
-- **Rollback:** như update, với tag cũ. State cục bộ (`<git-common-dir>/omi/state.sqlite`) chỉ migrate tiến và bản cũ từ chối DB mới hơn ("upgrade OMI"): sao lưu file đó trước khi update, khôi phục bản sao lưu khi lùi qua một migration.
+- **Rollback:** như update, với tag cũ. State cục bộ (`<workspace>/.omi-plugins/state.sqlite`) chỉ migrate tiến và bản cũ từ chối DB mới hơn ("upgrade OMI"): sao lưu file đó trước khi update, khôi phục bản sao lưu khi lùi qua một migration.
 
 Thử plugin từ source cục bộ không cần cài: `claude --plugin-dir .`. Kiểm tra manifest: `claude plugin validate .claude-plugin/plugin.json --strict` (đã nằm trong `npm test`, tự skip khi không có `claude`).
 

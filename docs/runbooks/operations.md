@@ -6,14 +6,15 @@ Dành cho người vận hành (PO, maintainer) một repo dùng plugin `omi-eng
 
 Skill `/omi-engineering:omi-start`, hoặc tay theo thứ tự:
 
-1. `omi doctor` — Node, git, gh, Claude Code, AGENTS.md, config, quyền GitHub. Thiếu `.omi/config.yaml` là bình thường trước bước 2.
-2. `omi github project init [--title <text>]` — tìm/tạo Project, link repo, ghi `.omi/config.yaml`, cài Issue Forms + PR template vào `.github/` (không ghi đè file có sẵn).
+0. `omi workspace init [--name <n>] [--repo <path|url>]` — dựng `<name>-workspace/` (`.claude/`, `.omi-plugins/`, `AGENTS.md` của Coordinator) và clone repo vào đó; chạy các bước sau trong workspace. Chạy lại an toàn.
+1. `omi doctor` — Node, git, gh, Claude Code, AGENTS.md, config, quyền GitHub. `omi.config.yaml` chưa có section `github` là bình thường trước bước 2.
+2. `omi github project init [--title <text>]` — tìm/tạo Project, link repo, ghi section `github` vào `.omi-plugins/omi.config.yaml`, cài Issue Forms + PR template vào `.github/` (không ghi đè file có sẵn).
 3. `omi github repo plan --output json > plan.json` → PO duyệt → `omi github repo apply --approved-plan plan.json` (label, bảo vệ `main`/`develop`, merge method; chỉ thêm và siết, không bao giờ xoá hay nới).
 4. `omi github project apply` — field, option, view. Exit 1 nghĩa là còn bước tay (filter/grouping/sort của view, built-in workflow, Insights): làm trên UI theo danh sách in ra.
 5. `omi github repo validate`, `omi github project validate`.
 6. Commit các file bước 2 qua một task bình thường (Issue → branch → PR → `develop`), rồi khai báo lệnh gate trong `checks`.
 
-## 2. Cấu hình `.omi/config.yaml`
+## 2. Cấu hình `.omi-plugins/omi.config.yaml`
 
 Schema strict (field lạ bị từ chối): [runtime/core/config.ts](../../runtime/core/config.ts). Tối thiểu:
 
@@ -89,7 +90,7 @@ Lỗi tạm thời (`GITHUB_RATE_LIMITED`, `GITHUB_UNAVAILABLE`, `NETWORK`, `LOC
 
 - OMI chỉ xoá thứ nó sở hữu và đã xác minh (worktree sạch, branch đã merge theo receipt của GitHub), không bao giờ `--force`, không xoá branch remote.
 - Worktree mồ côi (`cleanup scan` báo `orphan`) không bị xoá tự động. Người kiểm tra nội dung trước, rồi `git worktree remove <path>` (không `--force`) và `git branch -d <branch>`.
-- State cục bộ ở `<git-common-dir>/omi/state.sqlite` (dùng chung mọi worktree, không commit). Không xoá khi còn run mở; xoá là mất lịch sử run và outbox chưa đăng.
+- State cục bộ ở `<workspace>/.omi-plugins/state.sqlite` (dùng chung mọi worktree, ngoài repo). Không xoá khi còn run mở; xoá là mất lịch sử run và outbox chưa đăng.
 
 ## 9. Release
 

@@ -42,31 +42,35 @@ test("missing config fails, AGENTS.md absence warns", () => {
   const d = doctor(fixture({}));
   assert.equal(d.code, 1);
   assert.equal(d.check("config")?.status, "fail");
-  assert.match(d.check("config")?.detail ?? "", /not found/);
+  assert.match(d.check("config")?.detail ?? "", /omi workspace init/);
   assert.equal(d.check("instructions")?.status, "warn");
 });
 
 test("invalid config lists paths and never echoes values", () => {
   const tok = `ghp_${"s".repeat(36)}`;
-  const d = doctor(fixture({ ".omi/config.yaml": `${CONFIG}  token: ${tok}\n`, "AGENTS.md": "x" }));
+  const d = doctor(
+    fixture({ ".omi-plugins/omi.config.yaml": `${CONFIG}  token: ${tok}\n`, "AGENTS.md": "x" }),
+  );
   assert.equal(d.code, 1);
   assert.equal(d.check("config")?.status, "fail");
   assert.ok(!d.stdout.includes(tok), d.stdout);
   assert.equal(
-    doctor(fixture({ ".omi/config.yaml": "github: [" })).check("config")?.status,
+    doctor(fixture({ ".omi-plugins/omi.config.yaml": "github: [" })).check("config")?.status,
     "fail",
   );
 });
 
 test("CLAUDE.md shadows AGENTS.md → warn", () => {
-  const d = doctor(fixture({ "AGENTS.md": "x", "CLAUDE.md": "y", ".omi/config.yaml": CONFIG }));
+  const d = doctor(
+    fixture({ "AGENTS.md": "x", "CLAUDE.md": "y", ".omi-plugins/omi.config.yaml": CONFIG }),
+  );
   assert.equal(d.check("instructions")?.status, "warn");
   assert.match(d.check("instructions")?.detail ?? "", /CLAUDE\.md/);
   assert.equal(d.check("config")?.status, "pass");
 });
 
 test("valid config: public repo with develop default passes GitHub checks when authenticated", () => {
-  const d = doctor(fixture({ "AGENTS.md": "x", ".omi/config.yaml": CONFIG }));
+  const d = doctor(fixture({ "AGENTS.md": "x", ".omi-plugins/omi.config.yaml": CONFIG }));
   assert.equal(d.check("config")?.status, "pass");
   assert.equal(d.check("instructions")?.status, "pass");
   if (d.check("github-auth")?.status !== "pass") return; // no gh session on this machine
@@ -78,7 +82,7 @@ test("valid config: public repo with develop default passes GitHub checks when a
 });
 
 test("network failure reaching GitHub is transient: exit 75, checks kept (CR-001/CR-002)", () => {
-  const repo = fixture({ "AGENTS.md": "x", ".omi/config.yaml": CONFIG });
+  const repo = fixture({ "AGENTS.md": "x", ".omi-plugins/omi.config.yaml": CONFIG });
   const d = doctor(repo, { ...process.env, HTTPS_PROXY: "http://127.0.0.1:9", GH_TOKEN: "x" });
   assert.equal(d.check("github-auth")?.status, "fail");
   assert.equal(d.check("github-auth")?.code, "NETWORK");
@@ -114,7 +118,7 @@ test("live: plugin bin/ puts omi on PATH inside the agent's Bash", {
 });
 
 test("workflow adapter off: doctor warns, direct dispatch stays the path (#56 fallback)", () => {
-  const repo = fixture({ "AGENTS.md": "# x\n", ".omi/config.yaml": CONFIG });
+  const repo = fixture({ "AGENTS.md": "# x\n", ".omi-plugins/omi.config.yaml": CONFIG });
   const conf = mkdtempSync(join(tmpdir(), "omi-claude-conf-"));
   const env = { ...process.env, CLAUDE_CONFIG_DIR: conf };
   assert.equal(doctor(repo, env).check("workflows")?.status, "warn"); // no settings.json

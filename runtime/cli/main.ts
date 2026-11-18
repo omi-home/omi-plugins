@@ -19,6 +19,7 @@ import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/
 import { IssueType, ProjectStatus } from "../core/contracts.ts";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import type { RepoAction } from "../core/repo-config.ts";
+import { CONFIG_FILE } from "../core/workspace.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { type Check, doctor } from "./doctor.ts";
@@ -38,6 +39,7 @@ import {
   taskUnblock,
   ticketValidate,
 } from "./task.ts";
+import { workspaceInit } from "./workspace.ts";
 
 const humanScan = (s: ScanResult) => [
   ...s.runs.map(
@@ -59,7 +61,7 @@ const humanScan = (s: ScanResult) => [
 export const HELP = `Usage: omi <command> [--output human|json]
 
 Commands:
-  doctor                 Check tools, repository, AGENTS.md, .omi/config.yaml and GitHub access
+  doctor                 Check tools, repository, AGENTS.md, workspace config and GitHub access
   status [--milestone <n>]
                          Read-only overview of a Milestone (default: the active one): its Issues by
                          Project Status with open PRs, local runs and leftovers, Status drift and
@@ -105,10 +107,15 @@ Commands:
                          (<!-- omi:carried-findings=... --> comments: source | finding | action)
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
+  workspace init [--name <n>] [--repo <path|url>]
+                         Build <name>-workspace/ (default: next to the repo) with .claude/, .omi-plugins/
+                         (omi.config.yaml, omi.config.json) and the Coordinator's AGENTS.md, and clone the
+                         repo into it. Re-running reports each item created or kept; never overwrites
   github project init [--title <text>]
                          Bootstrap this repo into OMI: find or create the Project (title, default: repo
-                         name), link it, write .omi/config.yaml and install templates/github/ into .github/
-                         where missing. Re-running changes nothing; never overwrites a file
+                         name), link it, write the github section of .omi-plugins/omi.config.yaml and
+                         install templates/github/ into .github/ where missing. Re-running changes nothing;
+                         never overwrites a file
   github project plan    Diff the Project's custom fields (config/github/project.yaml), views, built-in
                          workflows and Insights (views.yaml) and list items whose Status their type does
                          not use (status-transitions.yaml). Read-only; exits 1 while anything is pending,
@@ -210,6 +217,7 @@ const REPO_WIDE = new Set([
   "project apply",
   "handoff show",
   "handoff post",
+  "workspace init",
 ]);
 
 const describe = (a: ProjectAction) =>
@@ -317,6 +325,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         "github",
         "handoff",
         "release",
+        "workspace",
       ].includes(command)
     ) {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
@@ -595,12 +604,21 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         const checks = projectValidate(repo(cwd).config);
         return ok({ checks }, humanChecks(checks), checksExit(checks));
       }
+      case "workspace init": {
+        const r = workspaceInit({ cwd, name: values.name, repo: values.repo });
+        const human = [
+          `workspace ${r.workspace}`,
+          ...r.items.map((i) => `${i.result.padEnd(9)} ${i.path}`),
+          "next      cd into the workspace, then `omi github project init` (skill omi-start)",
+        ];
+        return ok(r, lines(human));
+      }
       case "github project init": {
         const r = projectInit({ cwd, title: values.title });
         const human = [
           `project   #${r.project.number} ${r.project.title}${r.project.created ? " (created)" : ""}`,
           `repo      ${r.owner}/${r.repo}${r.linked ? " (linked)" : ""}`,
-          `config    ${r.config === "created" ? "created" : "kept"} .omi/config.yaml`,
+          `config    ${r.config === "created" ? "created" : "kept"} ${CONFIG_FILE}`,
           ...r.templates.copied.map((f) => `template  ${f}`),
           ...(r.templates.kept.length
             ? [`template  ${r.templates.kept.length} kept (already present)`]
@@ -684,5 +702,7 @@ const parse = (args: string[]) =>
       on: { type: "string" },
       "approved-plan": { type: "string" },
       milestone: { type: "string" },
+      name: { type: "string" },
+      repo: { type: "string" },
     },
   });

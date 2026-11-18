@@ -9,6 +9,7 @@ import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import { loadConfig, type OmiConfig } from "../core/config.ts";
 import type { Check } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
+import { CONFIG_FILE, locate } from "../core/workspace.ts";
 
 export type { Check };
 
@@ -295,8 +296,9 @@ export function doctor(cwd: string): Check[] {
 
   let config: OmiConfig | undefined;
   try {
-    config = loadConfig(repoRoot);
-    checks.push({ name: "config", status: "pass", detail: ".omi/config.yaml" });
+    const { workspace } = locate(repoRoot);
+    config = loadConfig(workspace);
+    checks.push({ name: "config", status: "pass", detail: join(workspace, CONFIG_FILE) });
   } catch (e) {
     const err = e instanceof OmiError ? e : new OmiError("INTERNAL", "config check crashed");
     const issues = (err.details as { issues?: { path: string; message: string }[] })?.issues;

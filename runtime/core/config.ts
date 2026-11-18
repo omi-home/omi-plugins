@@ -1,11 +1,13 @@
 // OMI configuration contract with safe defaults (spec §3, §7, §9, §14, §20).
-// Project config lives in <repo>/.omi/config.yaml; plugin config/ holds only default policies.
+// Project config lives in <workspace>/.omi-plugins/omi.config.yaml (ADR-0002 D1); plugin config/
+// holds only default policies.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 import { GateCheck, parseContract, Role } from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
+import { CONFIG_FILE } from "./workspace.ts";
 
 const ModelAlias = z.enum(["sonnet", "opus", "haiku"]);
 const Effort = z.enum(["low", "medium", "high"]);
@@ -83,22 +85,33 @@ export type OmiConfig = z.infer<typeof OmiConfig>;
 export const parseConfig = (input: unknown): OmiConfig =>
   parseContract(OmiConfig, input, "config", "CONFIG_INVALID");
 
-export const CONFIG_PATH = ".omi/config.yaml";
+export const CONFIG_PATH = CONFIG_FILE;
 
-/** Reads and validates `<repoRoot>/.omi/config.yaml`. Errors never echo config values. */
-export function loadConfig(repoRoot: string): OmiConfig {
+/** Parsed YAML of the workspace config, or undefined when the file is missing. */
+export function readConfigData(workspace: string): unknown {
   let text: string;
   try {
-    text = readFileSync(join(repoRoot, CONFIG_PATH), "utf8");
+    text = readFileSync(join(workspace, CONFIG_PATH), "utf8");
   } catch {
-    throw new OmiError("CONFIG_INVALID", `${CONFIG_PATH} not found`);
+    return undefined;
   }
-  let data: unknown;
   try {
-    data = parse(text);
+    return parse(text) ?? null;
   } catch (e) {
     const line = (e as { linePos?: { line: number }[] }).linePos?.[0]?.line;
     throw new OmiError("CONFIG_INVALID", `${CONFIG_PATH}: invalid YAML`, { line });
+  }
+}
+
+/** Reads and validates `<workspace>/.omi-plugins/omi.config.yaml`. Errors never echo values. */
+export function loadConfig(workspace: string): OmiConfig {
+  const data = readConfigData(workspace);
+  if (data === undefined) throw new OmiError("CONFIG_INVALID", `${CONFIG_PATH} not found`);
+  if (data === null) {
+    throw new OmiError(
+      "CONFIG_INVALID",
+      `${CONFIG_PATH} has no settings yet: run \`omi github project init\``,
+    );
   }
   return parseConfig(data);
 }
