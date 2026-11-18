@@ -401,6 +401,9 @@ export const StepComment = z
     changedFiles: z.array(relPath).max(500).default([]),
     evidencePaths: z.array(relPath).max(100).default([]),
     findings: z.array(Finding).max(100).default([]),
+    /** Host-observed tokens and wall time of the step (spec §14 cost measurement). */
+    usage: TokenUsage.optional(),
+    durationMs: z.int().min(0).optional(),
     nextAction: text(500),
     executionId: id,
     createdAt: z.iso.datetime(),

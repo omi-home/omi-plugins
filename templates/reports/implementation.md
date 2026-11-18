@@ -9,6 +9,7 @@
 | Executor | {{executor}} |
 | Model | {{model}} |
 | Effort | {{effort}} |
+| Cost | {{cost}} |
 | Commit | {{commit}} |
 | Status | {{status}} |
 

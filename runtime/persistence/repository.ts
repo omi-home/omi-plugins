@@ -174,8 +174,9 @@ export function advanceRun(
       "INSERT INTO transition (run_id, from_state, to_state, event, at) VALUES (?, ?, ?, ?, ?)",
     ).run(runId, ctx.state, next.state, event.type, now);
     if (verdict && ctx.state === "RUNNING") {
+      // A QA rework re-reviews within its round (#56): the round keeps its latest verdict.
       db.prepare(
-        "INSERT INTO review_round (run_id, round, outcome, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO review_round (run_id, round, outcome, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (run_id, round) DO UPDATE SET outcome = excluded.outcome",
       ).run(runId, ctx.round, verdict, now);
     }
     return { run: getRun(db, runId) as RunRow, context: next };

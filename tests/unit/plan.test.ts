@@ -22,6 +22,7 @@ test("simple bug: child DevTask runs Bug Resolution with one engineer, no BA/Arc
     engineer: "backend-engineer",
     security: false,
     regressionTest: true,
+    manualQa: true, // PO #56: Manual QA confirms the bug is gone
   });
   assert.equal(
     codeOf(() => planWorkflow({ type: "bug", labels: [] })),

@@ -27,6 +27,21 @@ const effort = (c: StepComment) =>
     ? "n/a (omi-cli)"
     : `requested ${c.requestedEffort} · actual unknown (not observable)`;
 
+/** Observed tokens and wall time (spec §14): never estimated, `not_available` when unknown. */
+function cost(c: StepComment): string {
+  const u = c.usage;
+  const tokens = u
+    ? `${u.inputTokens} in / ${u.outputTokens} out tokens${u.cacheReadTokens ? ` (${u.cacheReadTokens} cache read)` : ""}`
+    : c.executor === "omi-cli"
+      ? "no tokens (omi-cli)"
+      : "tokens not_available";
+  const wall =
+    c.durationMs === undefined
+      ? "wall time not_available"
+      : `${(c.durationMs / 1000).toFixed(1)} s wall`;
+  return `${tokens} · ${wall}`;
+}
+
 export function renderStepReport(c: StepComment): string {
   const values: Record<string, string> = {
     marker: commentMarker(c),
@@ -38,6 +53,7 @@ export function renderStepReport(c: StepComment): string {
     executor: c.executor,
     model: cell(model(c)),
     effort: cell(effort(c)),
+    cost: cell(cost(c)),
     commit: c.commitSha ? c.commitSha.slice(0, 8) : "—",
     status: c.status,
     summary: block(c.summary),

@@ -19,6 +19,8 @@ export interface DeliveryPlan {
   security: boolean;
   /** Bug fix: the engineer's change must include a regression test. */
   regressionTest: boolean;
+  /** Manual QA agent checks the acceptance criteria after release validation (PO, #56). */
+  manualQa: boolean;
 }
 
 /** Requirement/container Issue without a worktree: analysts write their sections, PO decides. */
@@ -39,6 +41,8 @@ const ROLE_LABEL: Record<string, Role> = {
 
 /** Labels that make the Security Reviewer mandatory (PO 2026-11-18). */
 export const SECURITY_LABELS = ["risk:high", "security"];
+/** Labels that add the Manual QA agent; Bug Resolution always has it (PO 2026-11-18, #56). */
+export const MANUAL_QA_LABELS = ["ui", "qa:manual"];
 
 export function planWorkflow(i: PlanInput): WorkflowPlan {
   const has = (l: string) => i.labels.includes(l);
@@ -89,6 +93,7 @@ export function planWorkflow(i: PlanInput): WorkflowPlan {
         engineer,
         security: SECURITY_LABELS.some(has),
         regressionTest: bug,
+        manualQa: bug || MANUAL_QA_LABELS.some(has),
       };
     }
     default:

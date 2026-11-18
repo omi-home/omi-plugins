@@ -36,7 +36,8 @@ Commands:
   task status <n>        Show the local run, worktree and transitions of Issue #n
   task run <n>           Start Issue #n and drive its planned Engineer (label role:*) → checks → Code
                          Reviewer (→ Security Reviewer when risk:high/security or asked) (→ Architect)
-                         until it needs a person (In QA, Waiting PO, Blocked). Runs agents: spends tokens.
+                         → release validation (→ Manual QA for bugs, ui, qa:manual) until In Review
+                         or it needs a person (Waiting PO, Blocked). Runs agents: spends tokens.
                          --from-source loads the agents from this checkout instead of the installed plugin
   task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
                          write their sections into the Issue body, then Waiting PO. No worktree.

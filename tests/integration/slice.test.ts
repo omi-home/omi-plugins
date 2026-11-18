@@ -32,6 +32,10 @@ interface Script {
   security?: Verdict | "CRITICAL";
   /** This analyst stops with an open question. */
   analysisBlocks?: string;
+  /** Manual QA verdicts, one per QA run (default PASSED). */
+  qa?: Verdict[];
+  /** Engineer leaves an uncommitted file after its first step (release validation). */
+  leavesDirt?: boolean;
 }
 
 const git = (cwd: string, ...a: string[]) =>
@@ -123,6 +127,21 @@ function stubAgents(script: Script) {
           ? { blockerReason: "PO must decide the scope" }
           : { sectionUpdates: [{ section, markdown: `### ${section} by ${role}` }] }),
       };
+    } else if (role === "manual-qa-engineer") {
+      const v = script.qa?.shift() ?? "PASSED";
+      result = {
+        ...base,
+        status: v,
+        summary: `qa ${packet.stepId}`,
+        ...(v === "PASSED"
+          ? { sectionUpdates: [{ section: "qa", markdown: "### Test cases" }] }
+          : {}),
+        findings:
+          v === "FAILED"
+            ? [{ id: "QA-001", severity: "high", observed: "AC-1 fails", expected: "AC-1 holds" }]
+            : [],
+        ...(v === "BLOCKED" ? { blockerReason: "cannot verify" } : {}),
+      };
     } else if (role.endsWith("-engineer")) {
       const wt = packet.worktree;
       const file = `src/${packet.stepId}-r${packet.round}.txt`;
@@ -139,6 +158,7 @@ function stubAgents(script: Script) {
       else rmSync(join(wt, "broken"), { force: true });
       git(wt, "add", "-A");
       git(wt, "commit", "-qm", file);
+      if (script.leavesDirt && packet.stepId === "implement") writeFileSync(join(wt, "dirt"), "");
       result = {
         ...base,
         status: "PASSED",
@@ -248,16 +268,28 @@ const titles = (bodies: string[]) =>
     return `${step?.[1]}:${step?.[2]}`;
   });
 
-test("happy path: Dev → checks → Review PASSED → IN_QA, one report each, usage observed", () => {
+test("happy path: Dev → checks → Review → release validation → PR_PENDING, usage observed", () => {
   const s = setup();
   const ctx = runSlice(s.deps, s.target);
-  assert.equal(ctx.state, "IN_QA");
+  assert.equal(ctx.state, "PR_PENDING");
   assert.deepEqual(s.agents.calls, ["backend-engineer:1", "code-reviewer:1"]);
+  // Checks already passed on this HEAD: release validation reuses them, no Manual QA planned.
   assert.deepEqual(titles(s.gh.comments.map((c) => c.body)), [
     "implement:1",
     "checks:1",
     "code-review:1",
+    "release-validation:1",
   ]);
+  assert.match(s.gh.comments[3]?.body ?? "", /1 commit\(s\) over base · checks passed on/);
+  // Cost row: host-observed tokens and wall time, never estimated (spec §14).
+  assert.match(
+    s.gh.comments[0]?.body ?? "",
+    /\| Cost \| 100 in \/ 20 out tokens \(5 cache read\) · \d+\.\d s wall \|/,
+  );
+  assert.match(
+    s.gh.comments[1]?.body ?? "",
+    /\| Cost \| no tokens \(omi-cli\) · \d+\.\d s wall \|/,
+  );
   assert.match(
     s.gh.comments[0]?.body ?? "",
     /requested sonnet · actual claude-sonnet-5-5 \(observed\)/,
@@ -342,7 +374,7 @@ test("Architect scope change stops at WAITING_PO before any third round", () => 
 test("failed checks go back to the engineer as CHK findings, not as a review round", () => {
   const s = setup({ breakChecksInRound: 1 });
   const ctx = runSlice(s.deps, s.target);
-  assert.equal(ctx.state, "IN_QA");
+  assert.equal(ctx.state, "PR_PENDING");
   assert.deepEqual(s.agents.calls, ["backend-engineer:1", "backend-engineer:1", "code-reviewer:1"]);
   const fix = s.agents.packets[1];
   assert.equal(fix?.stepId, "implement-fix1");
@@ -360,7 +392,7 @@ test("failed checks go back to the engineer as CHK findings, not as a review rou
 test("transient GitHub error is a new attempt of the same step, not a round", () => {
   const s = setup();
   s.gh.faults.push("gh: Server Error (HTTP 502)");
-  assert.equal(runSlice(s.deps, s.target).state, "IN_QA");
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
   const attempts = s.db
     .prepare(
       "SELECT a.attempt, a.error_code FROM step_attempt a JOIN step_run s ON s.id = a.step_run_id WHERE s.step_id = 'implement' ORDER BY a.attempt",
@@ -391,7 +423,7 @@ test("crash before the report is posted: rerun posts it without re-running the a
   assert.deepEqual(s.agents.calls, ["backend-engineer:1"]);
   assert.equal(repo.pendingReports(s.db, "run").length, 1);
   failPublish = false;
-  assert.equal(runSlice(s.deps, s.target).state, "IN_QA");
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
   assert.deepEqual(
     s.agents.calls,
     ["backend-engineer:1", "code-reviewer:1"],
@@ -401,6 +433,7 @@ test("crash before the report is posted: rerun posts it without re-running the a
     "implement:1",
     "checks:1",
     "code-review:1",
+    "release-validation:1",
   ]);
 });
 
@@ -412,13 +445,14 @@ const delivery = (p: Partial<DeliveryPlan> = {}): DeliveryPlan => ({
   engineer: "backend-engineer",
   security: false,
   regressionTest: false,
+  manualQa: false,
   ...p,
 });
 const roles = (calls: string[]) => calls.map((c) => c.split(":")[0]);
 
 test("planned engineer runs; no Security Reviewer unless required", () => {
   const s = setup({}, delivery({ engineer: "frontend-engineer" }));
-  assert.equal(runSlice(s.deps, s.target).state, "IN_QA");
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
   assert.deepEqual(s.agents.calls, ["frontend-engineer:1", "code-reviewer:1"]);
 });
 
@@ -442,7 +476,7 @@ test("security label: Security Reviewer after Code Review; its FAILED is a revie
 
 test("Code Reviewer routes to security review without a label", () => {
   const s = setup({ reviewNext: "security-review: touches auth" }, delivery());
-  assert.equal(runSlice(s.deps, s.target).state, "IN_QA");
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
   assert.deepEqual(roles(s.agents.calls), [
     "backend-engineer",
     "code-reviewer",
@@ -461,7 +495,7 @@ test("Bug Resolution: a fix without a regression test is a failed gate, not a re
     { addsTestFrom: "implement-fix1" },
     delivery({ workflow: "Bug Resolution", regressionTest: true }),
   );
-  assert.equal(runSlice(s.deps, s.target).state, "IN_QA");
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
   assert.deepEqual(roles(s.agents.calls), [
     "backend-engineer",
     "backend-engineer",
@@ -522,4 +556,56 @@ test("analysis: an open question stops before the next analyst and waits for the
   assert.equal(runAnalysis(a.deps, a.target).state, "WAITING_PO");
   assert.deepEqual(a.agents.calls, ["business-analyst:1"]);
   assert.deepEqual(a.written, []);
+});
+
+// ---- DevTask-0027 #56: QA stage ----
+
+test("Manual QA FAILED: same-round rework under new step ids, then QA passes → PR_PENDING", () => {
+  const s = setup({ qa: ["FAILED", "PASSED"] }, delivery({ manualQa: true }));
+  const ctx = runSlice(s.deps, s.target);
+  assert.equal(ctx.state, "PR_PENDING");
+  assert.equal(ctx.round, 1); // a QA rework is not a review round
+  assert.equal(ctx.qaReworks, 1);
+  assert.deepEqual(roles(s.agents.calls), [
+    "backend-engineer",
+    "code-reviewer",
+    "manual-qa-engineer",
+    "backend-engineer",
+    "code-reviewer",
+    "manual-qa-engineer",
+  ]);
+  assert.deepEqual(titles(s.gh.comments.map((c) => c.body)), [
+    "implement:1",
+    "checks:1",
+    "code-review:1",
+    "release-validation:1",
+    "qa:1",
+    "implement-qa1:1",
+    "checks-qa1:1",
+    "code-review-qa1:1",
+    "release-validation-qa1:1",
+    "qa-qa1:1",
+  ]);
+  const rework = s.agents.packets.find((p) => p.stepId === "implement-qa1");
+  assert.deepEqual(
+    rework?.openFindings.map((f) => f.id),
+    ["QA-001"],
+  );
+});
+
+test("release validation: uncommitted work is a QA failure the engineer fixes", () => {
+  const s = setup({ leavesDirt: true }, delivery());
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const rel = s.gh.comments.map((c) => c.body).filter((b) => /step=release-validation/.test(b));
+  assert.match(rel[0] ?? "", /\| Status \| FAILED \|[\s\S]*REL-001/);
+  assert.match(rel[1] ?? "", /\| Status \| PASSED \|/);
+  assert.equal(
+    s.agents.packets.find((p) => p.stepId === "implement-qa1")?.openFindings[0]?.id,
+    "REL-001",
+  );
+});
+
+test("Manual QA BLOCKED stops for a person", () => {
+  const s = setup({ qa: ["BLOCKED"] }, delivery({ manualQa: true }));
+  assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
 });

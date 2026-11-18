@@ -235,8 +235,8 @@ export interface RunResult {
 }
 
 /**
- * `omi task run <n>`: start (idempotent) then drive the review loop until it needs a person
- * (IN_QA, WAITING_PO, BLOCKED); the Project Status then mirrors the workflow state (#99).
+ * `omi task run <n>`: start (idempotent) then drive review and QA until PR_PENDING or a person is
+ * needed (WAITING_PO, BLOCKED); the Project Status then mirrors the workflow state (#99).
  * Spawns agent processes: this command spends tokens.
  */
 export function taskRun(
@@ -267,6 +267,7 @@ export function taskRun(
           evidenceDir: join(dirname(file), "evidence", start.run.id),
           runAgent: deps.runAgent,
           fromSource: deps.fromSource,
+          writeSection: (section, md) => writeSection(config, issue, section, md, gh),
         },
         {
           run: start.run,
@@ -385,7 +386,7 @@ const gitOut = (cwd: string, args: string[]) =>
  * `omi pr create <n>` (spec §8 gate 5): push the task branch from its owned, clean worktree,
  * create or reuse its one PR → `develop`, and verify base, head and exactly one primary Issue.
  * A Release Issue takes the separate `develop → main` path and owns no worktree. No workflow
- * transition here: PR_PENDING is reached through QA.
+ * transition here: `omi task run` reaches PR_PENDING through QA.
  */
 export function prCreate(
   deps: TaskDeps & { title?: string; body?: string; sleep?: (ms: number) => void },

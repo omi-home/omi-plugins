@@ -1,6 +1,7 @@
 // Delivery workflow (spec §10–§12): the planned engineer → deterministic checks → Code Reviewer
 // (→ Security Reviewer when required), with the Solution Architect once after two failed review
-// rounds; and the analysis workflow (analysts write Issue sections, the PO decides). Every step: task packet → named
+// rounds, then QA: release validation (→ Manual QA when planned) up to PR_PENDING; and the
+// analysis workflow (analysts write Issue sections, the PO decides). Every step: task packet → named
 // agent process (ADR-0001 D1) → verified result → persisted with its report → report posted
 // before the next step. The FSM decides every move; agents only recommend.
 import { spawnSync } from "node:child_process";
@@ -24,6 +25,7 @@ import {
 } from "../../persistence/repository.ts";
 import { publishPending } from "../../reporting/outbox.ts";
 import { renderStepReport } from "../../reporting/render.ts";
+import { git } from "../../resources/worktree.ts";
 import type { OmiConfig } from "../config.ts";
 import {
   type CheckRun,
@@ -54,6 +56,8 @@ export interface SliceDeps {
   /** Load agents from `pluginRoot` (`--plugin-dir`) instead of the installed plugin. */
   fromSource?: boolean;
   now?: () => Date;
+  /** Writes a `<!-- omi:section=… -->` of the Issue body (the Manual QA test cases). */
+  writeSection?: (section: string, markdown: string) => void;
 }
 
 export interface SliceTarget {
@@ -100,13 +104,23 @@ const SECURITY: StepSpec = {
   title: "Security Review",
   edits: false,
 };
+const QA: StepSpec = {
+  stepId: "qa",
+  role: "manual-qa-engineer",
+  category: "qa",
+  title: "Acceptance QA",
+  edits: false,
+};
 const DEFAULT_PLAN: DeliveryPlan = {
   kind: "delivery",
   workflow: "Feature Implementation",
   engineer: "backend-engineer",
   security: false,
   regressionTest: false,
+  manualQa: false,
 };
+/** A QA rework re-runs a round's steps without a new round number: give them new step ids. */
+const qaSuffix = (ctx: WorkflowContext) => (ctx.qaReworks ? `-qa${ctx.qaReworks}` : "");
 const workflowOf = (t: SliceTarget) => t.plan?.workflow ?? DEFAULT_PLAN.workflow;
 /** A test file by the usual conventions (`test/`, `tests/`, `*.test.*`, `*_test.*`, `*.spec.*`). */
 export const isTest = (f: string) =>
@@ -146,13 +160,14 @@ const cut = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)
 function agentStep(
   d: SliceDeps,
   t: SliceTarget,
-  spec: StepSpec,
+  planned: StepSpec,
   ctx: WorkflowContext,
   openFindings: Finding[],
   checkResults?: CheckRun[],
 ): StepResult | null {
   const { db, config } = d;
   const issue = { repository: t.run.repository, number: t.run.issue };
+  const spec = { ...planned, stepId: planned.stepId + qaSuffix(ctx) };
   const step = startStep(db, {
     runId: t.run.id,
     stepId: spec.stepId,
@@ -182,6 +197,7 @@ function agentStep(
       const file = join(d.evidenceDir, `${spec.stepId}-r${ctx.round}-a${attempt}.packet.json`);
       writeFileSync(file, JSON.stringify(packet, null, 2));
       addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "task-packet", path: file });
+      const started = Date.now();
       const stdout = (d.runAgent ?? spawnAgent)(
         buildAgentLaunch({
           pluginRoot: d.pluginRoot,
@@ -193,6 +209,7 @@ function agentStep(
           acceptEdits: spec.edits,
         }),
       );
+      const durationMs = Date.now() - started;
       const obs = observeRun(stdout);
       if (obs.isError) throw new OmiError("INTERNAL", `${spec.role} run ended in an error`);
       // Token usage is what the host observed, never what the agent claims.
@@ -222,6 +239,8 @@ function agentStep(
           changedFiles: result.changedFiles,
           evidencePaths: result.evidencePaths,
           findings: result.findings,
+          usage: result.usage,
+          durationMs,
           nextAction: result.nextAction ?? "The OMI runtime decides the next step.",
           executionId: `${t.run.id}.${spec.stepId}.r${ctx.round}.a${attempt}`,
           createdAt: (d.now?.() ?? new Date()).toISOString(),
@@ -265,12 +284,14 @@ function checksStep(
   ctx: WorkflowContext,
   /** Gate findings decided by the runtime itself (e.g. a missing regression test). */
   extra: Finding[] = [],
+  base = { stepId: "checks", title: "Deterministic Checks", next: "Code review." },
 ): { findings: Finding[]; results: CheckRun[] } {
   const n = ctx.validationFixes + 1;
+  const stepId = base.stepId + qaSuffix(ctx);
   const { passed, results } = runChecks({
     worktree: t.worktree,
     checks: d.config.checks,
-    logDir: join(d.evidenceDir, `checks-r${ctx.round}-${n}`),
+    logDir: join(d.evidenceDir, `${stepId}-r${ctx.round}-${n}`),
   });
   for (const r of results) {
     if (r.logPath) addArtifact(d.db, { runId: t.run.id, kind: "log", path: r.logPath });
@@ -298,8 +319,8 @@ function checksStep(
       workflowRunId: t.run.id,
       category: "checks",
       workflow: workflowOf(t),
-      stepId: "checks",
-      stepTitle: "Deterministic Checks",
+      stepId,
+      stepTitle: base.title,
       round: ctx.round,
       attempt: n,
       executor: "omi-cli",
@@ -310,8 +331,9 @@ function checksStep(
       status: ok ? "PASSED" : "FAILED",
       summary: results.map((r) => `${r.name}: ${r.outcome}`).join(", "),
       findings,
-      nextAction: ok ? "Code review." : "The engineer fixes the failed checks.",
-      executionId: `${t.run.id}.checks.r${ctx.round}.${n}`,
+      durationMs: results.reduce((sum, r) => sum + r.durationMs, 0),
+      nextAction: ok ? base.next : "The engineer fixes the failed checks.",
+      executionId: `${t.run.id}.${stepId}.r${ctx.round}.${n}`,
       createdAt: (d.now?.() ?? new Date()).toISOString(),
     },
     "checks comment",
@@ -327,8 +349,86 @@ function checksStep(
 }
 
 /**
+ * Release validation (PO 2026-11-18, #56), an omi-cli step: the branch is ready for a PR when
+ * the worktree is clean, it has commits over the base, and the checks passed on this very HEAD.
+ * Checks re-run only when HEAD differs from the one they passed on (or after a resume).
+ */
+function releaseStep(
+  d: SliceDeps,
+  t: SliceTarget,
+  ctx: WorkflowContext,
+  checkedHead: string | null,
+): Finding[] {
+  const started = Date.now();
+  const head = git(["rev-parse", "HEAD"], t.worktree);
+  const findings: Finding[] = [];
+  if (git(["status", "--porcelain", "--untracked-files=all"], t.worktree)) {
+    findings.push({
+      id: "REL-001",
+      severity: "high",
+      observed: "The task worktree has uncommitted changes.",
+      expected: "Every change of the task is committed on its branch.",
+    });
+  }
+  const commits = Number(git(["rev-list", "--count", `${t.baseSha}..HEAD`], t.worktree));
+  if (!commits) {
+    findings.push({
+      id: "REL-002",
+      severity: "high",
+      observed: "The task branch has no commit over its base.",
+      expected: "The change is committed on the task branch.",
+    });
+  }
+  const recheck = head !== checkedHead;
+  if (recheck) {
+    const gate = checksStep(d, t, ctx, [], {
+      stepId: "release-checks",
+      title: "Release Checks",
+      next: "Release validation.",
+    });
+    findings.push(...gate.findings);
+  }
+  const stepId = `release-validation${qaSuffix(ctx)}`;
+  const comment = parseContract(
+    StepComment,
+    {
+      schemaVersion: 1,
+      issue: { repository: t.run.repository, number: t.run.issue },
+      workflowRunId: t.run.id,
+      category: "qa",
+      workflow: workflowOf(t),
+      stepId,
+      stepTitle: "Release Validation",
+      round: ctx.round,
+      attempt: 1,
+      executor: "omi-cli",
+      requestedModel: null,
+      actualModel: null,
+      requestedEffort: null,
+      actualEffort: null,
+      commitSha: head,
+      status: findings.length ? "FAILED" : "PASSED",
+      summary: `${commits} commit(s) over base · checks ${recheck ? "re-run" : "passed"} on ${head.slice(0, 8)}`,
+      findings,
+      durationMs: Date.now() - started,
+      nextAction: findings.length ? "The engineer fixes the release findings." : "QA verdict.",
+      executionId: `${t.run.id}.${stepId}.r${ctx.round}`,
+      createdAt: (d.now?.() ?? new Date()).toISOString(),
+    },
+    "release validation comment",
+  );
+  enqueueReport(d.db, {
+    runId: t.run.id,
+    marker: commentMarker(comment),
+    body: renderStepReport(comment),
+  });
+  publishPending(d.db, t.run.id, { gh: d.gh });
+  return findings;
+}
+
+/**
  * Drives the run from WORKSPACE_READY (or wherever a previous invocation stopped) until it
- * needs someone else: IN_QA, WAITING_PO or BLOCKED. Returns the final FSM context.
+ * needs someone else: PR_PENDING, WAITING_PO or BLOCKED. Returns the final FSM context.
  */
 export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
   const plan = t.plan?.kind === "delivery" ? t.plan : DEFAULT_PLAN;
@@ -343,6 +443,7 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
   const refresh = () => runContext(d.db, t.run.id);
   let findings: Finding[] = [];
   let checks: CheckRun[] | undefined; // last checks of this run, for review and architect
+  let checkedHead: string | null = null; // HEAD the last passing checks ran on
   let needDev = true;
   if (ctx.state === "WORKSPACE_READY") advance({ type: "DEV_STARTED" });
   for (;;) {
@@ -379,6 +480,7 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
             : [];
         const gate = checksStep(d, t, ctx, regression);
         checks = gate.results;
+        checkedHead = gate.findings.length ? null : git(["rev-parse", "HEAD"], t.worktree);
         if (gate.findings.length) {
           advance({ type: "CHECKS_FAILED" });
           findings = gate.findings;
@@ -423,6 +525,30 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
         }
         break;
       }
+      case "IN_QA": {
+        const release = releaseStep(d, t, ctx, checkedHead);
+        if (release.length) {
+          findings = release;
+          advance({ type: "QA_FAILED" });
+          break;
+        }
+        if (plan.manualQa) {
+          const qa = agentStep(d, t, QA, ctx, findings, checks);
+          if (!qa) return refresh();
+          for (const u of qa.sectionUpdates) d.writeSection?.(u.section, u.markdown);
+          if (qa.status !== "PASSED" && qa.status !== "FAILED") {
+            advance({ type: "BLOCK" });
+            return ctx;
+          }
+          if (qa.status === "FAILED") {
+            findings = qa.findings;
+            advance({ type: "QA_FAILED" });
+            break;
+          }
+        }
+        advance({ type: "QA_PASSED" });
+        break;
+      }
       default:
         return ctx;
     }
@@ -447,7 +573,7 @@ const ANALYST_STEP: Partial<Record<Role, Omit<StepSpec, "role" | "edits">>> = {
  * WAITING_PO / BLOCKED when an analyst could not finish. `t.worktree` is the main checkout.
  */
 export function runAnalysis(
-  d: SliceDeps & { writeSection: (section: string, markdown: string) => void },
+  d: SliceDeps & Required<Pick<SliceDeps, "writeSection">>,
   t: SliceTarget & { plan: AnalysisPlan },
 ): WorkflowContext {
   mkdirSync(d.evidenceDir, { recursive: true });

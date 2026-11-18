@@ -22,6 +22,8 @@ const base = {
   actualModel: "claude-opus-5-5",
   requestedEffort: "medium",
   actualEffort: "unknown",
+  usage: { inputTokens: 1200, outputTokens: 340, cacheReadTokens: 800 },
+  durationMs: 42_300,
   commitSha: "abcdef1234567890",
   status: "FAILED",
   summary: "Two findings remain.",
@@ -62,11 +64,17 @@ test("CLI steps show null model/effort as n/a; missing model is unknown, never t
       actualModel: null,
       requestedEffort: null,
       actualEffort: null,
+      usage: undefined,
+      durationMs: undefined,
     }),
   );
   assert.match(cli, /\| Model \| n\/a \(omi-cli\) \|/);
+  assert.match(cli, /\| Cost \| no tokens \(omi-cli\) · wall time not_available \|/);
   assert.match(cli, /\| Effort \| n\/a \(omi-cli\) \|/);
-  const unknown = renderStepReport(comment({ category: "review", actualModel: "unknown" }));
+  const unknown = renderStepReport(
+    comment({ category: "review", actualModel: "unknown", usage: undefined }),
+  );
+  assert.match(unknown, /\| Cost \| tokens not_available · 42\.3 s wall \|/); // never invented
   assert.match(unknown, /requested opus · actual unknown \(not observed\)/);
   assert.match(unknown, /actual unknown \(not observable\)/);
 });

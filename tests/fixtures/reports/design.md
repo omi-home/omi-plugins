@@ -9,6 +9,7 @@
 | Executor | backend-engineer |
 | Model | requested opus · actual claude-opus-5-5 (observed) |
 | Effort | requested medium · actual unknown (not observable) |
+| Cost | 1200 in / 340 out tokens (800 cache read) · 42.3 s wall |
 | Commit | abcdef12 |
 | Status | FAILED |
 
