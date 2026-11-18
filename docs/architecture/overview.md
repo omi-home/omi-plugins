@@ -30,6 +30,8 @@ Ký hiệu `spec §N` (trong code, ADR, Issue) trỏ tới section `§N` trong p
 
 Luồng chính (D1): Coordinator → `omi` CLI → `claude -p --agent omi-engineering:<role>` (cwd = worktree của task) → kết quả có cấu trúc → CLI lưu SQLite và đăng comment.
 
+> [ADR-0002](../decisions/ADR-0002-workspace-va-profile-thuc-thi-claude-code.md) thay luồng này: workspace đồng cấp với repo, task workspace (clone) và profile thực thi Claude Code. Sơ đồ trên là as-built cho tới khi Feature-0024 #156 và Feature-0021 #137 hoàn thành.
+
 ## Hợp đồng thư mục gốc
 
 Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc mới cần ADR và cập nhật `ALLOWED_ROOT_DIRS` trong [tests/unit/directory-contract.test.ts](../../tests/unit/directory-contract.test.ts) — test này chặn mọi thư mục ngoài danh sách.
