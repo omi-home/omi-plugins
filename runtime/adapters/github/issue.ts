@@ -359,9 +359,15 @@ export function createIssue(
     changes.push("project");
   }
   // Initial Status from the desired state (DevTask-0030 #62); set once, never overwritten.
+  // A Project without that option (`omi project apply` not run) leaves it unset, reported as
+  // drift by `omi project plan`, rather than failing an Issue that is already created.
   if (itemId && !item?.fieldValueByName?.name) {
-    setItemStatus(statusField(c, run), itemId, loadProjectConfig().initialStatus, run);
-    changes.push("status");
+    try {
+      setItemStatus(statusField(c, run), itemId, loadProjectConfig().initialStatus, run);
+      changes.push("status");
+    } catch (e) {
+      if (!(e instanceof OmiError && e.code === "CONFIG_INVALID")) throw e;
+    }
   }
 
   // Number after creating, then re-read: two creators racing for one number → the later Issue

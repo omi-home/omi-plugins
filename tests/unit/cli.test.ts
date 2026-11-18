@@ -62,9 +62,10 @@ Commands:
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
   project plan           Diff the Project's custom fields against config/github/project.yaml and list
-                         items whose Status their type does not use (status-transitions.yaml). Read-only
+                         items whose Status their type does not use (status-transitions.yaml). Read-only;
+                         exits 1 while anything is pending, manual or drifting
   project apply          Create missing fields and options (existing option IDs and item values kept);
-                         never deletes. Iteration fields and conflicts stay manual
+                         never deletes. Iteration fields and conflicts stay manual (exit 1)
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and

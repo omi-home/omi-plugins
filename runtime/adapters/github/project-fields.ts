@@ -17,9 +17,7 @@ import {
   planFields,
 } from "../../core/project-config.ts";
 import { type GhRunner, graphql, spawnGh } from "./client.ts";
-
-const OWNER_PROJECT = (body: string) =>
-  `repositoryOwner(login:$owner){ ... on Organization{projectV2(number:$number){${body}}} ... on User{projectV2(number:$number){${body}}} }`;
+import { OWNER_PROJECT } from "./project.ts";
 
 const FIELDS = `query($owner:String!,$number:Int!){ ${OWNER_PROJECT(`id viewerCanUpdate
   fields(first:50){ nodes{ __typename

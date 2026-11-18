@@ -7,7 +7,7 @@ import type { ProjectStatus } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 import { type GhRunner, graphql, spawnGh } from "./client.ts";
 
-const OWNER_PROJECT = (body: string) =>
+export const OWNER_PROJECT = (body: string) =>
   `repositoryOwner(login:$owner){ ... on Organization{projectV2(number:$number){${body}}} ... on User{projectV2(number:$number){${body}}} }`;
 
 const FIELD_QUERY = `query($owner:String!,$number:Int!){ ${OWNER_PROJECT(
@@ -86,8 +86,9 @@ export interface StatusChange {
   to: ProjectStatus;
 }
 
-/** Statuses a start may advance from; anything later is never regressed. */
-const BEFORE_START: readonly string[] = ["Backlog", "Ready"] satisfies ProjectStatus[];
+/** Statuses a start may advance from; anything later is never regressed. Approved: a Feature or
+ * requirement the PO accepted for breakdown (status-transitions.yaml). */
+const BEFORE_START: readonly string[] = ["Backlog", "Ready", "Approved"] satisfies ProjectStatus[];
 const MAX_DEPTH = 8; // GitHub's sub-issue nesting limit
 
 export interface StatusField {

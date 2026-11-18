@@ -224,7 +224,7 @@ test("the matrix allows every Status move the workflow engine makes for executab
 test("the matrix allows the CLI roll-up moves (start, finish)", () => {
   // markStarted: Backlog/Ready/unset → In Progress, up the parent chain.
   for (const type of IssueType.options)
-    for (const from of ["Backlog", "Ready", null] as const)
+    for (const from of ["Backlog", "Ready", "Approved", null] as const)
       if (from === null || allowedStatuses(type).has(from))
         assert.ok(canMove(type, from, "In Progress"), `${type}: ${from} → In Progress`);
   // markFinished: task → Done; Milestone → In Review; Bug/requirement → In QA; others closed Done.

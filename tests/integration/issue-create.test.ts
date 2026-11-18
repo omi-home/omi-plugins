@@ -24,7 +24,7 @@ interface FakeIssue {
 
 function fakeGh(
   seed: Record<string, FakeIssue>,
-  opts: { pageSize?: number; onTitle?: () => void } = {},
+  opts: { pageSize?: number; onTitle?: () => void; statusOptions?: string[] } = {},
 ) {
   const issues = new Map(Object.entries(seed));
   const writes: string[] = [];
@@ -93,7 +93,10 @@ function fakeGh(
       return ok({ addProjectV2ItemById: { item: { id: items(i).nodes[0]?.id } } });
     }
     if (query.includes('field(name:"Status")')) {
-      const options = ["Backlog", "Ready"].map((name) => ({ id: `OPT_${name}`, name }));
+      const options = (opts.statusOptions ?? ["Backlog", "Ready"]).map((name) => ({
+        id: `OPT_${name}`,
+        name,
+      }));
       return ok({ repositoryOwner: { projectV2: { id: "P", field: { id: "F", options } } } });
     }
     if (query.includes("updateProjectV2ItemFieldValue")) {
@@ -248,6 +251,11 @@ test("re-run is a no-op; a half-done Issue is completed, not duplicated", () => 
   });
   assert.deepEqual(createIssue(config, input(), set.run).changes, []);
   assert.equal(set.issues.get("o/repo#6")?.status, "Ready");
+  // A Project without the initial option (no `omi project apply` yet): Issue still completed.
+  const bare = fakeGh(tree(), { statusOptions: ["Todo", "Done"] });
+  const made = createIssue(config, input(), bare.run);
+  assert.deepEqual(made.changes, ["create", "parent", "project", "title"]);
+  assert.equal(made.title, "DevTask-0008-Việc mới");
 });
 
 test("a closed Issue with the same title is not reused, but still counts for numbering", () => {

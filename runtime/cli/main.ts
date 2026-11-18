@@ -78,9 +78,10 @@ Commands:
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
   project plan           Diff the Project's custom fields against config/github/project.yaml and list
-                         items whose Status their type does not use (status-transitions.yaml). Read-only
+                         items whose Status their type does not use (status-transitions.yaml). Read-only;
+                         exits 1 while anything is pending, manual or drifting
   project apply          Create missing fields and options (existing option IDs and item values kept);
-                         never deletes. Iteration fields and conflicts stay manual
+                         never deletes. Iteration fields and conflicts stay manual (exit 1)
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
@@ -383,7 +384,9 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       }
       case "project plan": {
         const r = projectPlan(repo(cwd).config);
-        return ok(r, lines(humanPlan(r.actions, r.extra, r.drift)));
+        // Like a check: 1 while anything is pending, manual or drifting, so scripts can gate on it.
+        const clean = !r.actions.length && !r.drift.length;
+        return ok(r, lines(humanPlan(r.actions, r.extra, r.drift)), clean ? EXIT.ok : EXIT.failed);
       }
       case "project apply": {
         const r = projectApply(repo(cwd).config);
@@ -392,7 +395,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
           ...(r.applied.length ? [] : ["applied   nothing (already in the desired state)"]),
           ...humanPlan(r.plan.actions, r.plan.extra, []),
         ];
-        return ok(r, lines(human));
+        return ok(r, lines(human), r.plan.actions.length ? EXIT.failed : EXIT.ok);
       }
       case "pr validate": {
         const r = prValidate({ cwd }, issue);
