@@ -3,7 +3,7 @@
 // shows less progress than its children. Built-in Project automation does not do this.
 import { z } from "zod";
 import type { OmiConfig } from "../../core/config.ts";
-import type { ProjectStatus } from "../../core/contracts.ts";
+import { ProjectStatus } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 import { type Child, rollUp } from "../../core/hierarchy.ts";
 import { classify, type GhRunner, graphql, spawnGh } from "./client.ts";
@@ -204,12 +204,13 @@ export function setStatus(
   return { issue: `${at.owner}/${at.repo}#${issue}`, from, to };
 }
 
-const PARENT_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
+const PARENT_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String){
   repository(owner:$owner,name:$repo){ issue(number:$number){
     id state labels(first:30){nodes{name}} subIssuesSummary{total completed}
-    subIssues(first:100){ nodes{ number state stateReason repository{nameWithOwner}
-      projectItems(first:20){ nodes{ project{ number owner{... on Organization{login} ... on User{login}} }
-        fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} } } } }
+    subIssues(first:100,after:$after){ pageInfo{ hasNextPage endCursor }
+      nodes{ number state stateReason repository{nameWithOwner}
+        projectItems(first:20){ totalCount nodes{ project{ number owner{... on Organization{login} ... on User{login}} }
+          fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} } } } }
   } }
 }`;
 
@@ -219,6 +220,7 @@ const SubIssue = z.strictObject({
   stateReason: z.string().nullable(),
   repository: z.strictObject({ nameWithOwner: z.string() }),
   projectItems: z.strictObject({
+    totalCount: z.int(),
     nodes: z.array(
       z.strictObject({
         project: z.strictObject({
@@ -240,12 +242,20 @@ const ParentData = z.strictObject({
           state: z.enum(["OPEN", "CLOSED"]),
           labels: z.strictObject({ nodes: z.array(z.strictObject({ name: z.string() })) }),
           subIssuesSummary: z.strictObject({ total: z.int(), completed: z.int() }),
-          subIssues: z.strictObject({ nodes: z.array(SubIssue) }),
+          subIssues: z.strictObject({
+            pageInfo: z.strictObject({
+              hasNextPage: z.boolean(),
+              endCursor: z.string().nullable(),
+            }),
+            nodes: z.array(SubIssue),
+          }),
         })
         .nullable(),
     })
     .nullable(),
 });
+
+type ParentIssue = NonNullable<NonNullable<z.infer<typeof ParentData>["repository"]>["issue"]>;
 
 const CLOSE = `mutation($id:ID!){closeIssue(input:{issueId:$id,stateReason:COMPLETED}){issue{id}}}`;
 
@@ -256,19 +266,56 @@ export interface FinishChange extends StatusChange {
 /** Types whose finished children send them to In QA for verification (DocumentationTask-0007 #99). */
 const VERIFY_TYPES = ["bug", "fr", "nfr", "change-request"];
 
+/** The parent with every sub-issue (all pages) as roll-up sees it. */
+function readParent(config: OmiConfig, at: At, run: GhRunner) {
+  const { owner, projectNumber } = config.github;
+  const children: Child[] = [];
+  let after: string | null = null;
+  let info: ParentIssue | null = null;
+  do {
+    const vars: Record<string, unknown> = { ...at };
+    if (after) vars.after = after;
+    info = graphql(PARENT_QUERY, vars, ParentData, "parent issue", run).repository?.issue ?? null;
+    if (!info) return null;
+    for (const c of info.subIssues.nodes) {
+      const item = c.projectItems.nodes.find(
+        (i) =>
+          i.project.number === projectNumber &&
+          i.project.owner.login?.toLowerCase() === owner.toLowerCase(),
+      );
+      const raw = item?.fieldValueByName?.name;
+      children.push({
+        ref: `${c.repository.nameWithOwner}#${c.number}`,
+        state: c.state,
+        stateReason: c.stateReason,
+        // Not found among more items than read, or an option OMI does not know: cannot accept.
+        status: item
+          ? raw === undefined
+            ? null
+            : (ProjectStatus.safeParse(raw).data ?? "unknown")
+          : c.projectItems.totalCount > c.projectItems.nodes.length
+            ? "unknown"
+            : null,
+      });
+    }
+    after = info.subIssues.pageInfo.hasNextPage ? info.subIssues.pageInfo.endCursor : null;
+  } while (after);
+  return { ...info, children };
+}
+
 /**
  * After merge + verified cleanup (spec §8 gate 7, AGENTS.md rule 6): the task → Done, then up
  * the native parent chain while every sub-issue of a parent is closed and accepted (`rollUp`,
  * DevTask-0029 #60): a Feature (or any non-Milestone container) is closed and set Done; a
  * Milestone only goes to In Review, since Done needs the PO's acceptance of its gate. Stops at the
- * first parent that may not roll up (open, unaccepted or only cancelled children).
+ * first parent that may not roll up and says why (`held`).
  * Read → diff → write: a second call changes nothing.
  */
 export function markFinished(
   config: OmiConfig,
   issue: number,
   run: GhRunner = spawnGh,
-): FinishChange[] {
+): { changes: FinishChange[]; held?: string } {
   const field = statusField(config, run);
   field.option("Done");
   field.option("In Review");
@@ -281,21 +328,12 @@ export function markFinished(
     run,
   ).parent;
   for (let depth = 0; at && depth < MAX_DEPTH; depth++) {
-    const info = graphql(PARENT_QUERY, at, ParentData, "parent issue", run).repository?.issue;
+    const info = readParent(config, at, run);
     if (!info) break;
-    const { owner, projectNumber } = config.github;
-    const children: Child[] = info.subIssues.nodes.map((c) => ({
-      ref: `${c.repository.nameWithOwner}#${c.number}`,
-      state: c.state,
-      stateReason: c.stateReason,
-      status:
-        c.projectItems.nodes.find(
-          (i) =>
-            i.project.number === projectNumber &&
-            i.project.owner.login?.toLowerCase() === owner.toLowerCase(),
-        )?.fieldValueByName?.name ?? null,
-    }));
-    if (!rollUp(children, info.subIssuesSummary.total).ready) break;
+    const verdict = rollUp(info.children, info.subIssuesSummary.total);
+    if (!verdict.ready) {
+      return { changes, held: `${at.owner}/${at.repo}#${at.number}: ${verdict.reason}` };
+    }
     const label = (t: string) => info.labels.nodes.some((l) => l.name === `type:${t}`);
     const milestone = label("milestone");
     // Bug / requirement: children done means "verify" (#99), not done: a person accepts it.
@@ -312,7 +350,7 @@ export function markFinished(
     if (milestone || verify) break; // a person accepts these; nothing above rolls up automatically
     at = parent;
   }
-  return changes;
+  return { changes };
 }
 
 // --- bootstrap: find or create the Project, link it to the repo (DevTask-0031 #63) ------------

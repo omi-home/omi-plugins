@@ -38,6 +38,11 @@ test("rollUp: only closed and accepted children; cancelled ones allowed but not 
     ]),
     "every child is cancelled: a person decides",
   );
+  assert.equal(
+    no([kid("#1"), kid("#2", { status: "unknown" })]),
+    "closed but not accepted: #2 (unknown)",
+    "Status unreadable or not an OMI option: never accepted",
+  );
   assert.equal(no([kid("#1")], 101), "100 child(ren) not verified");
   assert.equal(no([]), "no children");
 });
@@ -109,7 +114,7 @@ test("depend: missing Issue or more blockers than OMI reads: refused, nothing wr
   const g = fakeGraph({ "o/a#1": [], "o/a#2": [] }, { "o/a#2": 60 });
   assert.throws(
     () => addDependency(at("o/a#1"), at("o/a#9"), g.run),
-    (e: OmiError) => e.code === "CONFIG_INVALID",
+    (e: OmiError) => e.code === "TICKET_INVALID",
   );
   assert.throws(
     () => addDependency(at("o/a#1"), at("o/a#2"), g.run),

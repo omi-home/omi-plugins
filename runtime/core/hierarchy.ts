@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
-import { type Check, IssueType, parseContract } from "./contracts.ts";
+import { type Check, IssueType, type ProjectStatus, parseContract } from "./contracts.ts";
 
 export const Hierarchy = z.strictObject({
   maxDepth: z.int().min(1),
@@ -96,13 +96,16 @@ const fail = (name: string, detail: string): Check => ({
 
 // --- completion roll-up policy (DevTask-0029 #60) ---------------------------------------------
 
-/** A sub-issue as roll-up sees it. `status`: its Status in the configured Project, null if absent. */
+/**
+ * A sub-issue as roll-up sees it. `status`: its Status in the configured Project; null when it is
+ * not on it (or has none); "unknown" when it cannot be told (unread item, option OMI does not know).
+ */
 export interface Child {
   ref: string;
   state: "OPEN" | "CLOSED";
   /** GitHub close reason: COMPLETED, NOT_PLANNED, DUPLICATE, REOPENED or null. */
   stateReason: string | null;
-  status: string | null;
+  status: ProjectStatus | "unknown" | null;
 }
 
 export type RollUp = { ready: true } | { ready: false; reason: string };

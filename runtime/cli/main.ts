@@ -175,6 +175,7 @@ const NESTED = new Set([
   "pr create",
   "pr validate",
   "pr merge",
+  "issue depend",
 ]);
 const GITHUB_REPO = new Set(["plan", "apply", "validate"]);
 const GITHUB_PROJECT = new Set(["init", "plan", "apply", "validate"]);
@@ -259,9 +260,6 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
     ) {
       command = `${command} ${rest[0]}`;
       rest = rest.slice(1);
-    } else if (command === "issue" && rest[0] === "depend") {
-      command = "issue depend";
-      rest = rest.slice(1);
     } else if (command === "issue" && (rest[0] === "create" || rest[0] === "section")) {
       command = rest[0] === "create" ? "issue create" : `issue section ${rest[1] ?? ""}`;
       rest = rest.slice(rest[0] === "create" ? 1 : 2);
@@ -284,9 +282,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
     }
     const issue =
-      NESTED.has(command) || command.startsWith("issue section") || command === "issue depend"
-        ? issueArg(rest.shift())
-        : 0;
+      NESTED.has(command) || command.startsWith("issue section") ? issueArg(rest.shift()) : 0;
     const section = command.startsWith("issue section") ? sectionArg(rest.shift()) : "";
     const bodyFile = (): string => {
       const file = values["body-file"];
@@ -441,6 +437,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
             (s) => `${s.status.toUpperCase().padEnd(7)} ${s.name.padEnd(22)} ${s.detail ?? ""}`,
           ) ?? []),
           ...r.status.map((c) => `status    ${c.issue}: ${c.from ?? "unset"} → ${c.to}`),
+          ...(r.held ? [`held      ${r.held}`] : []),
         ];
         return ok(r, lines(human), r.cleanup?.state === "CLEANUP_FAILED" ? EXIT.failed : EXIT.ok);
       }

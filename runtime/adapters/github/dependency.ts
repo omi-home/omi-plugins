@@ -8,7 +8,10 @@ import { type GhRunner, graphql, spawnGh } from "./client.ts";
 import type { IssueAt } from "./issue.ts";
 
 const PAGE = 50;
-/** ponytail: the cycle search stops (and refuses) past this many Issues; raise if graphs grow. */
+/**
+ * ponytail: the cycle search reads one Issue per gh call and refuses past this many; batch a BFS
+ * frontier into one aliased query if graphs grow.
+ */
 const MAX_VISITED = 200;
 
 const NODE = `query($owner:String!,$repo:String!,$number:Int!){ repository(owner:$owner,name:$repo){
@@ -40,11 +43,16 @@ const at = (r: z.infer<typeof Ref>): IssueAt => {
 
 function read(i: IssueAt, run: GhRunner) {
   const n = graphql(NODE, { ...i }, NodeData, "issue dependencies", run).repository?.issue;
-  if (!n) throw new OmiError("CONFIG_INVALID", `${i.owner}/${i.repo}#${i.number} not found`);
+  if (!n) {
+    throw new OmiError(
+      "TICKET_INVALID",
+      `${i.owner}/${i.repo}#${i.number} not found or not readable`,
+    );
+  }
   if (n.blockedBy.totalCount > n.blockedBy.nodes.length) {
     throw new OmiError(
       "POLICY_VIOLATION",
-      `${key(n)} has ${n.blockedBy.totalCount} blockers, more than OMI reads (${PAGE}): not verified`,
+      `${key(n)}: ${n.blockedBy.totalCount - n.blockedBy.nodes.length} blocker(s) not readable (private repository, or above ${PAGE}): cycle check not verified`,
     );
   }
   return n;

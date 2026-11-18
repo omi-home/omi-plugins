@@ -781,6 +781,8 @@ export interface FinalizeResult {
   cleanup: CleanupResult | null;
   report: string | null;
   status: StatusChange[];
+  /** Why the nearest parent did not roll up (DevTask-0029 #60), if it did not. */
+  held?: string;
 }
 
 function cleanupComment(run: RunRow, round: number, receipt: MergeReceipt, r: CleanupResult) {
@@ -853,8 +855,15 @@ export function taskFinalize(
       const runId = run.id;
       if (run.state === "COMPLETED") {
         // Cleanup and its report are done; only the Project projection may be behind.
-        const status = deps.dryRun ? [] : markFinished(config, issue, gh);
-        return { run, receipt: null, cleanup: null, report: null, status };
+        const fin = deps.dryRun ? { changes: [] } : markFinished(config, issue, gh);
+        return {
+          run,
+          receipt: null,
+          cleanup: null,
+          report: null,
+          status: fin.changes,
+          held: fin.held,
+        };
       }
       const branch = claimedRefs(db, runId, "branch")[0];
       if (!branch) throw new OmiError("OWNERSHIP_MISMATCH", `${primary} never owned a branch`);
@@ -918,8 +927,8 @@ export function taskFinalize(
       }
       run = advanceRun(db, runId, { type: "CLEANUP_SUCCEEDED" }).run;
       // COMPLETED is recorded first; a failure below is repaired by rerunning finalize.
-      const status = markFinished(config, issue, gh);
-      return { run, receipt, cleanup, report, status };
+      const fin = markFinished(config, issue, gh);
+      return { run, receipt, cleanup, report, status: fin.changes, held: fin.held };
     } finally {
       releaseLease(db, { key: lease, holder: session });
     }

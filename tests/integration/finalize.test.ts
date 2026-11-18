@@ -151,12 +151,14 @@ function fakeGh(f: Fake): GhRunner {
               completed: kids.filter((k) => !f.open.has(k)).length,
             },
             subIssues: {
+              pageInfo: { hasNextPage: false, endCursor: null },
               nodes: kids.map((k) => ({
                 number: k,
                 state: f.open.has(k) ? "OPEN" : "CLOSED",
                 stateReason: f.open.has(k) ? null : (f.reason?.[k] ?? "COMPLETED"),
                 repository: { nameWithOwner: "o/repo" },
                 projectItems: {
+                  totalCount: f.status[k] ? 1 : 0,
                   nodes: f.status[k]
                     ? [
                         {
@@ -289,7 +291,8 @@ test("closed but unaccepted sibling holds the Feature open; a cancelled one does
   const held = merged();
   held.f.children[3] = [5, 6];
   held.f.status[6] = "In QA"; // closed by hand before QA accepted it
-  taskFinalize({ cwd: held.repo, gh: held.gh }, 5);
+  const r = taskFinalize({ cwd: held.repo, gh: held.gh }, 5);
+  assert.equal(r.held, "o/repo#3: closed but not accepted: o/repo#6 (In QA)");
   assert.equal(held.f.status[5], "Done");
   assert.equal(held.f.status[3], "In Progress");
   assert.equal(held.f.open.has(3), true);
