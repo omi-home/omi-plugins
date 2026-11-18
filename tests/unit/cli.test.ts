@@ -66,6 +66,13 @@ Commands:
                          exits 1 while anything is pending, manual or drifting
   project apply          Create missing fields and options (existing option IDs and item values kept);
                          never deletes. Iteration fields and conflicts stay manual (exit 1)
+  github repo plan       Diff the repository's labels, main/develop protection and merge methods against
+                         config/github/repository.yaml. Read-only; exits 1 while anything differs
+  github repo apply --approved-plan <file>
+                         Apply exactly the plan the PO approved (\`github repo plan --output json\`
+                         saved to <file>): adds labels, tightens protection, sets merge methods; never
+                         deletes or loosens. Refused when the plan changed since approval
+  github repo validate   The same diff as checks (private repo on Free: protection unsupported, D5)
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and

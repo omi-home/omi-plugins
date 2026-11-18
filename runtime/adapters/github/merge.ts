@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { OmiConfig } from "../../core/config.ts";
 import type { Check } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
+import { loadRiskPolicy, riskLevel } from "../../core/repo-config.ts";
 import { type GhRunner, graphql, spawnGh } from "./client.ts";
 import { markedPrimaries } from "./pr.ts";
 
@@ -111,14 +112,8 @@ export function prFacts(
   };
 }
 
-/**
- * Highest risk named by `risk:<level>` labels on the Issue or the PR (gov §8.3).
- * ponytail: labels only; read T6.5's `risk-policy.yaml` once it exists.
- */
-export function riskOf(labels: string[]): string | undefined {
-  const levels = labels.map((l) => /^risk:(.+)$/.exec(l)?.[1]?.toLowerCase()).filter(Boolean);
-  return levels.includes("high") ? "high" : levels[0];
-}
+/** Highest risk named by `risk:<level>` labels on the Issue or the PR (gov §8.3, risk-policy.yaml). */
+export const riskOf = (labels: string[]): string | undefined => riskLevel(labels);
 
 const pass = (name: string, detail: string): Check => ({ name, status: "pass", detail });
 const warn = (name: string, detail: string): Check => ({ name, status: "warn", detail });
@@ -231,10 +226,12 @@ export function mergeEligibility(
     checks.push(warn("token", "token has admin rights: it can bypass branch protection"));
   }
   const risk = riskOf([...want.issueLabels, ...pr.labels.nodes.map((l) => l.name)]);
+  const policy = loadRiskPolicy();
+  const level = risk ?? policy.default;
   checks.push(
-    risk === "high"
-      ? fail(RISK_CHECK, "risk:high: the PO merges this PR (Waiting PO)")
-      : pass(RISK_CHECK, risk ? `risk:${risk}` : "no risk label (treated as low/medium)"),
+    policy.poMerge.includes(level)
+      ? fail(RISK_CHECK, `risk:${level}: the PO merges this PR (Waiting PO)`)
+      : pass(RISK_CHECK, risk ? `risk:${risk}` : `no risk label (treated as ${policy.default})`),
   );
   return checks;
 }

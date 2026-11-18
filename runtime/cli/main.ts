@@ -6,9 +6,11 @@ import { parseArgs } from "node:util";
 import { readSection, writeSection } from "../adapters/github/context.ts";
 import { createIssue } from "../adapters/github/issue.ts";
 import { projectApply, projectPlan, type StatusDrift } from "../adapters/github/project-fields.ts";
+import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/github/repo.ts";
 import { IssueType } from "../core/contracts.ts";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import type { FieldAction } from "../core/project-config.ts";
+import type { RepoAction } from "../core/repo-config.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { type Check, doctor } from "./doctor.ts";
@@ -82,6 +84,13 @@ Commands:
                          exits 1 while anything is pending, manual or drifting
   project apply          Create missing fields and options (existing option IDs and item values kept);
                          never deletes. Iteration fields and conflicts stay manual (exit 1)
+  github repo plan       Diff the repository's labels, main/develop protection and merge methods against
+                         config/github/repository.yaml. Read-only; exits 1 while anything differs
+  github repo apply --approved-plan <file>
+                         Apply exactly the plan the PO approved (\`github repo plan --output json\`
+                         saved to <file>): adds labels, tightens protection, sets merge methods; never
+                         deletes or loosens. Refused when the plan changed since approval
+  github repo validate   The same diff as checks (private repo on Free: protection unsupported, D5)
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
@@ -147,6 +156,7 @@ const NESTED = new Set([
   "pr validate",
   "pr merge",
 ]);
+const GITHUB_REPO = new Set(["plan", "apply", "validate"]);
 /** Subcommands without an issue: <group> <action>. */
 const REPO_WIDE = new Set(["cleanup scan", "cleanup apply", "project plan", "project apply"]);
 
@@ -163,6 +173,17 @@ const humanPlan = (actions: FieldAction[], extra: string[], drift: StatusDrift[]
   ...extra.map((e) => `extra     ${e} (not managed: kept)`),
   ...drift.map((d) => `drift     ${d.issue} ${d.status ?? "unset"}: ${d.reason}`),
 ];
+
+const describeRepo = (a: RepoAction) =>
+  a.kind === "create-label" || a.kind === "update-label"
+    ? `${a.kind === "create-label" ? "create" : "update"} label ${a.name} (#${a.color} ${a.description})`
+    : a.kind === "protect"
+      ? `protect ${a.branch}: ${a.enable.join(", ")}`
+      : a.kind === "merge-methods"
+        ? `merge methods: ${Object.entries(a.set)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(", ")}`
+        : `${a.what}: ${a.reason}`;
 
 const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
 
@@ -214,7 +235,12 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       ) {
         throw new OmiError("USAGE_INVALID", "expected issue section get|set <n> <name>");
       }
-    } else if (["ticket", "task", "pr", "cleanup", "issue", "project"].includes(command)) {
+    } else if (command === "github" && rest[0] === "repo" && GITHUB_REPO.has(rest[1] ?? "")) {
+      command = `github repo ${rest[1]}`;
+      rest = rest.slice(2);
+    } else if (
+      ["ticket", "task", "pr", "cleanup", "issue", "project", "github"].includes(command)
+    ) {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
     }
     const issue =
@@ -397,6 +423,39 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         ];
         return ok(r, lines(human), r.plan.actions.length ? EXIT.failed : EXIT.ok);
       }
+      case "github repo plan": {
+        const r = repoPlan(repo(cwd).config);
+        const human = [
+          ...r.actions.map(
+            (a) =>
+              `${a.kind === "manual" || a.kind === "unsupported" ? a.kind.padEnd(9) : "pending  "} ${describeRepo(a)}`,
+          ),
+          ...(r.actions.length ? [] : ["repo      in the desired state"]),
+          ...r.foreign.map((l) => `foreign   label ${l} (not managed: kept)`),
+        ];
+        return ok(r, lines(human), r.actions.length ? EXIT.failed : EXIT.ok);
+      }
+      case "github repo apply": {
+        const file = values["approved-plan"];
+        if (!file) throw new OmiError("USAGE_INVALID", "--approved-plan <file> is required");
+        let approved: unknown;
+        try {
+          approved = JSON.parse(readFileSync(resolve(cwd, file), "utf8"));
+        } catch {
+          throw new OmiError("USAGE_INVALID", `cannot read --approved-plan ${file} as JSON`);
+        }
+        const r = repoApply(repo(cwd).config, approvedActions(approved));
+        const human = [
+          ...r.applied.map((a) => `applied   ${describeRepo(a)}`),
+          ...(r.applied.length ? [] : ["applied   nothing (already in the desired state)"]),
+          ...r.plan.actions.map((a) => `${a.kind.padEnd(9)} ${describeRepo(a)}`),
+        ];
+        return ok(r, lines(human), r.plan.actions.length ? EXIT.failed : EXIT.ok);
+      }
+      case "github repo validate": {
+        const checks = repoValidate(repo(cwd).config);
+        return ok({ checks }, humanChecks(checks), checksExit(checks));
+      }
       case "pr validate": {
         const r = prValidate({ cwd }, issue);
         return ok(r, `pr        ${r.pr ?? "none"}\n${humanChecks(r.checks)}`, checksExit(r.checks));
@@ -439,5 +498,6 @@ const parse = (args: string[]) =>
       reason: { type: "string" },
       type: { type: "string" },
       parent: { type: "string" },
+      "approved-plan": { type: "string" },
     },
   });
