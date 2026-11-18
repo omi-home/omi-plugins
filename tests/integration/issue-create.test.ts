@@ -18,6 +18,8 @@ interface FakeIssue {
   state?: "OPEN" | "CLOSED";
   inProject?: boolean;
   body?: string;
+  status?: string;
+  itemId?: string;
 }
 
 function fakeGh(
@@ -31,9 +33,15 @@ function fakeGh(
   const repoOf = (k: string) => k.split("#")[0] as string;
   const byId = (id: string) => id.replace(/^I_/, "");
   const labels = (i: FakeIssue) => ({ nodes: [{ name: `type:${i.type}` }] });
-  const items = (i: FakeIssue) => ({
-    nodes: i.inProject ? [{ project: { number: 2, owner: { login: "o" } } }] : [],
-  });
+  let itemSeq = 0;
+  const items = (i: FakeIssue) => {
+    if (!i.inProject) return { nodes: [] };
+    if (!i.itemId) i.itemId = `PVTI_${++itemSeq}`;
+    const project = { number: 2, owner: { login: "o" } };
+    return {
+      nodes: [{ id: i.itemId, project, fieldValueByName: i.status ? { name: i.status } : null }],
+    };
+  };
   const up = (k: string | undefined, depth: number): unknown => {
     if (!k) return null;
     const i = issues.get(k) as FakeIssue;
@@ -79,8 +87,19 @@ function fakeGh(
       return ok({});
     }
     if (query.includes("addProjectV2ItemById")) {
-      (issues.get(byId(vars.c as string)) as FakeIssue).inProject = true;
+      const i = issues.get(byId(vars.c as string)) as FakeIssue;
+      i.inProject = true;
       writes.push("project");
+      return ok({ addProjectV2ItemById: { item: { id: items(i).nodes[0]?.id } } });
+    }
+    if (query.includes('field(name:"Status")')) {
+      const options = ["Backlog", "Ready"].map((name) => ({ id: `OPT_${name}`, name }));
+      return ok({ repositoryOwner: { projectV2: { id: "P", field: { id: "F", options } } } });
+    }
+    if (query.includes("updateProjectV2ItemFieldValue")) {
+      const i = [...issues.values()].find((x) => x.itemId === vars.i) as FakeIssue;
+      i.status = (vars.o as string).replace("OPT_", "");
+      writes.push(`status:${i.status}`);
       return ok({});
     }
     if (query.includes("issueTypes")) {
@@ -176,11 +195,12 @@ test("numbers per type (max + 1), native type, sub-issue and Project", () => {
   assert.equal(r.title, "DevTask-0008-Việc mới");
   assert.equal(r.url, "https://github.com/o/repo/issues/6");
   assert.ok(r.created);
-  assert.deepEqual(r.changes, ["create", "parent", "project", "title"]);
+  assert.deepEqual(r.changes, ["create", "parent", "project", "status", "title"]);
   assert.deepEqual(gh.writes, [
     "create:IT_TASK",
     "parent:o/repo#3",
     "project",
+    "status:Backlog",
     "title:DevTask-0008-Việc mới",
   ]);
   assert.equal(gh.issues.get("o/repo#6")?.body, BODY);
@@ -200,8 +220,34 @@ test("re-run is a no-op; a half-done Issue is completed, not duplicated", () => 
   const half = fakeGh({ ...tree(), "o/repo#6": { title: "Việc mới", type: "dev-task" } });
   const r = createIssue(config, input(), half.run);
   assert.equal(r.number, 6);
-  assert.deepEqual(r.changes, ["parent", "project", "title"]);
+  assert.deepEqual(r.changes, ["parent", "project", "status", "title"]);
   assert.equal(half.issues.size, 6);
+
+  // Crash after adding to the Project (DevTask-0030 #62): Status still unset → set once.
+  const unset = fakeGh({
+    ...tree(),
+    "o/repo#6": {
+      title: "DevTask-0008-Việc mới",
+      type: "dev-task",
+      parent: "o/repo#3",
+      inProject: true,
+    },
+  });
+  assert.deepEqual(createIssue(config, input(), unset.run).changes, ["status"]);
+  assert.deepEqual(createIssue(config, input(), unset.run).changes, []);
+  // A Status someone already set is never overwritten.
+  const set = fakeGh({
+    ...tree(),
+    "o/repo#6": {
+      title: "DevTask-0008-Việc mới",
+      type: "dev-task",
+      parent: "o/repo#3",
+      inProject: true,
+      status: "Ready",
+    },
+  });
+  assert.deepEqual(createIssue(config, input(), set.run).changes, []);
+  assert.equal(set.issues.get("o/repo#6")?.status, "Ready");
 });
 
 test("a closed Issue with the same title is not reused, but still counts for numbering", () => {

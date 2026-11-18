@@ -16,8 +16,10 @@ import {
   titleType,
 } from "../../core/hierarchy.ts";
 import { loadForm, missingSections } from "../../core/issue-forms.ts";
+import { loadProjectConfig } from "../../core/project-config.ts";
 import { redact } from "../../reporting/redact.ts";
 import { type GhRunner, graphql, spawnGh } from "./client.ts";
+import { setItemStatus, statusField } from "./project.ts";
 import { NATIVE_TYPE } from "./ticket.ts";
 
 export interface IssueAt {
@@ -38,7 +40,7 @@ export interface CreateIssueResult {
   url: string;
   title: string;
   created: boolean;
-  /** What this run wrote: create, title, parent, project. Empty on a no-op re-run. */
+  /** What this run wrote: create, title, parent, project, status. Empty on a no-op re-run. */
   changes: string[];
 }
 
@@ -47,21 +49,24 @@ const typeOf = (labels: z.infer<typeof labelsOf>) => labelType(labels.nodes);
 const projectItems = z.strictObject({
   nodes: z.array(
     z.strictObject({
+      id: z.string().optional(),
       project: z.strictObject({
         number: z.int(),
         owner: z.strictObject({ login: z.string().optional() }),
       }),
+      fieldValueByName: z.strictObject({ name: z.string().optional() }).nullable().optional(),
     }),
   ),
 });
 const PROJECT_ITEMS =
-  "projectItems(first:20,includeArchived:false){nodes{project{number owner{... on Organization{login} ... on User{login}}}}}";
-const inProject = (items: z.infer<typeof projectItems>, c: OmiConfig) =>
-  items.nodes.some(
+  'projectItems(first:20,includeArchived:false){nodes{id project{number owner{... on Organization{login} ... on User{login}}} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}';
+const projectItem = (items: z.infer<typeof projectItems>, c: OmiConfig) =>
+  items.nodes.find(
     (n) =>
       n.project.number === c.github.projectNumber &&
       n.project.owner.login?.toLowerCase() === c.github.owner.toLowerCase(),
   );
+const inProject = (items: z.infer<typeof projectItems>, c: OmiConfig) => !!projectItem(items, c);
 
 // --- repository facts -------------------------------------------------------------------------
 
@@ -231,6 +236,9 @@ const Created = z.strictObject({
 const SET_TITLE = `mutation($id:ID!,$title:String!){updateIssue(input:{id:$id,title:$title}){issue{id}}}`;
 const ADD_SUB = `mutation($p:ID!,$c:ID!){addSubIssue(input:{issueId:$p,subIssueId:$c}){issue{id}}}`;
 const ADD_ITEM = `mutation($p:ID!,$c:ID!){addProjectV2ItemById(input:{projectId:$p,contentId:$c}){item{id}}}`;
+const Added = z.strictObject({
+  addProjectV2ItemById: z.strictObject({ item: z.strictObject({ id: z.string() }) }),
+});
 const write = (q: string, vars: Record<string, string>, name: string, run: GhRunner) =>
   graphql(q, vars, z.unknown(), name, run, true);
 
@@ -343,9 +351,17 @@ export function createIssue(
     write(ADD_SUB, { p: parent.id, c: id }, "add sub-issue", run);
     changes.push("parent");
   }
-  if (!inProject(self.projectItems, c)) {
-    write(ADD_ITEM, { p: projectId, c: id }, "add to project", run);
+  const item = projectItem(self.projectItems, c);
+  let itemId = item?.id;
+  if (!item) {
+    itemId = graphql(ADD_ITEM, { p: projectId, c: id }, Added, "add to project", run, true)
+      .addProjectV2ItemById.item.id;
     changes.push("project");
+  }
+  // Initial Status from the desired state (DevTask-0030 #62); set once, never overwritten.
+  if (itemId && !item?.fieldValueByName?.name) {
+    setItemStatus(statusField(c, run), itemId, loadProjectConfig().initialStatus, run);
+    changes.push("status");
   }
 
   // Number after creating, then re-read: two creators racing for one number → the later Issue

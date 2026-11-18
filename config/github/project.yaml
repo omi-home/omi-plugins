@@ -1,0 +1,61 @@
+# Desired state of the Project's custom fields (DevTask-0030 #62). `omi project plan` diffs it
+# against GitHub, `omi project apply` writes the difference. IDs are always read from GitHub,
+# never written here. Apply only adds: missing fields and options are created, an option's
+# color/description is updated in place (its ID and item values are kept); fields and options
+# GitHub has but this file does not are reported, never deleted. Built-in fields (Title,
+# Assignees, Labels, Milestone, Parent issue…) are GitHub's and not listed: no field may
+# duplicate Issue Type, labels, Milestone or Parent (governance §4.2).
+# Status option names must equal the ProjectStatus enum (runtime/core/contracts.ts).
+
+# Status an Issue gets when `omi issue create` adds it to the Project.
+initialStatus: Backlog
+
+fields:
+  - name: Status
+    type: single_select
+    options:
+      - { name: Triage, color: GRAY, description: "Mới nhận (Bug/ChangeRequest)" }
+      - { name: Backlog, color: GRAY }
+      - {
+          name: Analysis,
+          color: BLUE,
+          description: "Phân tích (Feature/Requirement/ChangeRequest)",
+        }
+      - { name: Approved, color: GREEN, description: "PO đã duyệt, chờ phân rã/triển khai" }
+      - { name: Ready, color: BLUE }
+      - { name: In Progress, color: YELLOW }
+      - { name: In Review, color: PURPLE }
+      - { name: In QA, color: PINK }
+      - { name: Rework, color: ORANGE }
+      - { name: Waiting PO, color: RED }
+      - { name: Blocked, color: RED }
+      - { name: Done, color: GREEN }
+      - { name: Cancelled, color: GRAY }
+  # Option names are kept as they are: renaming breaks every mapping that reads them.
+  - name: Priority
+    type: single_select
+    options:
+      - { name: P0, color: RED, description: "blocked foundation" }
+      - { name: P1, color: ORANGE, description: "MVP critical" }
+      - { name: P2, color: YELLOW, description: "production hardening" }
+      - { name: P3, color: GRAY, description: "optional" }
+  # Size replaces Effort/Story Points (PO 2026-11-17).
+  - name: Size
+    type: single_select
+    options:
+      - { name: S, color: GREEN }
+      - { name: M, color: YELLOW }
+      - { name: L, color: ORANGE }
+  - name: Risk
+    type: single_select
+    options:
+      - { name: Low, color: GRAY }
+      - { name: Medium, color: GRAY }
+      - { name: High, color: GRAY }
+  - name: Target Date
+    type: date
+  # Creating an iteration field is not verified against the API yet: plan reports it missing
+  # as a manual step and apply never writes it.
+  - name: Sprint
+    type: iteration
+    duration: 14

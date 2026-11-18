@@ -5,8 +5,10 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { readSection, writeSection } from "../adapters/github/context.ts";
 import { createIssue } from "../adapters/github/issue.ts";
+import { projectApply, projectPlan, type StatusDrift } from "../adapters/github/project-fields.ts";
 import { IssueType } from "../core/contracts.ts";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
+import type { FieldAction } from "../core/project-config.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { type Check, doctor } from "./doctor.ts";
@@ -75,6 +77,10 @@ Commands:
                          Re-running with the same type and title completes the same Issue
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
+  project plan           Diff the Project's custom fields against config/github/project.yaml and list
+                         items whose Status their type does not use (status-transitions.yaml). Read-only
+  project apply          Create missing fields and options (existing option IDs and item values kept);
+                         never deletes. Iteration fields and conflicts stay manual
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
@@ -141,7 +147,21 @@ const NESTED = new Set([
   "pr merge",
 ]);
 /** Subcommands without an issue: <group> <action>. */
-const REPO_WIDE = new Set(["cleanup scan", "cleanup apply"]);
+const REPO_WIDE = new Set(["cleanup scan", "cleanup apply", "project plan", "project apply"]);
+
+const describe = (a: FieldAction) =>
+  a.kind === "create"
+    ? `create field ${a.field.name} (${a.field.type})`
+    : a.kind === "update-options"
+      ? `field ${a.name}: ${[...a.add.map((o) => `+${o}`), ...a.change.map((o) => `~${o}`)].join(", ")}`
+      : `${a.name}: ${a.reason}`;
+
+const humanPlan = (actions: FieldAction[], extra: string[], drift: StatusDrift[]) => [
+  ...actions.map((a) => `${a.kind === "manual" ? "manual " : "pending"}   ${describe(a)}`),
+  ...(actions.length ? [] : ["fields    in the desired state"]),
+  ...extra.map((e) => `extra     ${e} (not managed: kept)`),
+  ...drift.map((d) => `drift     ${d.issue} ${d.status ?? "unset"}: ${d.reason}`),
+];
 
 const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
 
@@ -193,7 +213,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       ) {
         throw new OmiError("USAGE_INVALID", "expected issue section get|set <n> <name>");
       }
-    } else if (["ticket", "task", "pr", "cleanup", "issue"].includes(command)) {
+    } else if (["ticket", "task", "pr", "cleanup", "issue", "project"].includes(command)) {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
     }
     const issue =
@@ -360,6 +380,19 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
           ...r.scan.orphans.map((p) => `orphan    ${p} (not owned: left alone)`),
         ];
         return ok(r, lines(human), r.outcomes.some((o) => o.error) ? EXIT.failed : EXIT.ok);
+      }
+      case "project plan": {
+        const r = projectPlan(repo(cwd).config);
+        return ok(r, lines(humanPlan(r.actions, r.extra, r.drift)));
+      }
+      case "project apply": {
+        const r = projectApply(repo(cwd).config);
+        const human = [
+          ...r.applied.map((a) => `applied   ${describe(a)}`),
+          ...(r.applied.length ? [] : ["applied   nothing (already in the desired state)"]),
+          ...humanPlan(r.plan.actions, r.plan.extra, []),
+        ];
+        return ok(r, lines(human));
       }
       case "pr validate": {
         const r = prValidate({ cwd }, issue);

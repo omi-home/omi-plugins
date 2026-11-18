@@ -1,0 +1,72 @@
+# Project Status lifecycle per OMI type (DocumentationTask-0007 #99, DevTask-0030 #62).
+# `<from>: [<to>…]`. A type's allowed statuses are every status named in its map plus the
+# common ones. Rules shared by every type (not repeated below):
+#   - Blocked: from any status except Done/Cancelled, and back to any status of the type;
+#   - Cancelled: from any status except Done (reason + `resolution:*` label);
+#   - Done → In Progress: a deliberate reopen.
+# `omi project plan` reports items whose Status is outside their type's set. GitHub keeps no
+# Status history, so a wrong manual move between two allowed statuses is not detectable.
+# The CLI's own moves are checked against this file by tests (workflow projection + roll-up).
+
+# Executable: Project Status is the projection of the workflow state (fsm.ts PROJECT_STATUS).
+# The engine runs QA before the PR, so In QA precedes In Review.
+executable: &executable
+  Backlog: [Ready, In Progress]
+  Ready: [In Progress, In Review, Waiting PO, Done]
+  # Done: a task split into sub-tasks rolls up when the last one closes (#59).
+  In Progress: [In QA, In Review, Rework, Waiting PO, Done]
+  In QA: [In Review, Rework, Waiting PO]
+  In Review: [Rework, Waiting PO, Done]
+  Rework: [In Progress, In Review, Waiting PO]
+  # A person's decision resumes the step that was held (any pre-merge status).
+  Waiting PO: [Ready, In Progress, In QA, Rework, In Review, Done]
+
+types:
+  milestone:
+    Backlog: [In Progress]
+    In Progress: [In Review, Waiting PO]
+    In Review: [In Progress, Done] # gate fails → In Progress; Done = PO accepts
+    Waiting PO: [In Progress, In Review]
+  epic:
+    Backlog: [In Progress]
+    In Progress: [Waiting PO, Done]
+    Waiting PO: [In Progress]
+  feature:
+    Backlog: [Analysis, In Progress]
+    Analysis: [Approved, Waiting PO]
+    Approved: [In Progress]
+    # Done: the CLI closes a Feature when its last child closes (AGENTS.md rule 6).
+    In Progress: [In Review, Waiting PO, Done]
+    In Review: [In Progress, Done]
+    Waiting PO: [Approved, In Progress, In Review]
+  fr: &requirement
+    Backlog: [Analysis, In Progress]
+    Analysis: [In Review]
+    In Review: [Analysis, Waiting PO]
+    Waiting PO: [Approved]
+    Approved: [In Progress]
+    In Progress: [In QA]
+    In QA: [In Progress, Done]
+  nfr: *requirement
+  change-request:
+    Triage: [Backlog, Analysis]
+    Backlog: [Analysis, In Progress]
+    Analysis: [In Review]
+    In Review: [Analysis, Waiting PO]
+    Waiting PO: [Approved]
+    Approved: [In Progress]
+    In Progress: [In QA]
+    In QA: [In Progress, Done]
+  bug:
+    Triage: [Ready, Backlog]
+    Backlog: [Ready, In Progress]
+    Ready: [In Progress]
+    In Progress: [In QA]
+    In QA: [In Progress, Waiting PO, Done]
+    Waiting PO: [In Progress, Done]
+  dev-task: *executable
+  test-task: *executable
+  devops-task: *executable
+  documentation-task: *executable
+  spike: *executable
+  release: *executable

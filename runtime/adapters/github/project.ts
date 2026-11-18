@@ -90,13 +90,13 @@ export interface StatusChange {
 const BEFORE_START: readonly string[] = ["Backlog", "Ready"] satisfies ProjectStatus[];
 const MAX_DEPTH = 8; // GitHub's sub-issue nesting limit
 
-interface StatusField {
+export interface StatusField {
   projectId: string;
   fieldId: string;
   option: (name: ProjectStatus) => string;
 }
 
-function statusField(config: OmiConfig, run: GhRunner): StatusField {
+export function statusField(config: OmiConfig, run: GhRunner): StatusField {
   const { owner, projectNumber } = config.github;
   const proj = graphql(
     FIELD_QUERY,
@@ -143,7 +143,8 @@ function projectItem(config: OmiConfig, at: At, run: GhRunner) {
   return { item, from: item?.fieldValueByName?.name ?? null, parent };
 }
 
-const write = (f: StatusField, itemId: string, to: ProjectStatus, run: GhRunner) =>
+/** Sets one Project item's Status (option ID read from GitHub through `f`). */
+export const setItemStatus = (f: StatusField, itemId: string, to: ProjectStatus, run: GhRunner) =>
   graphql(
     MUTATION,
     { p: f.projectId, i: itemId, f: f.fieldId, o: f.option(to) },
@@ -169,7 +170,7 @@ export function markStarted(
   for (let depth = 0; at && depth < MAX_DEPTH; depth++) {
     const { item, from, parent } = projectItem(config, at, run);
     if (item && (from === null || BEFORE_START.includes(from))) {
-      write(field, item.id, target, run);
+      setItemStatus(field, item.id, target, run);
       changes.push({ issue: `${at.owner}/${at.repo}#${at.number}`, from, to: target });
     }
     at = parent;
@@ -197,7 +198,7 @@ export function setStatus(
     );
   }
   if (from === to) return null;
-  write(field, item.id, to, run);
+  setItemStatus(field, item.id, to, run);
   return { issue: `${at.owner}/${at.repo}#${issue}`, from, to };
 }
 
@@ -266,7 +267,7 @@ export function markFinished(
     const close = !milestone && !verify && info.state === "OPEN";
     if (close) graphql(CLOSE, { id: info.id }, z.unknown(), "close issue", run);
     const move = item && from !== to && from !== "Done";
-    if (move) write(field, item.id, to, run);
+    if (move) setItemStatus(field, item.id, to, run);
     if (close || move) {
       changes.push({ issue: `${at.owner}/${at.repo}#${at.number}`, from, to, closed: close });
     }
