@@ -76,6 +76,25 @@ test("role → resource pack map follows the spec baseline; shared knowledge is 
     "resources/role-rules/architecture/adr-management.md",
     "resources/role-rules/architecture/root-cause-analysis.md",
   ]);
+  const core = "resources/shared/engineering-core.md";
+  const api = "resources/shared/api-contracts.md";
+  assert.deepEqual(packs("backend-engineer"), [
+    core,
+    "resources/role-rules/backend/backend-implementation.md",
+    api,
+    "resources/role-rules/backend/unit-test-design.md",
+  ]);
+  assert.deepEqual(packs("frontend-engineer"), [
+    core,
+    "resources/role-rules/frontend/frontend-implementation.md",
+    api,
+    "resources/role-rules/frontend/component-testing.md",
+  ]);
+  assert.deepEqual(packs("database-engineer"), [
+    core,
+    "resources/role-rules/database/schema-design.md",
+    "resources/role-rules/database/database-migration.md",
+  ]);
   // A role loads only its own pack folder plus shared/.
   for (const a of agents) {
     const folders = new Set(a.packs.map((p) => p.split("/").slice(0, -1).join("/")));

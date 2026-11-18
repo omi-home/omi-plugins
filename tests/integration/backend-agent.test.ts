@@ -93,9 +93,7 @@ test("live: without the grant the Read is denied and the agent blocks", {
 }, () => {
   const o = runAgent(false);
   assert.ok(
-    o.permissionDenials.some(
-      (d) => d.startsWith("Read:") && d.includes("backend-implementation.md"),
-    ),
+    o.permissionDenials.some((d) => d.startsWith("Read:") && /[\\/]resources[\\/]/.test(d)),
   );
   assert.ok(!o.result.includes(PACK_ID), o.result);
   assert.match(o.result, /BLOCKED/);
