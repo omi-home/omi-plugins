@@ -33,4 +33,4 @@ body:
       description: Điều kiện để đóng Issue.
       value: "- [ ] Mọi Milestone con được PO chấp nhận"
     validations:
-      required: true
+      required: false

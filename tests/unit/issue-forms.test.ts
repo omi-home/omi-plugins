@@ -40,24 +40,14 @@ test("one valid Issue Form per OMI type, labelled type:<slug>, title prefix, uni
 });
 
 test("type-specific required fields (Bug, NFR, Change Request, Spike)", () => {
-  assert.deepEqual(requiredSections(loadForm("bug")), [
-    "Steps to Reproduce",
-    "Expected",
-    "Actual",
-    "Severity",
-  ]);
-  assert.deepEqual(requiredSections(loadForm("nfr")), [
-    "Threshold",
-    "Verification",
-    "Scope / Acceptance",
-  ]);
-  assert.deepEqual(requiredSections(loadForm("change-request")), [
-    "Current State",
-    "Proposal",
-    "Impact",
-  ]);
-  assert.deepEqual(requiredSections(loadForm("spike")), ["Question", "Timebox", "Expected Output"]);
-  assert.deepEqual(requiredSections(loadForm("dev-task")), ["Scope / Acceptance"]);
+  const req = (t: Parameters<typeof loadForm>[0]) => requiredSections(loadForm(t)).slice(1);
+  assert.equal(requiredSections(loadForm("bug"))[0], "Objective");
+  assert.deepEqual(req("bug"), ["Steps to Reproduce", "Expected", "Actual", "Severity"]);
+  assert.deepEqual(req("nfr"), ["Threshold", "Verification", "Scope / Acceptance"]);
+  assert.deepEqual(req("change-request"), ["Current State", "Proposal", "Impact"]);
+  assert.deepEqual(req("spike"), ["Question", "Timebox", "Expected Output"]);
+  assert.deepEqual(req("dev-task"), ["Scope / Acceptance"]);
+  assert.deepEqual(req("epic"), []); // a prefilled Definition of Done cannot be "required"
 });
 
 test("config.yml disables blank issues; PR template closes its Issue and asks for evidence", () => {
@@ -100,4 +90,22 @@ test("missing or empty required sections are reported; hand-written headings pas
   assert.equal(empty.status, "fail");
   assert.equal(empty.code, "TICKET_INVALID");
   assert.match(empty.detail, /Scope \/ Acceptance/);
+
+  // Subheadings and code fences stay inside a section; "Impact" is not "Impacted files";
+  // an HTML comment or TBD is a placeholder, not content.
+  const cr = loadForm("change-request");
+  const crBody = (impact: string) =>
+    [
+      "## Objective\nx",
+      "## Impacted files\n",
+      "## Current State\n### a\n- now",
+      "## Proposal\n```sh\n# not a heading\n```",
+      `## Impact\n${impact}`,
+    ].join("\n");
+  assert.deepEqual(missingSections(crBody("risk"), cr), []);
+  assert.deepEqual(missingSections(crBody("<!-- fill in -->"), cr), ["Impact"]);
+  assert.deepEqual(missingSections(crBody("TBD"), cr), ["Impact"]);
+  assert.deepEqual(missingSections(crBody("risk").replace("### a\n- now", ""), cr), [
+    "Current State",
+  ]);
 });

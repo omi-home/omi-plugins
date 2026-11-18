@@ -161,10 +161,11 @@ const tree = (): Record<string, FakeIssue> => ({
   },
 });
 const at = (number: number, repo = "repo") => ({ owner: "o", repo, number });
+const BODY = "## Objective\nx\n\n## Scope / Acceptance\n- [ ] y";
 const input = (parent = at(3), title = "Việc mới") => ({
   type: "dev-task" as const,
   title,
-  body: "## Objective\nx",
+  body: BODY,
   parent,
 });
 
@@ -182,7 +183,7 @@ test("numbers per type (max + 1), native type, sub-issue and Project", () => {
     "project",
     "title:DevTask-0008-Việc mới",
   ]);
-  assert.equal(gh.issues.get("o/repo#6")?.body, "## Objective\nx");
+  assert.equal(gh.issues.get("o/repo#6")?.body, BODY);
 });
 
 test("re-run is a no-op; a half-done Issue is completed, not duplicated", () => {
@@ -297,6 +298,15 @@ test("numbering race: the later Issue moves to the next number; pages are all re
     gh.writes.filter((w) => w.startsWith("title")),
     ["title:DevTask-0008-Việc mới", "title:DevTask-0009-Việc mới"],
   );
+});
+
+test("a body without the form's required sections is refused before any write", () => {
+  const gh = fakeGh(tree());
+  assert.throws(
+    () => createIssue(config, { ...input(), body: "## Objective\nx" }, gh.run),
+    /missing required sections .*: Scope \/ Acceptance/,
+  );
+  assert.deepEqual(gh.writes, []);
 });
 
 test("missing type label is a config error; empty title is a usage error", () => {

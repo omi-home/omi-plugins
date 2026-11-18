@@ -1,4 +1,4 @@
-<!-- One PR, one executable Issue: `omi pr create` fills this in; by hand, keep the Closes line. -->
+<!-- One PR, one executable Issue. `omi pr create` writes its own body (--body-file); this template is for PRs opened by hand: keep the Closes line. -->
 ## Tóm tắt
 
 -

@@ -39,36 +39,57 @@ export const loadForm = (type: IssueType): IssueForm => {
   return f;
 };
 
-/** Labels of the required fields; Objective has its own gate. */
+/** Labels of the form's required fields. */
 export const requiredSections = (form: IssueForm): string[] =>
-  form.body
-    .filter((f) => f.validations?.required && f.attributes.label !== "Objective")
-    .map((f) => f.attributes.label);
+  form.body.filter((f) => f.validations?.required).map((f) => f.attributes.label);
 
 const norm = (s: string) => s.normalize("NFC").trim().toLowerCase();
-/** A form's placeholder for an empty optional field. */
-const EMPTY = /^(_no response_)?$/i;
+/** Nothing filled in: blank, the form's `_No response_`, or a placeholder. */
+const EMPTY = /^(_no response_|tbd|todo|n\/a|-)?$/i;
+const reEscape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+interface Heading {
+  line: number;
+  level: number;
+  text: string;
+}
+
+/** Markdown headings outside fenced code blocks. */
+function headings(lines: string[]): Heading[] {
+  const out: Heading[] = [];
+  let fence = false;
+  lines.forEach((l, line) => {
+    if (/^\s*(```|~~~)/.test(l)) fence = !fence;
+    const m = !fence && /^(#{1,6})\s+(.*)$/.exec(l);
+    if (m) out.push({ line, level: (m[1] as string).length, text: norm(m[2] as string) });
+  });
+  return out;
+}
 
 /** Required sections of `type` missing from `body`, or present with nothing under them. */
 export function missingSections(body: string, form: IssueForm): string[] {
   const lines = body.split(/\r?\n/);
-  const text = (label: string): string | undefined => {
-    const at = lines.findIndex((l) => {
-      const m = /^#{1,6}\s+(.*)$/.exec(l);
-      return m?.[1] !== undefined && norm(m[1]).startsWith(norm(label));
+  const hs = headings(lines);
+  const filled = (label: string) => {
+    // The label as a whole word: "Impact" is not "Impacted files"; "(from roadmap)" may follow.
+    const re = new RegExp(`^${reEscape(norm(label))}(?![\\p{L}\\p{N}])`, "u");
+    return hs.some((h, i) => {
+      if (!re.test(h.text)) return false;
+      const end = hs.slice(i + 1).find((n) => n.level <= h.level)?.line ?? lines.length;
+      const text = lines
+        .slice(h.line + 1, end)
+        .join("\n")
+        .replace(/<!--[\s\S]*?-->/g, "")
+        .trim();
+      return !EMPTY.test(text);
     });
-    if (at < 0) return undefined;
-    const end = lines.findIndex((l, i) => i > at && /^#{1,6}\s/.test(l));
-    return lines
-      .slice(at + 1, end < 0 ? undefined : end)
-      .join("\n")
-      .trim();
   };
-  return requiredSections(form).filter((label) => EMPTY.test(text(label) ?? ""));
+  return requiredSections(form).filter((label) => !filled(label));
 }
 
+/** Ready gate; Objective is left to its own gate (which also accepts "Mục tiêu"). */
 export function sectionsCheck(body: string, type: IssueType): Check {
-  const missing = missingSections(body, loadForm(type));
+  const missing = missingSections(body, loadForm(type)).filter((l) => l !== "Objective");
   return missing.length
     ? {
         name: "sections",

@@ -15,6 +15,7 @@ import {
   numberedAs,
   titleType,
 } from "../../core/hierarchy.ts";
+import { loadForm, missingSections } from "../../core/issue-forms.ts";
 import { redact } from "../../reporting/redact.ts";
 import { type GhRunner, graphql, spawnGh } from "./client.ts";
 import { NATIVE_TYPE } from "./ticket.ts";
@@ -279,6 +280,15 @@ export function createIssue(
     );
   }
   const found = same[0];
+  if (!found) {
+    const missing = missingSections(input.body, loadForm(input.type));
+    if (missing.length) {
+      throw new OmiError(
+        "TICKET_INVALID",
+        `--body-file is missing required sections of the ${input.type} Issue Form: ${missing.join(", ")}`,
+      );
+    }
+  }
 
   // Every check before the first write.
   const parent = input.parent
