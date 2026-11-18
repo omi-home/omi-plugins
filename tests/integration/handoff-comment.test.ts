@@ -187,3 +187,35 @@ test("post: zero or several active Milestones ask for --milestone; empty text is
     (e: OmiError) => e.code === "USAGE_INVALID",
   );
 });
+
+test("post: a BOM or blank lines before the marker do not duplicate it", () => {
+  const gh = fakeGh({
+    64: [
+      {
+        id: 7,
+        body: "<!-- omi:handoff=2026-11-19-s14 -->\nv1\n",
+        createdAt: "2026-11-19T01:00:00Z",
+      },
+    ],
+  });
+  postHandoff(config, "﻿\n<!-- omi:handoff=2026-11-19-s14 -->\nv2", { issue: 64, run: gh.run });
+  assert.equal(gh.comments.get(64)?.[0]?.body, "<!-- omi:handoff=2026-11-19-s14 -->\nv2\n");
+});
+
+test("post: a marker that lives on another Milestone is refused, not copied", () => {
+  const gh = fakeGh({
+    57: [
+      {
+        id: 7,
+        body: "<!-- omi:handoff=2026-11-19-s14 -->\nv1\n",
+        createdAt: "2026-11-19T01:00:00Z",
+      },
+    ],
+  });
+  assert.throws(
+    () =>
+      postHandoff(config, "<!-- omi:handoff=2026-11-19-s14 -->\nv2", { issue: 64, run: gh.run }),
+    (e: OmiError) => e.code === "USAGE_INVALID" && /--milestone 57/.test(e.message),
+  );
+  assert.deepEqual(gh.writes, []);
+});

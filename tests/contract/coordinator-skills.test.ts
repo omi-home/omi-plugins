@@ -20,16 +20,11 @@ for (const name of SCRIPT_ONLY) {
     const commands = code.filter((c) => /^omi /.test(c));
     assert.ok(commands.length >= 5);
     for (const c of commands) {
-      const words = c
-        .split(" ")
-        .slice(1)
-        .filter((w) => /^[a-z]+$/.test(w));
-      // Longest known prefix: `omi task status <n>` → "task status".
-      const known = [2, 1].some((k) => {
-        const cmd = words.slice(0, k).join(" ");
-        return k <= words.length && new RegExp(`^  ${cmd}\\b`, "m").test(HELP);
-      });
-      assert.ok(known, `unknown command in ${name}: ${c}`);
+      // Every leading word is the command: `omi task status <n>` → "task status".
+      const words = c.split(" ").slice(1);
+      const end = words.findIndex((w) => !/^[a-z]+$/.test(w));
+      const cmd = (end < 0 ? words : words.slice(0, end)).join(" ");
+      assert.match(HELP, new RegExp(`^  ${cmd}(\\s|$)`, "m"), `unknown command in ${name}: ${c}`);
     }
     for (const c of code) assert.doesNotMatch(c, /^(git|gh|npm|node) /, `raw step: ${c}`);
   });

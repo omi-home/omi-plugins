@@ -3,7 +3,7 @@
 // resumes from GitHub instead of local memory.
 import { z } from "zod";
 import type { OmiConfig } from "../../core/config.ts";
-import { parseContract } from "../../core/contracts.ts";
+import { type ProjectStatus, parseContract } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 import { api } from "../../reporting/outbox.ts";
 import { redact } from "../../reporting/redact.ts";
@@ -46,11 +46,13 @@ const SearchData = z.strictObject({
 
 /**
  * Every handoff comment GitHub search finds in the repository, newest first.
- * ponytail: search indexes new comments with a short lag; `post` checks its target directly.
+ * ponytail: search indexes new comments with a short lag; `post` checks its target directly, but a
+ * handoff posted on another Milestone minutes earlier can be missed (same session number twice).
  */
 export function listHandoffs(config: OmiConfig, run: GhRunner = spawnGh): Handoff[] {
   const { owner, repo } = config.github;
-  const q = `repo:${owner}/${repo} "omi:handoff" in:comments sort:updated-desc`;
+  // Handoffs live on Milestones; the label keeps task Issues that quote the marker out of the slots.
+  const q = `repo:${owner}/${repo} label:type:milestone "omi:handoff" in:comments sort:updated-desc`;
   const found: Handoff[] = [];
   for (const n of graphql(SEARCH, { q }, SearchData, "search handoffs", run).search.nodes) {
     if (!("number" in n)) continue;
@@ -90,6 +92,8 @@ const ActiveData = z.strictObject({
   }),
 });
 
+const ACTIVE_STATUSES: readonly string[] = ["In Progress", "In Review"] satisfies ProjectStatus[];
+
 /** The one open Milestone whose Project Status is In Progress or In Review. */
 export function activeMilestone(config: OmiConfig, run: GhRunner = spawnGh): number {
   const { owner, repo, projectNumber } = config.github;
@@ -99,8 +103,8 @@ export function activeMilestone(config: OmiConfig, run: GhRunner = spawnGh): num
     i.projectItems.nodes.some(
       (p) =>
         p.project.number === projectNumber &&
-        p.project.owner.login === owner &&
-        ["In Progress", "In Review"].includes(p.fieldValueByName?.name ?? ""),
+        p.project.owner.login?.toLowerCase() === owner.toLowerCase() &&
+        ACTIVE_STATUSES.includes(p.fieldValueByName?.name ?? ""),
     ),
   );
   if (active.length !== 1) {
@@ -126,7 +130,8 @@ export interface PostResult {
   action: "created" | "updated" | "unchanged";
 }
 
-const strip = (body: string) => body.replace(MARKER, "").trim();
+/** The handoff text without its marker line. */
+export const strip = (body: string) => body.replace(MARKER, "").trim();
 
 /**
  * Posts `text` as the handoff on `issue` (default: the active Milestone). A text that opens with
@@ -135,10 +140,11 @@ const strip = (body: string) => body.replace(MARKER, "").trim();
  */
 export function postHandoff(
   config: OmiConfig,
-  text: string,
+  raw: string,
   o: { issue?: number; now?: Date; run?: GhRunner } = {},
 ): PostResult {
   const run = o.run ?? spawnGh;
+  const text = raw.replace(/^\uFEFF/, "").trimStart(); // BOM / blank lines before the marker
   const { owner, repo } = config.github;
   const issue = o.issue ?? activeMilestone(config, run);
   const base = `repos/${owner}/${repo}/issues`;
@@ -153,10 +159,21 @@ export function postHandoff(
   const content = redact(strip(text));
   if (!content) throw new OmiError("USAGE_INVALID", "the handoff text is empty");
 
-  let marker = MARKER.exec(text.trimStart())?.[1];
+  let marker = MARKER.exec(text)?.[1];
   const existing = marker
     ? mine.find((c) => MARKER.exec(c.body)?.[1] === marker)
     : mine.find((c) => strip(c.body) === content);
+  if (marker && !existing) {
+    const elsewhere = listHandoffs(config, run).find(
+      (h) => h.marker === marker && h.issue !== issue,
+    );
+    if (elsewhere) {
+      throw new OmiError(
+        "USAGE_INVALID",
+        `handoff ${marker} is on #${elsewhere.issue}: pass --milestone ${elsewhere.issue} to update it`,
+      );
+    }
+  }
   if (!marker) {
     if (existing) {
       const m = MARKER.exec(existing.body)?.[1] as string;

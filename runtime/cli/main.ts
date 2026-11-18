@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { fetchIssueContext, readSection, writeSection } from "../adapters/github/context.ts";
 import { addDependency } from "../adapters/github/dependency.ts";
-import { listHandoffs, postHandoff } from "../adapters/github/handoff.ts";
+import { listHandoffs, postHandoff, strip } from "../adapters/github/handoff.ts";
 import { createIssue } from "../adapters/github/issue.ts";
 import {
   type ProjectAction,
@@ -472,7 +472,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
               `handoff   ${h.marker} on #${h.issue} ${h.title} (${h.createdAt})`,
               `url       ${h.url}`,
               "",
-              h.body.replace(/^<!--.*?-->\s*/, "").trimEnd(),
+              strip(h.body),
             ])
           : "handoff   none found\n";
         return ok(h, human);
