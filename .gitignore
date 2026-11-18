@@ -1,0 +1,9 @@
+node_modules/
+coverage/
+*.log
+.env
+.env.*
+*.sqlite
+*.sqlite-*
+CLAUDE.local.md
+.claude/settings.local.json

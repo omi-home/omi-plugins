@@ -1,0 +1,73 @@
+# Desired governance of a target repository (DevTask-0038 #90): labels, branch protection,
+# merge methods. `omi github repo plan` diffs it, `omi github repo apply --approved-plan <file>`
+# writes exactly the plan the PO approved (governance changes are High risk), `validate` checks.
+# Apply only tightens and adds: labels GitHub has but this file does not are reported, never
+# deleted; protection rules are minimums, so a stricter existing setting is kept and nothing is
+# ever loosened. Branches are the repo's configured git.releaseBranch / git.baseBranch.
+
+labels:
+  # One per OMI type (ADR-0001 D6); `omi ticket validate` requires exactly one.
+  - { name: "type:epic", color: "3e1f8a", description: "OMI type: Epic" }
+  - { name: "type:milestone", color: "5319e7", description: "OMI type: Milestone" }
+  - { name: "type:feature", color: "0e8a16", description: "OMI type: Feature" }
+  - { name: "type:fr", color: "bfd4f2", description: "OMI type: FR" }
+  - { name: "type:nfr", color: "d4c5f9", description: "OMI type: NFR" }
+  - { name: "type:change-request", color: "f9d0c4", description: "OMI type: Change Request" }
+  - { name: "type:bug", color: "d73a4a", description: "OMI type: Bug" }
+  - { name: "type:dev-task", color: "1d76db", description: "OMI type: Dev Task" }
+  - { name: "type:test-task", color: "0052cc", description: "OMI type: Test Task" }
+  - { name: "type:devops-task", color: "006b75", description: "OMI type: DevOps Task" }
+  - {
+      name: "type:documentation-task",
+      color: "c5def5",
+      description: "OMI type: Documentation Task",
+    }
+  - { name: "type:spike", color: "fbca04", description: "OMI type: Spike" }
+  - { name: "type:release", color: "b60205", description: "OMI type: Release" }
+  # Merge tiers of config/risk-policy.yaml (gov §8.3); risk:high → the PO merges.
+  - { name: "risk:low", color: "c2e0c6", description: "Risk: low" }
+  - { name: "risk:medium", color: "fbca04", description: "Risk: medium" }
+  - {
+      name: "risk:high",
+      color: "b60205",
+      description: "Risk: high — PO merges, Security Reviewer runs",
+    }
+  # Engineer of a delivery task (workflow-engine/plan.ts).
+  - { name: "role:frontend", color: "bfdadc", description: "Engineer: Frontend" }
+  - { name: "role:backend", color: "bfdadc", description: "Engineer: Backend" }
+  - { name: "role:database", color: "bfdadc", description: "Engineer: Database" }
+  - { name: "role:devops", color: "bfdadc", description: "Engineer: DevOps" }
+  # Workflow flags the engine reads by these exact names (renaming breaks routing).
+  - { name: security, color: "ee0701", description: "Security Reviewer is mandatory" }
+  - { name: ui, color: "c5def5", description: "UI change: UI/UX analysis, Manual QA" }
+  - { name: "qa:manual", color: "d4c5f9", description: "Manual QA checks the acceptance criteria" }
+  - { name: refactor, color: "ededed", description: "Refactor workflow" }
+  # Why an Issue was Cancelled (DocumentationTask-0007 #99).
+  - { name: "resolution:duplicate", color: "cfd3d7", description: "Cancelled: duplicate" }
+  - { name: "resolution:wontfix", color: "ffffff", description: "Cancelled: will not be done" }
+  - {
+      name: "resolution:cannot-reproduce",
+      color: "cfd3d7",
+      description: "Cancelled: cannot reproduce",
+    }
+  - { name: "resolution:rejected", color: "e4e669", description: "Cancelled: rejected by the PO" }
+
+# Rules that must be on (classic branch protection). PO 2026-11-17: linear history only on the
+# base branch, since a release PR develop → main may need a merge commit.
+protection:
+  release: [pull-request, enforce-admins, no-force-push, no-deletion, conversation-resolution]
+  base:
+    [
+      pull-request,
+      enforce-admins,
+      no-force-push,
+      no-deletion,
+      conversation-resolution,
+      linear-history,
+    ]
+
+# Repository merge methods. All three stay allowed; a task PR's squash is checked by `omi pr validate`.
+merge:
+  squash: true
+  mergeCommit: true
+  rebase: true

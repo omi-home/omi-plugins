@@ -1,0 +1,9 @@
+# Merge tiers (gov §8.3, DevTask-0038 #90). An Issue or PR carries `risk:<level>`; the highest
+# level wins. Read by `omi pr validate` / `omi pr merge`.
+
+# Lowest → highest.
+levels: [low, medium, high]
+# No risk label.
+default: medium
+# Levels OMI never merges: the PR goes to Waiting PO and the PO merges it.
+poMerge: [high]

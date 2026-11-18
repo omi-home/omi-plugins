@@ -1,0 +1,15 @@
+# Allowed parent → child OMI types (DevTask-0045 #128). Read by `omi ticket validate`.
+# A type with no entry, or an empty list, takes no children. Work happens on terminal issues.
+maxDepth: 6
+children:
+  epic: [milestone]
+  milestone: [feature, bug, release, dev-task, documentation-task, spike]
+  feature:
+    [fr, nfr, change-request, bug, dev-task, test-task, devops-task, documentation-task, spike]
+  fr: [dev-task, test-task, devops-task, documentation-task, spike]
+  nfr: [dev-task, test-task, devops-task, documentation-task, spike]
+  change-request: [dev-task, test-task, devops-task, documentation-task, spike]
+  # A Bug is fixed through a child task (DocumentationTask-0007 #99).
+  bug: [dev-task, test-task]
+  # A task split into smaller tasks becomes their parent (PO 2026-11-18, #59).
+  dev-task: [dev-task, test-task]

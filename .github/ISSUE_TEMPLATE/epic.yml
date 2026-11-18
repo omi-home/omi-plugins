@@ -1,0 +1,36 @@
+# OMI Issue Form (DevTask-0047 #130). Required fields are the sections `omi ticket validate` checks.
+name: Epic
+description: Mục tiêu lớn, gốc của cây Milestone.
+title: Epic-NNNN-
+labels:
+  - type:epic
+body:
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: Kết quả cần đạt, một hai câu.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context / Parent
+      description: Issue cha (sẽ gắn native sub-issue), bối cảnh, link quyết định.
+    validations:
+      required: false
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope / Acceptance
+      description: Phạm vi và Acceptance Criteria dạng checklist `- [ ]`.
+    validations:
+      required: false
+  - type: textarea
+    id: definition-of-done
+    attributes:
+      label: Definition of Done
+      description: Điều kiện để đóng Issue.
+      value: "- [ ] Mọi Milestone con được PO chấp nhận"
+    validations:
+      required: false
