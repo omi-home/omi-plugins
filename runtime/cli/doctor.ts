@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import { loadConfig, type OmiConfig } from "../core/config.ts";
@@ -34,9 +35,37 @@ export function atLeast(version: string, min: string): boolean {
 function toolVersion(name: string, cmd: string, min: string | undefined, cwd: string): Check {
   const r = run(cmd, ["--version"], cwd);
   const v = semver(r.out)?.join(".");
-  if (!r.ok || !v) return { name, status: "fail", detail: `${cmd} not found on PATH` };
+  if (!r.ok || !v) {
+    // Node spawns no .cmd/.ps1 without a shell (an npm-installed CLI on Windows): OMI cannot run it.
+    const shim =
+      process.platform === "win32" &&
+      run("where.exe", [cmd], cwd)
+        .out.split(/\r?\n/)
+        .find((f) => /\.(cmd|bat|ps1)$/i.test(f));
+    return {
+      name,
+      status: "fail",
+      detail: shim
+        ? `only a script shim is on PATH (${shim}): OMI needs a native ${cmd}.exe`
+        : `${cmd} not found on PATH`,
+    };
+  }
   if (min && !atLeast(v, min)) return { name, status: "fail", detail: `${v} < required ${min}` };
   return { name, status: "pass", detail: v };
+}
+
+/**
+ * The launcher grants `Read(<plugin root>/resources/**)`; a space or glob character in that path is
+ * not verified to match literally in a Claude permission rule (carried CR-002 of #19).
+ */
+export function pluginRootCheck(root: string): Check {
+  return /[\s*?[\]{}]/.test(root)
+    ? {
+        name: "plugin-root",
+        status: "warn",
+        detail: `${root} has a space or glob character: agents may be denied their rule pack`,
+      }
+    : { name: "plugin-root", status: "pass", detail: root };
 }
 
 /** CLAUDE.md files at or above the repo root silently disable AGENTS.md (T0.4). */
@@ -59,6 +88,40 @@ function instructions(repoRoot: string): Check {
     return { name: "instructions", status: "warn", detail: "no AGENTS.md at repository root" };
   }
   return { name: "instructions", status: "pass", detail: "AGENTS.md" };
+}
+
+/** `/context` lists AGENTS.md as a Project memory file when the builtin cc-plugin-agents-md loads it. */
+export const agentsMdInContext = (contextText: string) =>
+  /^\|\s*Project\s*\|[^|\n]*AGENTS\.md\s*\|/im.test(contextText);
+
+/**
+ * Whether Claude Code actually loads AGENTS.md here (carried CR-003 of #23): `/context` through
+ * `claude -p` is a local command (no model call, no tokens). The prompt goes through stdin: a Git
+ * Bash shell would rewrite a `/context` argument into a Windows path.
+ */
+function agentsMdLoaded(repoRoot: string): Check {
+  const r = spawnSync("claude", ["-p"], {
+    cwd: repoRoot,
+    input: "/context",
+    encoding: "utf8",
+    timeout: 30_000,
+    windowsHide: true,
+  });
+  if (r.status !== 0) {
+    return {
+      name: "agents-md",
+      status: "warn",
+      detail: "could not run `claude -p /context` to verify",
+    };
+  }
+  return agentsMdInContext(r.stdout ?? "")
+    ? { name: "agents-md", status: "pass", detail: "Claude Code loads AGENTS.md" }
+    : {
+        name: "agents-md",
+        status: "warn",
+        detail:
+          "AGENTS.md is not in Claude Code's memory files: is builtin cc-plugin-agents-md off?",
+      };
 }
 
 function workflows(): Check {
@@ -214,7 +277,9 @@ export function doctor(cwd: string): Check[] {
       ? { name: "node", status: "pass", detail: process.versions.node }
       : { name: "node", status: "fail", detail: `${process.versions.node} < required ${MIN_NODE}` },
     toolVersion("git", "git", undefined, cwd),
+    toolVersion("gh", "gh", undefined, cwd),
     toolVersion("claude", "claude", MIN_CLAUDE, cwd),
+    pluginRootCheck(fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "")),
     workflows(),
   ];
 
@@ -224,7 +289,9 @@ export function doctor(cwd: string): Check[] {
     return checks;
   }
   const repoRoot = top.out;
-  checks.push({ name: "repository", status: "pass", detail: repoRoot }, instructions(repoRoot));
+  const instr = instructions(repoRoot);
+  checks.push({ name: "repository", status: "pass", detail: repoRoot }, instr);
+  if (instr.status === "pass") checks.push(agentsMdLoaded(repoRoot));
 
   let config: OmiConfig | undefined;
   try {

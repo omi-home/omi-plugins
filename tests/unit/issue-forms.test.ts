@@ -61,7 +61,11 @@ test("config.yml disables blank issues; PR template closes its Issue and asks fo
 
 test("this repository's .github is the templates/github copy", () => {
   const want = files("templates/github");
-  assert.deepEqual(files(".github"), want);
+  // workflows/ is this repo's own CI, not a template installed into other repos.
+  assert.deepEqual(
+    files(".github").filter((f) => !f.startsWith("workflows/")),
+    want,
+  );
   for (const f of want) assert.equal(read(`.github/${f}`), read(`templates/github/${f}`), f);
 });
 

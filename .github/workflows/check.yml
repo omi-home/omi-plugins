@@ -1,0 +1,25 @@
+# Cross-platform gate (DevTask-0034 #68): lint + typecheck + test on every OS OMI supports, at the
+# minimum Node (type stripping) and the current LTS. Live agent probes stay off (no OMI_LIVE).
+name: check
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+permissions:
+  contents: read
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ["22.18.0", "24"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run check
