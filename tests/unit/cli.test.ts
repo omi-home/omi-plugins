@@ -63,6 +63,8 @@ Commands:
                          Record that Issue #n is blocked by #m (native dependency; another repo is
                          fine). Refuses cycles; re-running is a no-op. \`ticket validate\` then holds
                          #n until #m is closed
+  issue findings <n>     List the findings other tasks carried over to Issue #n
+                         (<!-- omi:carried-findings=... --> comments: source | finding | action)
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
   github project init [--title <text>]
@@ -85,6 +87,12 @@ Commands:
                          saved to <file>): adds labels, tightens protection, sets merge methods; never
                          deletes or loosens. Refused when the plan changed since approval
   github repo validate   The same diff as checks (private repo on Free: protection unsupported, D5)
+  handoff show           Print the newest session handoff (comment opening <!-- omi:handoff=... -->)
+                         found in the repository; none is not an error
+  handoff post --body-file <path> [--milestone <n>]
+                         Post the handoff on the active Milestone (the one open Milestone In Progress or
+                         In Review) with marker <date>-s<N>; the same text again changes nothing, a text
+                         opening with an existing marker updates that comment. Redacted
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and

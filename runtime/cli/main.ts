@@ -3,8 +3,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { readSection, writeSection } from "../adapters/github/context.ts";
+import { fetchIssueContext, readSection, writeSection } from "../adapters/github/context.ts";
 import { addDependency } from "../adapters/github/dependency.ts";
+import { listHandoffs, postHandoff } from "../adapters/github/handoff.ts";
 import { createIssue } from "../adapters/github/issue.ts";
 import {
   type ProjectAction,
@@ -89,6 +90,8 @@ Commands:
                          Record that Issue #n is blocked by #m (native dependency; another repo is
                          fine). Refuses cycles; re-running is a no-op. \`ticket validate\` then holds
                          #n until #m is closed
+  issue findings <n>     List the findings other tasks carried over to Issue #n
+                         (<!-- omi:carried-findings=... --> comments: source | finding | action)
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
   github project init [--title <text>]
@@ -111,6 +114,12 @@ Commands:
                          saved to <file>): adds labels, tightens protection, sets merge methods; never
                          deletes or loosens. Refused when the plan changed since approval
   github repo validate   The same diff as checks (private repo on Free: protection unsupported, D5)
+  handoff show           Print the newest session handoff (comment opening <!-- omi:handoff=... -->)
+                         found in the repository; none is not an error
+  handoff post --body-file <path> [--milestone <n>]
+                         Post the handoff on the active Milestone (the one open Milestone In Progress or
+                         In Review) with marker <date>-s<N>; the same text again changes nothing, a text
+                         opening with an existing marker updates that comment. Redacted
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
@@ -176,11 +185,19 @@ const NESTED = new Set([
   "pr validate",
   "pr merge",
   "issue depend",
+  "issue findings",
 ]);
 const GITHUB_REPO = new Set(["plan", "apply", "validate"]);
 const GITHUB_PROJECT = new Set(["init", "plan", "apply", "validate"]);
 /** Subcommands without an issue: <group> <action>. */
-const REPO_WIDE = new Set(["cleanup scan", "cleanup apply", "project plan", "project apply"]);
+const REPO_WIDE = new Set([
+  "cleanup scan",
+  "cleanup apply",
+  "project plan",
+  "project apply",
+  "handoff show",
+  "handoff post",
+]);
 
 const describe = (a: ProjectAction) =>
   a.kind === "create"
@@ -277,7 +294,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       command = `github project ${rest[1]}`;
       rest = rest.slice(2);
     } else if (
-      ["ticket", "task", "pr", "cleanup", "issue", "project", "github"].includes(command)
+      ["ticket", "task", "pr", "cleanup", "issue", "project", "github", "handoff"].includes(command)
     ) {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
     }
@@ -398,6 +415,13 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         const human = `depend    ${r.issue} blocked by ${r.blockedBy}${r.added ? "" : " (existing)"}\n`;
         return ok(r, human);
       }
+      case "issue findings": {
+        const found = fetchIssueContext(repo(cwd).config, issue).carriedFindings;
+        const human = found.length
+          ? found.map((f) => `- ${f.source}: ${f.finding} → ${f.action}`)
+          : [`no carried findings on #${issue}`];
+        return ok({ issue, findings: found }, lines(human));
+      }
       case "issue section get": {
         const text = readSection(repo(cwd).config, issue, section);
         return ok(
@@ -440,6 +464,27 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
           ...(r.held ? [`held      ${r.held}`] : []),
         ];
         return ok(r, lines(human), r.cleanup?.state === "CLEANUP_FAILED" ? EXIT.failed : EXIT.ok);
+      }
+      case "handoff show": {
+        const h = listHandoffs(repo(cwd).config)[0] ?? null;
+        const human = h
+          ? lines([
+              `handoff   ${h.marker} on #${h.issue} ${h.title} (${h.createdAt})`,
+              `url       ${h.url}`,
+              "",
+              h.body.replace(/^<!--.*?-->\s*/, "").trimEnd(),
+            ])
+          : "handoff   none found\n";
+        return ok(h, human);
+      }
+      case "handoff post": {
+        const text = bodyFile();
+        const milestone = values.milestone === undefined ? undefined : issueArg(values.milestone);
+        const r = postHandoff(repo(cwd).config, text, { issue: milestone });
+        return ok(
+          r,
+          lines([`handoff   ${r.marker} on #${r.issue} (${r.action})`, `url       ${r.url}`]),
+        );
       }
       case "cleanup scan": {
         const r = cleanupScan({ cwd });
@@ -567,5 +612,6 @@ const parse = (args: string[]) =>
       parent: { type: "string" },
       on: { type: "string" },
       "approved-plan": { type: "string" },
+      milestone: { type: "string" },
     },
   });

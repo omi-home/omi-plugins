@@ -51,6 +51,7 @@ test("main /context: agent listed by name/description only, no rule pack, only e
   // D3: the only plugin skills are Coordinator entry points.
   const skills = r.stdout.split("### Skills")[1] ?? "";
   assert.deepEqual(skills.match(/omi-engineering:[\w-]+/g)?.sort(), [
+    "omi-engineering:omi-resume",
     "omi-engineering:omi-start",
     "omi-engineering:omi-task",
   ]);

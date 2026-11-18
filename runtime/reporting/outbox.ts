@@ -33,7 +33,7 @@ const LEASE_MS = 5 * 60_000;
 const blockingSleep = (ms: number) =>
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-function api(run: GhRunner, args: string[], what: string, input?: string): unknown {
+export function api(run: GhRunner, args: string[], what: string, input?: string): unknown {
   const r = run(["api", ...args], input);
   if (r.status !== 0 || r.error) throw classify(r, what);
   try {
