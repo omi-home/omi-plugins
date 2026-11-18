@@ -56,7 +56,7 @@ function worktree() {
 
 /** Comments REST API + the issue-context GraphQL query. `faults` fail the next calls. */
 function fakeGitHub() {
-  const comments: { id: number; body: string; html_url: string }[] = [];
+  const comments: { id: number; body: string; html_url: string; author_association: string }[] = [];
   const faults: string[] = [];
   const run: GhRunner = (args, input) => {
     const fault = faults.shift();
@@ -81,7 +81,12 @@ function fakeGitHub() {
     if (method === "GET") return ok([comments]);
     const { body } = JSON.parse(input as string);
     if (method === "POST") {
-      const c = { id: comments.length + 1, body, html_url: `https://x/${comments.length + 1}` };
+      const c = {
+        id: comments.length + 1,
+        body,
+        html_url: `https://x/${comments.length + 1}`,
+        author_association: "MEMBER",
+      };
       comments.push(c);
       return ok(c);
     }

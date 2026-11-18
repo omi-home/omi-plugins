@@ -7,7 +7,7 @@ import { type ProjectStatus, parseContract } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 import { api } from "../../reporting/outbox.ts";
 import { redact } from "../../reporting/redact.ts";
-import { type GhRunner, graphql, spawnGh } from "./client.ts";
+import { type GhRunner, graphql, spawnGh, trustedAuthor } from "./client.ts";
 
 const MARKER = /^<!-- omi:handoff=([\w.-]+) -->/;
 /** Handoff-holding Issues read per `show`; comments read per Issue. */
@@ -23,7 +23,7 @@ export interface Handoff {
 }
 
 const SEARCH = `query($q:String!){ search(query:$q,type:ISSUE,first:${ISSUES}){ nodes{ ... on Issue{
-  number title comments(last:100){ nodes{ url body createdAt } } } } } }`;
+  number title comments(last:100){ nodes{ url body createdAt authorAssociation } } } } } }`;
 
 const SearchData = z.strictObject({
   search: z.strictObject({
@@ -34,7 +34,12 @@ const SearchData = z.strictObject({
           title: z.string(),
           comments: z.strictObject({
             nodes: z.array(
-              z.strictObject({ url: z.string(), body: z.string(), createdAt: z.string() }),
+              z.strictObject({
+                url: z.string(),
+                body: z.string(),
+                createdAt: z.string(),
+                authorAssociation: z.string(),
+              }),
             ),
           }),
         }),
@@ -56,9 +61,11 @@ export function listHandoffs(config: OmiConfig, run: GhRunner = spawnGh): Handof
   const found: Handoff[] = [];
   for (const n of graphql(SEARCH, { q }, SearchData, "search handoffs", run).search.nodes) {
     if (!("number" in n)) continue;
-    for (const c of n.comments.nodes) {
+    for (const { authorAssociation, ...c } of n.comments.nodes) {
       const m = MARKER.exec(c.body);
-      if (m) found.push({ marker: m[1] as string, issue: n.number, title: n.title, ...c });
+      if (m && trustedAuthor(authorAssociation)) {
+        found.push({ marker: m[1] as string, issue: n.number, title: n.title, ...c });
+      }
     }
   }
   return found.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -120,6 +127,7 @@ const Comment = z.looseObject({
   id: z.int().positive(),
   html_url: z.string(),
   body: z.string(),
+  author_association: z.string().optional(),
 });
 
 export interface PostResult {
@@ -155,7 +163,7 @@ export function postHandoff(
   );
   const mine = parseContract(z.array(z.array(Comment)), pages, "list comments")
     .flat()
-    .filter((c) => MARKER.test(c.body));
+    .filter((c) => MARKER.test(c.body) && trustedAuthor(c.author_association));
   const content = redact(strip(text));
   if (!content) throw new OmiError("USAGE_INVALID", "the handoff text is empty");
 

@@ -201,6 +201,7 @@ const rest = (c: { id: number; body: string }) => ({
   id: c.id,
   html_url: `u#${c.id}`,
   body: c.body,
+  author_association: "MEMBER",
 });
 
 /** Task #5 (Feature #3 → Milestone #2) with a pushed commit, PR #9 squash-merged. */

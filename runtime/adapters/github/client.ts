@@ -43,6 +43,15 @@ export function classify(r: Pick<GhResult, "stderr" | "error">, what: string): O
   return new OmiError(code, `${what}: ${first || "gh failed"}`);
 }
 
+/**
+ * Comment authors whose OMI markers count (carried findings, handoffs, outbox reports). Anyone can
+ * comment on a public repository: a marker from anyone else is untrusted text, never state.
+ * GraphQL `authorAssociation` / REST `author_association`.
+ */
+const TRUSTED_AUTHORS: readonly string[] = ["OWNER", "MEMBER", "COLLABORATOR"];
+export const trustedAuthor = (association: string | undefined) =>
+  TRUSTED_AUTHORS.includes(association ?? "");
+
 const GqlError = z.looseObject({ type: z.string().optional(), message: z.string() });
 export type GqlError = z.infer<typeof GqlError>;
 const GqlEnvelope = z.looseObject({

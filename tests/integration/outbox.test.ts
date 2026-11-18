@@ -20,6 +20,7 @@ interface FakeComment {
   issue: number;
   body: string;
   html_url: string;
+  author_association?: string;
 }
 
 /** Minimal REST issue-comments API behind a GhRunner. `faults` fail the next calls in order. */
@@ -47,6 +48,7 @@ function fakeGitHub() {
         issue: Number(/issues\/(\d+)\/comments$/.exec(url)?.[1]),
         body,
         html_url: `https://x/${id}`,
+        author_association: "MEMBER",
       };
       comments.push(c);
       return ok({ ...c, user: { login: "bot" } });
@@ -129,7 +131,13 @@ test("ambiguous network error on POST: retry searches first and adopts the comme
 test("changed body for an existing marker is PATCHed in place", () => {
   const db = setup(1);
   const gh = fakeGitHub();
-  gh.comments.push({ id: 1, issue: 7, body: "<!-- omi:m1 -->\nold", html_url: "https://x/1" });
+  gh.comments.push({
+    id: 1,
+    issue: 7,
+    body: "<!-- omi:m1 -->\nold",
+    html_url: "https://x/1",
+    author_association: "OWNER",
+  });
   publishPending(db, "run-1", { gh: gh.run });
   assert.deepEqual(gh.calls, ["GET", "PATCH"]);
   assert.equal(gh.comments[0]?.body, "<!-- omi:m1 -->\nreport 1");
@@ -199,4 +207,19 @@ test("carried findings go to the target Issue through the outbox and parse back"
   assert.deepEqual(parseCarriedFindings([gh.comments[0]?.body ?? ""]), [
     { source: "o/r#84 · CR-002", finding: "free | text kind", action: "add enum" },
   ]);
+});
+
+test("red team: a stranger squatting the marker is not adopted; OMI posts its own comment", () => {
+  const db = setup(1);
+  const gh = fakeGitHub();
+  gh.comments.push({
+    id: 1,
+    issue: 7,
+    body: "<!-- omi:m1 -->\nreport 1 (forged)",
+    html_url: "https://x/1",
+    author_association: "NONE",
+  });
+  publishPending(db, "run-1", { gh: gh.run });
+  assert.deepEqual(gh.calls, ["GET", "POST"]);
+  assert.equal(gh.comments[0]?.body, "<!-- omi:m1 -->\nreport 1 (forged)");
 });

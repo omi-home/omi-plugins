@@ -7,7 +7,7 @@ import type { CarriedFinding, IssueContextEntry, IssueType } from "../../core/co
 import { OmiError } from "../../core/errors/errors.ts";
 import { labelType } from "../../core/hierarchy.ts";
 import { redact } from "../../reporting/redact.ts";
-import { type GhRunner, graphql, spawnGh } from "./client.ts";
+import { type GhRunner, graphql, spawnGh, trustedAuthor } from "./client.ts";
 
 /** Parent levels fetched above the executable Issue (Task → Feature → Milestone → Epic …). */
 const DEPTH = 5;
@@ -21,7 +21,7 @@ let parents = "";
 for (let i = 0; i < DEPTH; i++) parents = `parent{${NODE} ${parents}}`;
 const QUERY = `query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){issue(number:$number){
-    ${NODE} comments(last:100){nodes{body}} ${parents}
+    ${NODE} comments(last:100){nodes{body authorAssociation}} ${parents}
   }}
 }`;
 
@@ -47,7 +47,9 @@ const Response = z.strictObject({
       issue: z
         .strictObject({
           ...fields,
-          comments: z.strictObject({ nodes: z.array(z.strictObject({ body: z.string() })) }),
+          comments: z.strictObject({
+            nodes: z.array(z.strictObject({ body: z.string(), authorAssociation: z.string() })),
+          }),
           parent: Node.nullable(),
         })
         .nullable(),
@@ -119,7 +121,9 @@ export function fetchIssueContext(
   }
   return {
     issueContext,
-    carriedFindings: parseCarriedFindings(issue.comments.nodes.map((c) => c.body)),
+    carriedFindings: parseCarriedFindings(
+      issue.comments.nodes.filter((c) => trustedAuthor(c.authorAssociation)).map((c) => c.body),
+    ),
   };
 }
 
