@@ -59,6 +59,11 @@ Commands:
                          Issue, tip, conflicts, CI, reviews, merge method, protection, risk
   pr merge <n>           Merge Issue #n's task PR when every gate passes (configured method, pinned
                          to the validated head); risk:high goes to Waiting PO and is not merged
+  release check <n>      Read-only gate for Release Issue #n: plugin.json and package.json agree on a
+                         semver, CHANGELOG.md has "## [<version>]", tag <plugin>--v<version> is free and
+                         newer on origin, develop is ahead of main, the Milestone's other work is closed
+  release tag <n>        After the PO merged #n's PR (develop → main): tag its merge commit
+                         <plugin>--v<version>, push the tag, close #n, Done + roll-up. Re-run: no-op
   issue create           Create an Issue: --type <OMI type> --title <text> --body-file <path>
                          [--parent <n|owner/repo#n>]. Numbered <IssueType>-<NNNN>- per type, linked
                          as a sub-issue (hierarchy matrix checked first), added to the Project.

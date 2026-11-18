@@ -20,11 +20,18 @@ npm run check
 
 ## Cài plugin
 
-Repo này đồng thời là marketplace một-plugin (`.claude-plugin/marketplace.json`, `source: "./"`):
+Repo này đồng thời là marketplace một-plugin (`.claude-plugin/marketplace.json`, `source: "./"`). Mỗi release là tag `omi-engineering--v<version>` trên `main` (xem [CHANGELOG](./CHANGELOG.md)); ghim marketplace vào tag để có bản cố định:
 
-```text
-/plugin install omi-engineering --marketplace omi-home/omi-plugins
+```bash
+claude plugin marketplace add omi-home/omi-plugins#omi-engineering--v0.1.0
+claude plugin install omi-engineering@omi-plugins   # --scope project để chia sẻ qua .claude/settings.json
 ```
+
+Không có `#<tag>` thì marketplace theo branch mặc định (`develop`, chưa phát hành). Máy không có SSH key GitHub: đặt `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`.
+
+- **Update:** marketplace ghim theo tag không tự lên bản mới. Đổi tag: `claude plugin marketplace remove omi-plugins`, `add` lại với `#omi-engineering--v<mới>`, `install` lại, rồi khởi động lại Claude Code.
+- **Rollback:** như update, với tag cũ. State cục bộ (`<git-common-dir>/omi/state.sqlite`) chỉ migrate tiến và bản cũ từ chối DB mới hơn ("upgrade OMI"): sao lưu file đó trước khi update, khôi phục bản sao lưu khi lùi qua một migration.
+
 
 Thử plugin từ source cục bộ không cần cài: `claude --plugin-dir .`. Kiểm tra manifest: `claude plugin validate .claude-plugin/plugin.json --strict` (đã nằm trong `npm test`, tự skip khi không có `claude`).
 

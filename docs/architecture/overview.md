@@ -83,7 +83,7 @@ omi-plugins/
 │   ├── omi-task/SKILL.md               # one ticket-driven task
 │   ├── omi-resume/SKILL.md             # new session: doctor → handoff show → cleanup scan → next step
 │   ├── omi-status/SKILL.md             # Milestone overview (omi status) for the PO
-│   └── omi-release/SKILL.md            # planned: DevTask-0035 #70
+│   └── omi-release/SKILL.md            # release check → PR develop → main (PO merge) → release tag
 ├── workflows/                          # OPTIONAL read-only adapters (ADR-0001 D1); no isolation: worktree
 │   └── review-gate.js                  # e.g. parallel multi-lens review; CLI publishes results
 ├── hooks/
