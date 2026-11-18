@@ -19,7 +19,7 @@ import { z } from "zod";
 import { classify } from "../adapters/github/client.ts";
 import type { OmiConfig } from "../core/config.ts";
 import { type IssueType, parseContract, SCHEMA_VERSION } from "../core/contracts.ts";
-import { OmiError } from "../core/errors/errors.ts";
+import { type ErrorCode, OmiError } from "../core/errors/errors.ts";
 import type { Db } from "../persistence/db.ts";
 import {
   acquireLease,
@@ -87,6 +87,20 @@ export function git(args: string[], cwd: string): string {
         );
       }
       throw classify({ stderr: err.stderr ?? "", error: e as Error }, "git fetch");
+    }
+    if (args[0] === "push") {
+      // The remote's own words are the only reason a person gets (GH013 push protection, hooks,
+      // rules): keep them whole. OmiError redacts the message.
+      const said = (err.stderr ?? "").trim().slice(-2000) || "no output";
+      const code: ErrorCode =
+        /\[remote rejected\]|\[rejected\]|hook declined|GH0\d\d|protected branch/i.test(said)
+          ? "POLICY_VIOLATION"
+          : /Authentication failed|Permission to \S+ denied|could not read Username|terminal prompts disabled/i.test(
+                said,
+              )
+            ? "GITHUB_AUTH"
+            : classify({ stderr: said, error: e as Error }, "git push").code;
+      throw new OmiError(code, `git push failed:\n${said}`);
     }
     const first = (err.stderr ?? "").trim().split(/\r?\n/)[0] ?? "";
     throw new OmiError("INTERNAL", `git ${args[0]} failed: ${first}`);

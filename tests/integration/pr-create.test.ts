@@ -421,3 +421,25 @@ test("pr merge: release PRs are left to the PO", () => {
     "POLICY_VIOLATION",
   );
 });
+
+test("push rejected by the remote: POLICY_VIOLATION with git's reason, redacted; no PR (#119)", () => {
+  const s = started({ issues: { 5: "dev-task" } });
+  const token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+  const hook = join(s.root, "..", "origin.git", "hooks", "pre-receive");
+  writeFileSync(
+    hook,
+    `#!/bin/sh\necho "error: GH013: Repository rule violations found. Push cannot contain secrets: ${token}" >&2\nexit 1\n`,
+    { mode: 0o755 },
+  );
+  let err: { code?: string; message?: string } = {};
+  try {
+    prCreate({ cwd: s.root, gh: s.gh.run, sleep: noSleep }, 5);
+  } catch (e) {
+    err = e as typeof err;
+  }
+  assert.equal(err.code, "POLICY_VIOLATION");
+  assert.match(err.message ?? "", /GH013[\s\S]*Push cannot contain secrets/);
+  assert.ok(!(err.message ?? "").includes(token));
+  assert.equal(s.gh.created.length, 0);
+  assert.deepEqual(s.gh.statuses, []);
+});

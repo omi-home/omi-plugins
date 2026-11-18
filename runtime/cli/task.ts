@@ -78,7 +78,7 @@ import {
 import { publishPending } from "../reporting/outbox.ts";
 import { renderStepReport } from "../reporting/render.ts";
 import { applyRetention, cleanupRun } from "../resources/cleanup.ts";
-import { branchName, ensureWorktree, type Workspace } from "../resources/worktree.ts";
+import { branchName, ensureWorktree, git, type Workspace } from "../resources/worktree.ts";
 
 export interface TaskDeps {
   cwd: string;
@@ -456,7 +456,7 @@ export function taskAnalyze(
           fromSource: deps.fromSource,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),
         },
-        { run, worktree: root, baseSha: gitOut(root, ["rev-parse", "HEAD"]), plan },
+        { run, worktree: root, baseSha: git(["rev-parse", "HEAD"], root), plan },
       );
       // Analysis done or an open question: either way the PO decides next.
       const status = setStatus(
@@ -486,9 +486,6 @@ export interface PrResult {
   checks: Check[];
   status: StatusChange | null;
 }
-
-const gitOut = (cwd: string, args: string[]) =>
-  execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 /**
  * `omi pr create <n>` (spec §8 gate 5): push the task branch from its owned, clean worktree,
@@ -528,18 +525,18 @@ export function prCreate(
       throw new OmiError("OWNERSHIP_MISMATCH", `${primary} has no owned branch and worktree`);
     }
     base = config.git.baseBranch;
-    if (gitOut(worktree, ["rev-parse", "--abbrev-ref", "HEAD"]) !== head) {
+    if (git(["rev-parse", "--abbrev-ref", "HEAD"], worktree) !== head) {
       throw new OmiError("OWNERSHIP_MISMATCH", `worktree is not on ${head}`, { path: worktree });
     }
-    if (gitOut(worktree, ["status", "--porcelain"])) {
+    if (git(["status", "--porcelain"], worktree)) {
       throw new OmiError("WORKTREE_DIRTY", "commit or discard changes first", { path: worktree });
     }
-    gitOut(worktree, ["fetch", "--quiet", "origin", base]);
-    if (gitOut(worktree, ["rev-list", "--count", `origin/${base}..HEAD`]) === "0") {
+    git(["fetch", "--quiet", "origin", base], worktree);
+    if (git(["rev-list", "--count", `origin/${base}..HEAD`], worktree) === "0") {
       throw new OmiError("POLICY_VIOLATION", `${head} has no commits ahead of origin/${base}`);
     }
-    tip = gitOut(worktree, ["rev-parse", "HEAD"]);
-    gitOut(worktree, ["push", "--quiet", "-u", "origin", head]);
+    tip = git(["rev-parse", "HEAD"], worktree);
+    git(["push", "--quiet", "-u", "origin", head], worktree);
   }
 
   let facts = repoFacts(config, head, gh);
@@ -628,7 +625,7 @@ function taskPr(deps: TaskDeps, issue: number): TaskPr {
   }
   if (!head) throw new OmiError("OWNERSHIP_MISMATCH", `${primary} has no owned branch`);
   const localTip =
-    worktree && existsSync(worktree) ? gitOut(worktree, ["rev-parse", head]) : undefined;
+    worktree && existsSync(worktree) ? git(["rev-parse", head], worktree) : undefined;
   return { config, ref, primary, ticket, head, base: config.git.baseBranch, localTip };
 }
 
