@@ -31,6 +31,10 @@ test("golden: help and version, human and json", () => {
 
 Commands:
   doctor                 Check tools, repository, AGENTS.md, .omi/config.yaml and GitHub access
+  status [--milestone <n>]
+                         Read-only overview of a Milestone (default: the active one): its Issues by
+                         Project Status with open PRs, local runs and leftovers, Status drift and
+                         governance gaps
   ticket validate <n>    Check Issue #n against the ticket-first gates (no changes)
   task start <n>         Validate Issue #n, create or reuse its run and worktree, mark it In Progress
   task status <n>        Show the local run, worktree and transitions of Issue #n

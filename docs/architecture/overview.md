@@ -79,11 +79,11 @@ omi-plugins/
 │   ├── automation-qa-engineer.md
 │   └── devops-engineer.md
 ├── skills/                             # Coordinator entry points ONLY (ADR-0001 D3)
-│   ├── omi-start/SKILL.md
-│   ├── omi-task/SKILL.md
-│   ├── omi-resume/SKILL.md
-│   ├── omi-status/SKILL.md
-│   └── omi-release/SKILL.md
+│   ├── omi-start/SKILL.md              # bootstrap a repo (github project init → repo/project apply)
+│   ├── omi-task/SKILL.md               # one ticket-driven task
+│   ├── omi-resume/SKILL.md             # new session: doctor → handoff show → cleanup scan → next step
+│   ├── omi-status/SKILL.md             # Milestone overview (omi status) for the PO
+│   └── omi-release/SKILL.md            # planned: DevTask-0035 #70
 ├── workflows/                          # OPTIONAL read-only adapters (ADR-0001 D1); no isolation: worktree
 │   └── review-gate.js                  # e.g. parallel multi-lens review; CLI publishes results
 ├── hooks/

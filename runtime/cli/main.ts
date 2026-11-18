@@ -16,13 +16,14 @@ import {
   type StatusDrift,
 } from "../adapters/github/project-fields.ts";
 import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/github/repo.ts";
-import { IssueType } from "../core/contracts.ts";
+import { IssueType, ProjectStatus } from "../core/contracts.ts";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import type { RepoAction } from "../core/repo-config.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { type Check, doctor } from "./doctor.ts";
 import { projectInit } from "./init.ts";
+import { NOT_IN_PROJECT, status } from "./status.ts";
 import {
   prCreate,
   prMerge,
@@ -58,6 +59,10 @@ export const HELP = `Usage: omi <command> [--output human|json]
 
 Commands:
   doctor                 Check tools, repository, AGENTS.md, .omi/config.yaml and GitHub access
+  status [--milestone <n>]
+                         Read-only overview of a Milestone (default: the active one): its Issues by
+                         Project Status with open PRs, local runs and leftovers, Status drift and
+                         governance gaps
   ticket validate <n>    Check Issue #n against the ticket-first gates (no changes)
   task start <n>         Validate Issue #n, create or reuse its run and worktree, mark it In Progress
   task status <n>        Show the local run, worktree and transitions of Issue #n
@@ -317,6 +322,38 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         return ok({ help: HELP }, HELP);
       case "version":
         return ok({ omi: VERSION }, `omi ${VERSION}\n`);
+      case "status": {
+        const milestone = values.milestone === undefined ? undefined : issueArg(values.milestone);
+        const r = status({ cwd, milestone });
+        const order = [...ProjectStatus.options, "no Status", NOT_IN_PROJECT];
+        const keys = Object.keys(r.byStatus).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+        const fail = (s: { ok: false; error: { code: string; message: string } }) =>
+          `unavailable (${s.error.code}: ${s.error.message})`;
+        const human = [
+          `milestone #${r.milestone.number} ${r.milestone.title} (${r.milestone.status ?? NOT_IN_PROJECT})`,
+          ...keys.flatMap((k) => {
+            const all = r.byStatus[k] ?? [];
+            if (k === "Done" || k === "Cancelled")
+              return [`${k.padEnd(12)} ${all.length} issue(s)`];
+            return all.map(
+              (i, n) =>
+                `${(n ? "" : k).padEnd(12)} ${"  ".repeat(i.depth - 1)}#${i.number} ${i.title}${i.state === "CLOSED" ? " (closed)" : ""}${i.prs.map((p) => ` PR #${p.number}${p.draft ? " (draft)" : ""}`).join("")}`,
+            );
+          }),
+          ...(r.cleanup.ok
+            ? humanScan(r.cleanup.value).map((l) => `run       ${l}`)
+            : [`runs      ${fail(r.cleanup)}`]),
+          ...(r.drift.ok
+            ? r.drift.value.map((d) => `drift     ${d.issue} ${d.status ?? "unset"}: ${d.reason}`)
+            : [`drift     ${fail(r.drift)}`]),
+          ...(r.governance.ok
+            ? r.governance.value.map(
+                (c) => `governance ${c.status.toUpperCase()} ${c.name}: ${c.detail}`,
+              )
+            : [`governance ${fail(r.governance)}`]),
+        ];
+        return ok(r, lines(human));
+      }
       case "doctor": {
         const checks = doctor(cwd);
         return ok({ checks }, humanChecks(checks), checksExit(checks));

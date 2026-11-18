@@ -53,6 +53,7 @@ test("main /context: agent listed by name/description only, no rule pack, only e
   assert.deepEqual(skills.match(/omi-engineering:[\w-]+/g)?.sort(), [
     "omi-engineering:omi-resume",
     "omi-engineering:omi-start",
+    "omi-engineering:omi-status",
     "omi-engineering:omi-task",
   ]);
 });
