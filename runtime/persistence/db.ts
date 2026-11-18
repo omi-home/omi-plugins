@@ -33,9 +33,9 @@ export function openState(file: string): Db {
   const db = new DatabaseSync(file);
   try {
     // WAL: readers never block the writer. FULL: a committed transaction survives power loss.
+    db.exec("PRAGMA busy_timeout = 5000");
+    setWal(db);
     db.exec(`
-      PRAGMA busy_timeout = 5000;
-      PRAGMA journal_mode = WAL;
       PRAGMA synchronous = FULL;
       PRAGMA foreign_keys = ON;
     `);
@@ -44,6 +44,24 @@ export function openState(file: string): Db {
   } catch (e) {
     db.close();
     throw sqliteError(e, "open state");
+  }
+}
+
+/**
+ * Switching to WAL holds a read lock while asking for the write lock; when another connection
+ * races it SQLite returns BUSY at once (waiting could deadlock), bypassing busy_timeout.
+ * Retry briefly; the last BUSY still surfaces as LOCK_HELD.
+ */
+function setWal(db: Db): void {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      db.exec("PRAGMA journal_mode = WAL");
+      return;
+    } catch (e) {
+      const code = (e as { errcode?: number }).errcode;
+      if (attempt >= 50 || code === undefined || (code & 0xff) !== SQLITE_BUSY) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
   }
 }
 
