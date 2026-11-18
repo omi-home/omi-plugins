@@ -25,6 +25,7 @@ function fakeGh(seed: Record<number, C[]>, statuses: Record<number, string> = {}
   const out = (data: unknown) => ({ status: 0, stdout: JSON.stringify(data), stderr: "" });
   const run: GhRunner = (args, input) => {
     const query = args[2] === "-f" ? (args[3] ?? "") : "";
+    if (query.includes("viewer")) return out({ data: { viewer: { login: "omi-bot" } } });
     if (query.includes("search(")) {
       const nodes = [...comments].map(([n, cs]) => ({
         number: n,
@@ -35,6 +36,7 @@ function fakeGh(seed: Record<number, C[]>, statuses: Record<number, string> = {}
             body: c.body,
             createdAt: c.createdAt,
             authorAssociation: c.author ?? "MEMBER",
+            author: { login: c.author ? "stranger" : "member" },
           })),
         },
       }));
@@ -57,6 +59,7 @@ function fakeGh(seed: Record<number, C[]>, statuses: Record<number, string> = {}
         html_url: url(n, c.id),
         body: c.body,
         author_association: c.author ?? "MEMBER",
+        user: { login: c.author ? "stranger" : "member" },
       }));
       return out([page]);
     }

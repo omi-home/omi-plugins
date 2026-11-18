@@ -3,11 +3,16 @@
 // carried into it. One GraphQL call, read-only.
 import { z } from "zod";
 import type { OmiConfig } from "../../core/config.ts";
-import type { CarriedFinding, IssueContextEntry, IssueType } from "../../core/contracts.ts";
+import {
+  AuthorAssociation,
+  type CarriedFinding,
+  type IssueContextEntry,
+  type IssueType,
+} from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 import { labelType } from "../../core/hierarchy.ts";
 import { redact } from "../../reporting/redact.ts";
-import { type GhRunner, graphql, spawnGh, trustedAuthor } from "./client.ts";
+import { type GhRunner, graphql, markerAuthor, spawnGh } from "./client.ts";
 
 /** Parent levels fetched above the executable Issue (Task → Feature → Milestone → Epic …). */
 const DEPTH = 5;
@@ -21,7 +26,7 @@ let parents = "";
 for (let i = 0; i < DEPTH; i++) parents = `parent{${NODE} ${parents}}`;
 const QUERY = `query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){issue(number:$number){
-    ${NODE} comments(last:100){nodes{body authorAssociation}} ${parents}
+    ${NODE} comments(last:100){nodes{body authorAssociation author{login}}} ${parents}
   }}
 }`;
 
@@ -48,7 +53,13 @@ const Response = z.strictObject({
         .strictObject({
           ...fields,
           comments: z.strictObject({
-            nodes: z.array(z.strictObject({ body: z.string(), authorAssociation: z.string() })),
+            nodes: z.array(
+              z.strictObject({
+                body: z.string(),
+                authorAssociation: AuthorAssociation,
+                author: z.strictObject({ login: z.string() }).nullable(),
+              }),
+            ),
           }),
           parent: Node.nullable(),
         })
@@ -103,6 +114,7 @@ export function fetchIssueContext(
   const { owner, repo } = config.github;
   const data = graphql(QUERY, { owner, repo, number }, Response, "issue context", run);
   const issue = data.repository?.issue;
+  const trusted = markerAuthor(run);
   if (!issue) throw new OmiError("TICKET_INVALID", `issue ${owner}/${repo}#${number} not found`);
 
   const issueContext: IssueContextEntry[] = [];
@@ -122,7 +134,10 @@ export function fetchIssueContext(
   return {
     issueContext,
     carriedFindings: parseCarriedFindings(
-      issue.comments.nodes.filter((c) => trustedAuthor(c.authorAssociation)).map((c) => c.body),
+      issue.comments.nodes
+        .filter((c) => /omi:carried-findings=/.test(c.body))
+        .filter((c) => trusted(c.authorAssociation, c.author?.login))
+        .map((c) => c.body),
     ),
   };
 }

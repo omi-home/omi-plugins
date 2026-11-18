@@ -3,7 +3,7 @@
 // (network, rate limit, 5xx) from actionable (auth, scopes) failures.
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
-import { parseContract } from "../../core/contracts.ts";
+import { type AuthorAssociation, parseContract } from "../../core/contracts.ts";
 import { type ErrorCode, OmiError } from "../../core/errors/errors.ts";
 
 export interface GhResult {
@@ -43,14 +43,40 @@ export function classify(r: Pick<GhResult, "stderr" | "error">, what: string): O
   return new OmiError(code, `${what}: ${first || "gh failed"}`);
 }
 
+const TRUSTED: readonly AuthorAssociation[] = ["OWNER", "MEMBER", "COLLABORATOR"];
+const VIEWER = "query{ viewer{ login } }";
+const viewers = new WeakMap<GhRunner, string>();
+
 /**
- * Comment authors whose OMI markers count (carried findings, handoffs, outbox reports). Anyone can
- * comment on a public repository: a marker from anyone else is untrusted text, never state.
- * GraphQL `authorAssociation` / REST `author_association`.
+ * Who may write OMI markers (carried findings, handoffs, outbox reports): owners, members,
+ * collaborators, and the identity `gh` runs as (a bot or a private org member shows as NONE /
+ * CONTRIBUTOR). Anyone can comment on a public repository; their markers are text, never state.
+ * The viewer is read once per runner, and only when an association is not trusted.
  */
-const TRUSTED_AUTHORS: readonly string[] = ["OWNER", "MEMBER", "COLLABORATOR"];
-export const trustedAuthor = (association: string | undefined) =>
-  TRUSTED_AUTHORS.includes(association ?? "");
+export function markerAuthor(run: GhRunner) {
+  return (association: string | undefined, login: string | undefined): boolean => {
+    if (TRUSTED.some((t) => t === association)) return true;
+    if (!login) return false;
+    let viewer = viewers.get(run);
+    if (viewer === undefined) {
+      viewer = graphql(VIEWER, {}, Viewer, "viewer", run).viewer.login;
+      viewers.set(run, viewer);
+    }
+    return login === viewer;
+  };
+}
+
+/** A REST issue comment (`gh api .../comments`). */
+export const RestComment = z.looseObject({
+  id: z.int().positive(),
+  html_url: z.string(),
+  body: z.string(),
+  author_association: z.string().optional(),
+  user: z.looseObject({ login: z.string() }).nullable().optional(),
+});
+export type RestComment = z.infer<typeof RestComment>;
+
+const Viewer = z.strictObject({ viewer: z.strictObject({ login: z.string() }) });
 
 const GqlError = z.looseObject({ type: z.string().optional(), message: z.string() });
 export type GqlError = z.infer<typeof GqlError>;

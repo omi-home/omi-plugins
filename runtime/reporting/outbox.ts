@@ -3,7 +3,13 @@
 // the ID was stored ends in a PATCH, never a duplicate. Persist happened before; this publishes.
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { classify, type GhRunner, spawnGh, trustedAuthor } from "../adapters/github/client.ts";
+import {
+  classify,
+  type GhRunner,
+  markerAuthor,
+  RestComment,
+  spawnGh,
+} from "../adapters/github/client.ts";
 import { type IssueRef, parseContract } from "../core/contracts.ts";
 import { isTransient, OmiError } from "../core/errors/errors.ts";
 import type { Db } from "../persistence/db.ts";
@@ -16,12 +22,7 @@ import {
 } from "../persistence/repository.ts";
 import { redact } from "./redact.ts";
 
-const Comment = z.looseObject({
-  id: z.int().positive(),
-  html_url: z.string(),
-  body: z.string(),
-  author_association: z.string().optional(),
-});
+const Comment = RestComment;
 type Comment = z.infer<typeof Comment>;
 
 export interface PublishOptions {
@@ -58,7 +59,8 @@ function findByMarker(run: GhRunner, target: IssueRef, marker: string): Comment 
   );
   const all = parseContract(z.array(z.array(Comment)), pages, "list comments").flat();
   // Our bodies open with it; a quote elsewhere, or a stranger squatting the marker, is not ours.
-  return all.find((c) => c.body.startsWith(marker) && trustedAuthor(c.author_association));
+  const trusted = markerAuthor(run);
+  return all.find((c) => c.body.startsWith(marker) && trusted(c.author_association, c.user?.login));
 }
 
 function publishOne(run: GhRunner, r: PendingReport): Comment {

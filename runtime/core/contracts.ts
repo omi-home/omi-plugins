@@ -90,6 +90,19 @@ export const IssueType = z.enum([
 ]);
 export type IssueType = z.infer<typeof IssueType>;
 
+/** GitHub's relation of a comment author to the repository (GraphQL authorAssociation). */
+export const AuthorAssociation = z.enum([
+  "OWNER",
+  "MEMBER",
+  "COLLABORATOR",
+  "CONTRIBUTOR",
+  "FIRST_TIME_CONTRIBUTOR",
+  "FIRST_TIMER",
+  "MANNEQUIN",
+  "NONE",
+]);
+export type AuthorAssociation = z.infer<typeof AuthorAssociation>;
+
 export const ProjectStatus = z.enum([
   "Triage",
   "Backlog",
