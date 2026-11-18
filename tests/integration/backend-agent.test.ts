@@ -50,7 +50,10 @@ test("main /context: agent listed by name/description only, no rule pack, only e
   assert.ok(!r.stdout.includes("role-rules"));
   // D3: the only plugin skills are Coordinator entry points.
   const skills = r.stdout.split("### Skills")[1] ?? "";
-  assert.deepEqual(skills.match(/omi-engineering:[\w-]+/g), ["omi-engineering:omi-task"]);
+  assert.deepEqual(skills.match(/omi-engineering:[\w-]+/g)?.sort(), [
+    "omi-engineering:omi-start",
+    "omi-engineering:omi-task",
+  ]);
 });
 
 const runAgent = (grant: boolean) => {

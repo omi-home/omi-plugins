@@ -125,11 +125,11 @@ omi-plugins/
 │   ├── resource-policy.yaml
 │   ├── risk-policy.yaml                # Low/Medium/High merge tiers: `omi pr validate|merge`
 │   └── github/                         # governance defaults; target repo overrides in .omi/config.yaml
-│       ├── project.yaml                # custom fields + initial Status (`omi project plan|apply`)
+│       ├── project.yaml                # custom fields + initial Status (`omi github project plan|apply`)
 │       ├── issue-types.yaml
 │       ├── issue-hierarchy.yaml        # allowed parent → child matrix
 │       ├── status-transitions.yaml     # Status lifecycle per type, drift in `omi project plan`
-│       ├── views.yaml
+│       ├── views.yaml                  # views, built-in workflows, Insights (`omi github project`)
 │       └── repository.yaml             # labels, branch protection, merge methods (`omi github repo`)
 ├── schemas/
 │   ├── workflow-state.schema.json

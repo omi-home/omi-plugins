@@ -6,14 +6,20 @@ import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import {
   projectApply,
   projectPlan,
+  projectValidate,
   statusDrift,
 } from "../../runtime/adapters/github/project-fields.ts";
 import type { OmiConfig } from "../../runtime/core/config.ts";
 import type { OmiError } from "../../runtime/core/errors/errors.ts";
-import { type GhOption, loadProjectConfig } from "../../runtime/core/project-config.ts";
+import {
+  type GhOption,
+  loadProjectConfig,
+  loadViewsConfig,
+} from "../../runtime/core/project-config.ts";
 
 const config = { github: { owner: "o", repo: "repo", projectNumber: 2 } } as OmiConfig;
 const desired = loadProjectConfig();
+const desiredViews = loadViewsConfig();
 
 interface FakeField {
   id: string;
@@ -21,6 +27,18 @@ interface FakeField {
   dataType: string;
   options?: GhOption[];
 }
+interface FakeView {
+  name: string;
+  layout: string;
+  filter?: string;
+  columns?: string;
+  groupBy?: string;
+  sort?: string;
+}
+/** GitHub's views once every desired setting was done by hand. */
+const configuredViews = (): FakeView[] =>
+  desiredViews.views.map((v) => ({ ...v, layout: `${v.layout.toUpperCase()}_LAYOUT` }));
+
 interface FakeItem {
   issue?: { number: number; type?: string };
   status?: string;
@@ -28,9 +46,20 @@ interface FakeItem {
 
 function fakeProject(
   seed: FakeField[],
-  opts: { canUpdate?: boolean; forbidden?: boolean; items?: FakeItem[]; pageSize?: number } = {},
+  opts: {
+    canUpdate?: boolean;
+    forbidden?: boolean;
+    items?: FakeItem[];
+    pageSize?: number;
+    views?: FakeView[];
+    workflows?: { name: string; enabled: boolean }[];
+  } = {},
 ) {
   const fields = structuredClone(seed);
+  const views = structuredClone(opts.views ?? configuredViews());
+  const workflows =
+    opts.workflows ??
+    Object.entries(desiredViews.workflows).map(([name, enabled]) => ({ name, enabled }));
   const writes: string[] = [];
   let seq = 0;
   const ok = (data: unknown) => ({ status: 0, stdout: JSON.stringify({ data }), stderr: "" });
@@ -54,6 +83,11 @@ function fakeProject(
         stderr: "",
       };
     }
+    if (query.includes("createProjectV2View")) {
+      views.push({ name: v.n, layout: v.l, columns: v.l === "BOARD_LAYOUT" ? "Status" : "" });
+      writes.push(`view:${v.n}`);
+      return ok({});
+    }
     if (query.includes("createProjectV2Field")) {
       const options = (v.o as GhOption[] | undefined)?.map((o) => ({ ...o, id: `new${++seq}` }));
       fields.push({ id: `F${++seq}`, name: v.n, dataType: v.t, options });
@@ -76,6 +110,25 @@ function fakeProject(
             ...f,
           })),
         },
+        views: {
+          nodes: views.map((w, i) => ({
+            id: `V${i}`,
+            name: w.name,
+            layout: w.layout,
+            filter: w.filter ?? "",
+            groupByFields: { nodes: w.groupBy ? [{ name: w.groupBy }] : [] },
+            verticalGroupByFields: { nodes: w.columns ? [{ name: w.columns }] : [] },
+            sortByFields: {
+              nodes: w.sort
+                ? w.sort.split(", ").map((x) => {
+                    const [name, dir] = x.split(" ");
+                    return { direction: dir?.toUpperCase(), field: { name } };
+                  })
+                : [],
+            },
+          })),
+        },
+        workflows: { nodes: workflows },
       });
     }
     if (query.includes("items(first:100")) {
@@ -102,7 +155,7 @@ function fakeProject(
     }
     throw new Error(`unexpected query ${query.slice(0, 80)}`);
   };
-  return { run, fields, writes };
+  return { run, fields, views, writes };
 }
 
 const want = (name: string): GhOption[] => {
@@ -209,4 +262,76 @@ test("Status drift: outside the type's lifecycle, unset, unknown, no type — ac
       "#6 no single valid type:* label",
     ],
   );
+});
+
+test("views: apply creates missing ones by name + layout once; settings stay manual", () => {
+  const seed = configuredViews().filter((v) => v.name !== "Blockers/Risks" && v.name !== "Kanban");
+  seed.push({ name: "Spike", layout: "TABLE_LAYOUT" });
+  const gh = fakeProject(before(), {
+    views: seed,
+    workflows: [
+      { name: "Auto-add sub-issues to project", enabled: true },
+      { name: "Item closed", enabled: true },
+      { name: "Pull request merged", enabled: false },
+    ],
+  });
+  const plan = projectPlan(config, gh.run);
+  assert.deepEqual(
+    plan.views.actions.map((a) => (a.kind === "create-view" ? `create ${a.view.name}` : a.name)),
+    [
+      "create Blockers/Risks",
+      "Blockers/Risks",
+      "Blockers/Risks",
+      "create Kanban",
+      "Kanban",
+      "workflow Item closed",
+    ],
+  );
+  assert.deepEqual(plan.views.extraViews, ["Spike"]);
+
+  const r = projectApply(config, gh.run);
+  assert.deepEqual(
+    gh.writes.filter((w) => w.startsWith("view:")),
+    ["view:Blockers/Risks", "view:Kanban"],
+  );
+  assert.equal(gh.views.find((v) => v.name === "Kanban")?.layout, "BOARD_LAYOUT");
+  assert.ok(
+    gh.views.some((v) => v.name === "Spike"),
+    "extra view never deleted",
+  );
+  assert.deepEqual(
+    r.plan.views.actions.map((a) => (a.kind === "manual" ? a.reason : a.kind)),
+    [
+      "set filter to 'status:Blocked,\"Waiting PO\"' in the Project UI (now (none))",
+      "set group by to 'Status' in the Project UI (now (none))",
+      "set filter to '-status:Cancelled' in the Project UI (now (none))",
+      "disable it in Project settings → Workflows (no API)",
+    ],
+    "verify read-back: a new board already has Status columns",
+  );
+  const writes = gh.writes.length;
+  assert.deepEqual(projectApply(config, gh.run).applied, []);
+  assert.equal(gh.writes.length, writes, "second apply: no duplicate view");
+});
+
+test("validate: checks per area; Insights and extras warn, missing view fails", () => {
+  const synced = fakeProject(before());
+  projectApply(config, synced.run);
+  const ok = projectValidate(config, fakeProject(synced.fields).run);
+  assert.deepEqual(
+    ok.map((c) => `${c.name}:${c.status}`),
+    [
+      "fields:pass",
+      "views:pass",
+      "workflows:pass",
+      "status-drift:pass",
+      "extra:warn",
+      "insights:warn",
+    ],
+  );
+  const missing = projectValidate(
+    config,
+    fakeProject(synced.fields, { views: configuredViews().slice(1) }).run,
+  );
+  assert.match(missing.find((c) => c.name === "views")?.detail ?? "", /missing view WBS/);
 });

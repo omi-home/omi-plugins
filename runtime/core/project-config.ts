@@ -241,3 +241,134 @@ export function planFields(desired: ProjectConfig, actual: ActualField[]): Field
   }
   return { actions, extra };
 }
+
+// --- views, built-in workflows, Insights (DevTask-0031 #63) ------------------------------------
+
+export const ViewLayout = z.enum(["table", "board", "roadmap"]);
+export type ViewLayout = z.infer<typeof ViewLayout>;
+/** Settings the API reads but cannot write; absent = not managed. */
+const VIEW_SETTINGS = ["filter", "groupBy", "columns", "sort"] as const;
+type ViewSetting = (typeof VIEW_SETTINGS)[number];
+
+const View = z.strictObject({
+  name: z.string().min(1),
+  layout: ViewLayout,
+  filter: z.string().optional(),
+  groupBy: z.string().min(1).optional(),
+  /** Board column field. */
+  columns: z.string().min(1).optional(),
+  /** `<Field> asc|desc`, several joined with `, `. */
+  sort: z
+    .string()
+    .regex(/^[^,]+ (asc|desc)(, [^,]+ (asc|desc))*$/)
+    .optional(),
+});
+export type View = z.infer<typeof View>;
+
+export const ViewsConfig = z
+  .strictObject({
+    views: z.array(View),
+    workflows: z.record(z.string().min(1), z.boolean()).default({}),
+    insights: z.array(z.string().min(1)).default([]),
+  })
+  .refine((c) => unique(c.views.map((v) => v.name)), "duplicate view name")
+  .refine((c) => c.views.every((v) => !v.columns || v.layout === "board"), "columns needs board");
+export type ViewsConfig = z.infer<typeof ViewsConfig>;
+
+let views: ViewsConfig | undefined;
+export const loadViewsConfig = (): ViewsConfig =>
+  (views ??= parseContract(ViewsConfig, read("views.yaml"), "views config", "CONFIG_INVALID"));
+
+/** A view as GitHub reports it, settings already flattened to the View shape. */
+export type ActualView = { id: string } & Required<Omit<View, "layout">> & { layout: string };
+
+export type ViewAction =
+  | { kind: "create-view"; view: View }
+  /** UI-only change: a setting, a layout, a duplicate name or a built-in workflow. */
+  | { kind: "manual"; name: string; reason: string };
+
+export interface ViewPlan {
+  actions: ViewAction[];
+  /** Views on GitHub not in the desired state: reported, never deleted. */
+  extraViews: string[];
+  /** No API: Insights charts to create by hand. */
+  unsupported: string[];
+}
+
+const LABEL: Record<ViewSetting, string> = {
+  filter: "filter",
+  groupBy: "group by",
+  columns: "column field",
+  sort: "sort",
+};
+const shown = (v: string) => (v === "" ? "(none)" : `'${v}'`);
+
+/** Settings of `want` that `have` (absent: a view about to be created) does not match. */
+function settingsToSet(want: View, have?: ActualView): ViewAction[] {
+  return VIEW_SETTINGS.flatMap((s): ViewAction[] => {
+    const w = want[s];
+    if (w === undefined || (have && have[s].trim() === w.trim())) return [];
+    // A new view has no filter, and a new board already uses Status columns (verified 2026-11-18).
+    if (!have && (w === "" || (s === "columns" && w === "Status"))) return [];
+    return [
+      {
+        kind: "manual",
+        name: want.name,
+        reason: `set ${LABEL[s]} to ${shown(w)} in the Project UI${have ? ` (now ${shown(have[s])})` : ""}`,
+      },
+    ];
+  });
+}
+
+export function planViews(
+  desired: ViewsConfig,
+  actual: ActualView[],
+  workflows: { name: string; enabled: boolean }[],
+): ViewPlan {
+  const actions: ViewAction[] = [];
+  const key = (n: string) => n.toLowerCase();
+  for (const want of desired.views) {
+    const found = actual.filter((a) => key(a.name) === key(want.name));
+    const have = found[0];
+    if (found.length > 1) {
+      actions.push({
+        kind: "manual",
+        name: want.name,
+        reason: `${found.length} views share this name: delete the extra ones in the Project UI`,
+      });
+    } else if (!have) {
+      actions.push({ kind: "create-view", view: want }, ...settingsToSet(want));
+    } else if (have.layout !== want.layout) {
+      actions.push({
+        kind: "manual",
+        name: want.name,
+        reason: `layout is ${have.layout}, desired ${want.layout}: change it in the Project UI`,
+      });
+    } else {
+      actions.push(...settingsToSet(want, have));
+    }
+  }
+  for (const [name, enabled] of Object.entries(desired.workflows)) {
+    const have = workflows.find((w) => key(w.name) === key(name));
+    if (!have) {
+      actions.push({
+        kind: "manual",
+        name: `workflow ${name}`,
+        reason: "not found on the Project",
+      });
+    } else if (have.enabled !== enabled) {
+      actions.push({
+        kind: "manual",
+        name: `workflow ${name}`,
+        reason: `${enabled ? "enable" : "disable"} it in Project settings → Workflows (no API)`,
+      });
+    }
+  }
+  return {
+    actions,
+    extraViews: actual
+      .filter((a) => !desired.views.some((v) => key(v.name) === key(a.name)))
+      .map((a) => a.name),
+    unsupported: desired.insights.map((i) => `Insights chart: ${i} (no API: create it by hand)`),
+  };
+}

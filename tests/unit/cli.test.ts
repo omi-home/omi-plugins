@@ -61,11 +61,19 @@ Commands:
                          Re-running with the same type and title completes the same Issue
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
-  project plan           Diff the Project's custom fields against config/github/project.yaml and list
-                         items whose Status their type does not use (status-transitions.yaml). Read-only;
-                         exits 1 while anything is pending, manual or drifting
-  project apply          Create missing fields and options (existing option IDs and item values kept);
-                         never deletes. Iteration fields and conflicts stay manual (exit 1)
+  github project init [--title <text>]
+                         Bootstrap this repo into OMI: find or create the Project (title, default: repo
+                         name), link it, write .omi/config.yaml and install templates/github/ into .github/
+                         where missing. Re-running changes nothing; never overwrites a file
+  github project plan    Diff the Project's custom fields (config/github/project.yaml), views, built-in
+                         workflows and Insights (views.yaml) and list items whose Status their type does
+                         not use (status-transitions.yaml). Read-only; exits 1 while anything is pending,
+                         manual or drifting. \`project plan\` is an alias
+  github project apply   Create missing fields, options and views (by name + layout); never deletes. View
+                         filters/grouping/sort, workflows, iteration fields and conflicts are printed as
+                         manual steps (exit 1); Insights as unsupported. \`project apply\` is an alias
+  github project validate
+                         The same diff as checks (extra fields/views and Insights: warnings)
   github repo plan       Diff the repository's labels, main/develop protection and merge methods against
                          config/github/repository.yaml. Read-only; exits 1 while anything differs
   github repo apply --approved-plan <file>

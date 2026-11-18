@@ -1,0 +1,39 @@
+# Desired views, built-in workflows and Insights of the Project (DevTask-0031 #63).
+# `omi github project plan|apply|validate` read this next to project.yaml.
+#
+# What the API can do (Spike-0005 #8, verified again 2026-11-18 on Project #2):
+# - create a view by name + layout (createProjectV2View). It silently creates duplicates, so apply
+#   reads the existing views first and only creates a missing name;
+# - read a view's filter, grouping, board column field and sort — but NOT set them. A difference
+#   is printed as a manual instruction for the Project UI;
+# - read built-in workflows (enabled or not) — but not toggle them: a difference is manual;
+# - nothing for Insights charts: always reported as unsupported, create them by hand.
+# A setting left out is not managed. Views GitHub has but this file does not are reported, never
+# deleted. Field names must exist on the Project (project.yaml or GitHub built-ins).
+
+views:
+  - { name: WBS, layout: table, filter: "" }
+  - { name: Backlog, layout: table, filter: "status:Backlog,Ready", sort: "Priority asc" }
+  - { name: Sprint Board, layout: board, filter: "sprint:@current", columns: Status }
+  - {
+      name: Review & QA,
+      layout: board,
+      filter: 'status:"In Review","In QA",Rework',
+      columns: Status,
+    }
+  - { name: Blockers/Risks, layout: table, filter: 'status:Blocked,"Waiting PO"', groupBy: Status }
+  - { name: Release Roadmap, layout: roadmap }
+  - { name: Kanban, layout: board, filter: "-status:Cancelled", columns: Status }
+
+# Built-in workflows. OMI moves Status itself (`omi task start|finalize`, `omi pr create`), so
+# "Item closed" stays off: it would mark a not-planned close as Done instead of Cancelled.
+workflows:
+  Auto-add sub-issues to project: true
+  Item closed: false
+  Pull request merged: false
+
+# No API: printed as unsupported with these instructions.
+insights:
+  - "Status over time (stacked area), filter: -status:Cancelled"
+  - "Open items by Priority (bar), filter: is:open"
+  - 'Blocked and Waiting PO by Assignees (bar), filter: status:Blocked,"Waiting PO"'

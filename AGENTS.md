@@ -31,6 +31,7 @@ node bin/omi doctor  # kiểm tra môi trường, AGENTS.md, .omi/config.yaml, G
 node bin/omi ticket validate <n>  # gate ticket-first cho Issue #n (chỉ đọc); `task start`/`task status` tạo/xem run + worktree
 node bin/omi pr create <n> --body-file <f>  # push branch task, tạo/dùng lại PR → develop, kiểm base/head/Issue chính, In Review
 node bin/omi issue create --type <t> --parent <n> --title <text> --body-file <f>  # tạo Issue đánh số theo type, gắn sub-issue + Project (chạy lại an toàn)
+node bin/omi github project init|plan|apply|validate  # bootstrap Project + config + template; field/view/workflow desired-state (skill omi-start)
 ```
 
 - Runtime TypeScript chạy trực tiếp bằng Node ≥ 22.18 (type stripping) — không có bước build. Chỉ dùng cú pháp TS xoá được (`erasableSyntaxOnly`), import kèm đuôi `.ts`.

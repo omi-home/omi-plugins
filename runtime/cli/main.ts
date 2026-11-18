@@ -5,15 +5,22 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { readSection, writeSection } from "../adapters/github/context.ts";
 import { createIssue } from "../adapters/github/issue.ts";
-import { projectApply, projectPlan, type StatusDrift } from "../adapters/github/project-fields.ts";
+import {
+  type ProjectAction,
+  type ProjectPlan,
+  projectApply,
+  projectPlan,
+  projectValidate,
+  type StatusDrift,
+} from "../adapters/github/project-fields.ts";
 import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/github/repo.ts";
 import { IssueType } from "../core/contracts.ts";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
-import type { FieldAction } from "../core/project-config.ts";
 import type { RepoAction } from "../core/repo-config.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { type Check, doctor } from "./doctor.ts";
+import { projectInit } from "./init.ts";
 import {
   prCreate,
   prMerge,
@@ -79,11 +86,19 @@ Commands:
                          Re-running with the same type and title completes the same Issue
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
-  project plan           Diff the Project's custom fields against config/github/project.yaml and list
-                         items whose Status their type does not use (status-transitions.yaml). Read-only;
-                         exits 1 while anything is pending, manual or drifting
-  project apply          Create missing fields and options (existing option IDs and item values kept);
-                         never deletes. Iteration fields and conflicts stay manual (exit 1)
+  github project init [--title <text>]
+                         Bootstrap this repo into OMI: find or create the Project (title, default: repo
+                         name), link it, write .omi/config.yaml and install templates/github/ into .github/
+                         where missing. Re-running changes nothing; never overwrites a file
+  github project plan    Diff the Project's custom fields (config/github/project.yaml), views, built-in
+                         workflows and Insights (views.yaml) and list items whose Status their type does
+                         not use (status-transitions.yaml). Read-only; exits 1 while anything is pending,
+                         manual or drifting. \`project plan\` is an alias
+  github project apply   Create missing fields, options and views (by name + layout); never deletes. View
+                         filters/grouping/sort, workflows, iteration fields and conflicts are printed as
+                         manual steps (exit 1); Insights as unsupported. \`project apply\` is an alias
+  github project validate
+                         The same diff as checks (extra fields/views and Insights: warnings)
   github repo plan       Diff the repository's labels, main/develop protection and merge methods against
                          config/github/repository.yaml. Read-only; exits 1 while anything differs
   github repo apply --approved-plan <file>
@@ -157,22 +172,30 @@ const NESTED = new Set([
   "pr merge",
 ]);
 const GITHUB_REPO = new Set(["plan", "apply", "validate"]);
+const GITHUB_PROJECT = new Set(["init", "plan", "apply", "validate"]);
 /** Subcommands without an issue: <group> <action>. */
 const REPO_WIDE = new Set(["cleanup scan", "cleanup apply", "project plan", "project apply"]);
 
-const describe = (a: FieldAction) =>
+const describe = (a: ProjectAction) =>
   a.kind === "create"
     ? `create field ${a.field.name} (${a.field.type})`
     : a.kind === "update-options"
       ? `field ${a.name}: ${[...a.add.map((o) => `+${o}`), ...a.change.map((o) => `~${o}`)].join(", ")}`
-      : `${a.name}: ${a.reason}`;
+      : a.kind === "create-view"
+        ? `create view ${a.view.name} (${a.view.layout})`
+        : `${a.name}: ${a.reason}`;
 
-const humanPlan = (actions: FieldAction[], extra: string[], drift: StatusDrift[]) => [
-  ...actions.map((a) => `${a.kind === "manual" ? "manual " : "pending"}   ${describe(a)}`),
-  ...(actions.length ? [] : ["fields    in the desired state"]),
-  ...extra.map((e) => `extra     ${e} (not managed: kept)`),
-  ...drift.map((d) => `drift     ${d.issue} ${d.status ?? "unset"}: ${d.reason}`),
-];
+const humanPlan = (p: Omit<ProjectPlan, "drift">, drift: StatusDrift[]) => {
+  const actions = [...p.actions, ...p.views.actions];
+  return [
+    ...actions.map((a) => `${a.kind === "manual" ? "manual " : "pending"}   ${describe(a)}`),
+    ...(actions.length ? [] : ["project   in the desired state"]),
+    ...p.extra.map((e) => `extra     ${e} (not managed: kept)`),
+    ...p.views.extraViews.map((v) => `extra     view ${v} (not managed: kept)`),
+    ...p.views.unsupported.map((u) => `unsupported ${u}`),
+    ...drift.map((d) => `drift     ${d.issue} ${d.status ?? "unset"}: ${d.reason}`),
+  ];
+};
 
 const repoPrefix = (a: RepoAction) =>
   a.kind === "manual" || a.kind === "unsupported" ? a.kind.padEnd(11) : "pending    ";
@@ -240,6 +263,9 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       }
     } else if (command === "github" && rest[0] === "repo" && GITHUB_REPO.has(rest[1] ?? "")) {
       command = `github repo ${rest[1]}`;
+      rest = rest.slice(2);
+    } else if (command === "github" && rest[0] === "project" && GITHUB_PROJECT.has(rest[1] ?? "")) {
+      command = `github project ${rest[1]}`;
       rest = rest.slice(2);
     } else if (
       ["ticket", "task", "pr", "cleanup", "issue", "project", "github"].includes(command)
@@ -411,20 +437,41 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         ];
         return ok(r, lines(human), r.outcomes.some((o) => o.error) ? EXIT.failed : EXIT.ok);
       }
-      case "project plan": {
+      case "project plan":
+      case "github project plan": {
         const r = projectPlan(repo(cwd).config);
         // Like a check: 1 while anything is pending, manual or drifting, so scripts can gate on it.
-        const clean = !r.actions.length && !r.drift.length;
-        return ok(r, lines(humanPlan(r.actions, r.extra, r.drift)), clean ? EXIT.ok : EXIT.failed);
+        const clean = !r.actions.length && !r.views.actions.length && !r.drift.length;
+        return ok(r, lines(humanPlan(r, r.drift)), clean ? EXIT.ok : EXIT.failed);
       }
-      case "project apply": {
+      case "project apply":
+      case "github project apply": {
         const r = projectApply(repo(cwd).config);
         const human = [
           ...r.applied.map((a) => `applied   ${describe(a)}`),
           ...(r.applied.length ? [] : ["applied   nothing (already in the desired state)"]),
-          ...humanPlan(r.plan.actions, r.plan.extra, []),
+          ...humanPlan(r.plan, []),
         ];
-        return ok(r, lines(human), r.plan.actions.length ? EXIT.failed : EXIT.ok);
+        const left = r.plan.actions.length + r.plan.views.actions.length;
+        return ok(r, lines(human), left ? EXIT.failed : EXIT.ok);
+      }
+      case "github project validate": {
+        const checks = projectValidate(repo(cwd).config);
+        return ok({ checks }, humanChecks(checks), checksExit(checks));
+      }
+      case "github project init": {
+        const r = projectInit({ cwd, title: values.title });
+        const human = [
+          `project   #${r.project.number} ${r.project.title}${r.project.created ? " (created)" : ""}`,
+          `repo      ${r.owner}/${r.repo}${r.linked ? " (linked)" : ""}`,
+          `config    ${r.config === "created" ? "created" : "kept"} .omi/config.yaml`,
+          ...r.templates.copied.map((f) => `template  ${f}`),
+          ...(r.templates.kept.length
+            ? [`template  ${r.templates.kept.length} kept (already present)`]
+            : []),
+          "next      github repo plan, github project apply (see skills/omi-start)",
+        ];
+        return ok(r, lines(human));
       }
       case "github repo plan": {
         const r = repoPlan(repo(cwd).config);
