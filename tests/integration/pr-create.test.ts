@@ -11,6 +11,8 @@ import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { type PullRequest, prBody, validatePr } from "../../runtime/adapters/github/pr.ts";
 import type { Ticket } from "../../runtime/adapters/github/ticket.ts";
 import { prCreate, prMerge, prValidate, taskStart, taskStatus } from "../../runtime/cli/task.ts";
+import type { IssueType } from "../../runtime/core/contracts.ts";
+import { titleType } from "../../runtime/core/hierarchy.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -165,9 +167,9 @@ function fakeGh(f: Fake) {
       }
       const ticket: Ticket = {
         number: n,
-        title: `Task ${n}`,
+        title: `${titleType(type as IssueType)}-${String(n).padStart(4, "0")}-Task ${n}`,
         state: "OPEN",
-        body: "## Acceptance\n- [ ] done",
+        body: "## Objective\nx\n\n## Acceptance\n- [ ] done",
         issueType: { name: "Task" },
         labels: { totalCount: 1, nodes: [{ name: `type:${type}` }] },
         parent: null,
@@ -220,7 +222,7 @@ test("create: pushes the owned branch, opens one PR → develop with marker + Cl
   const [c] = s.gh.created;
   assert.equal(c?.base, "develop");
   assert.equal(c?.head, s.branch);
-  assert.equal(c?.title, "Task 5");
+  assert.equal(c?.title, "DevTask-0005-Task 5");
   assert.match(c?.body ?? "", /<!-- omi:pr-primary=o\/repo#5 -->[\s\S]*Closes #5/);
   assert.equal(
     git(s.root, "ls-remote", "origin", s.branch).split("\t")[0],

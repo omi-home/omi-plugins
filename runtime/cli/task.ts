@@ -48,6 +48,7 @@ import {
   type WorkflowEventType,
 } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
+import { hierarchyChecks, type Link, loadHierarchy, titleCheck } from "../core/hierarchy.ts";
 import { PRE_MERGE, PROJECT_STATUS, transition } from "../core/workflow-engine/fsm.ts";
 import { planWorkflow, type WorkflowPlan } from "../core/workflow-engine/plan.ts";
 import {
@@ -94,7 +95,6 @@ const EXECUTABLE: readonly IssueType[] = [
   "devops-task",
   "documentation-task",
   "spike",
-  "bug",
 ];
 const START_LEASE_MS = 10 * 60_000;
 /** A whole review loop may run several agents back to back. */
@@ -122,19 +122,57 @@ const typeOf = (t: Ticket) => {
   return labels.length === 1 ? IssueType.safeParse(labels[0]).data : undefined;
 };
 
-/** Ticket gates plus "may this Issue own a worktree" (spec §6: work happens on terminal tasks). */
-export function startGates(t: Ticket, config: OmiConfig): Check[] {
+/**
+ * Parent chain of `t` inside the configured repository, nearest first. Stops at a repeated
+ * Issue (a cycle, kept so the check reports it) or one level past the maximum depth.
+ * ponytail: one GraphQL call per ancestor; one nested query if deep trees get slow.
+ */
+function ancestors(config: OmiConfig, t: Ticket, gh: GhRunner, maxDepth: number): Link[] {
+  const repoName = `${config.github.owner}/${config.github.repo}`.toLowerCase();
+  const out: Link[] = [];
+  let p = t.parent;
+  while (p && p.repository.nameWithOwner.toLowerCase() === repoName && out.length < maxDepth) {
+    const n = p.number;
+    const seen = n === t.number || out.some((l) => l.number === n);
+    const parent = seen ? undefined : fetchTicket(config, n, gh);
+    out.push({ number: n, type: parent && typeOf(parent) });
+    p = parent?.parent ?? null;
+  }
+  return out;
+}
+
+/**
+ * Ticket gates, Definition of Ready (Objective, title ↔ `type:*`, hierarchy) and "may this Issue
+ * own a worktree" (spec §6: work happens on terminal tasks).
+ */
+export function startGates(t: Ticket, config: OmiConfig, gh: GhRunner): Check[] {
   const checks = validateTicket(t, config);
+  checks.push(
+    /^#{1,6}\s+(objective|mục tiêu)\b/im.test(t.body)
+      ? { name: "objective", status: "pass", detail: "objective present" }
+      : {
+          name: "objective",
+          status: "fail",
+          code: "TICKET_INVALID",
+          detail: "no Objective section",
+        },
+  );
   const type = typeOf(t);
   if (type) {
+    const h = loadHierarchy();
     checks.push(
+      titleCheck(t.title, type),
+      ...hierarchyChecks({ number: t.number, type }, ancestors(config, t, gh, h.maxDepth), h),
       EXECUTABLE.includes(type)
         ? { name: "executable", status: "pass", detail: type }
         : {
             name: "executable",
             status: "fail",
             code: "POLICY_VIOLATION",
-            detail: `${type} issues do not get a task branch/worktree`,
+            detail:
+              type === "bug"
+                ? "a Bug is fixed through a child DevTask or TestTask: create one and start it"
+                : `${type} issues do not get a task branch/worktree`,
           },
     );
   }
@@ -144,7 +182,8 @@ export function startGates(t: Ticket, config: OmiConfig): Check[] {
 export function ticketValidate(deps: TaskDeps, issue: number): Check[] {
   // Read-only: no state database is opened or created.
   const { config } = repo(deps.cwd);
-  return startGates(fetchTicket(config, issue, deps.gh ?? spawnGh), config);
+  const gh = deps.gh ?? spawnGh;
+  return startGates(fetchTicket(config, issue, gh), config, gh);
 }
 
 function step(db: Db, r: RunRow, type: Exclude<WorkflowEventType, "TECHNICAL_FAILURE">): RunRow {
@@ -170,7 +209,7 @@ export function taskStart(deps: TaskDeps, issue: number): StartResult {
     acquireLease(db, { key: lease, holder: session, ttlMs: START_LEASE_MS });
     try {
       const ticket = fetchTicket(config, issue, gh);
-      const checks = startGates(ticket, config);
+      const checks = startGates(ticket, config, gh);
       const bad = checks.find((c) => c.status === "fail");
       if (bad) {
         throw new OmiError(bad.code ?? "TICKET_INVALID", `${bad.name}: ${bad.detail}`, {
@@ -509,7 +548,7 @@ export function prCreate(
   if (release) {
     if (ticket.state !== "OPEN") throw new OmiError("TICKET_INVALID", `${primary} is closed`);
   } else {
-    const bad = startGates(ticket, config).find((c) => c.status === "fail");
+    const bad = startGates(ticket, config, gh).find((c) => c.status === "fail");
     if (bad) throw new OmiError(bad.code ?? "TICKET_INVALID", `${bad.name}: ${bad.detail}`);
     const db = openState(statePath(deps.cwd));
     let worktree: string | undefined;
@@ -610,7 +649,7 @@ function taskPr(deps: TaskDeps, issue: number): TaskPr {
   if (typeOf(ticket) === "release") {
     throw new OmiError("POLICY_VIOLATION", "release PRs (develop → main) are merged by the PO");
   }
-  const bad = startGates(ticket, config).find((c) => c.status === "fail");
+  const bad = startGates(ticket, config, gh).find((c) => c.status === "fail");
   if (bad) throw new OmiError(bad.code ?? "TICKET_INVALID", `${bad.name}: ${bad.detail}`);
   const db = openState(statePath(deps.cwd));
   let head: string | undefined;

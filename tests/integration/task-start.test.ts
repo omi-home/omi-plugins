@@ -99,9 +99,9 @@ function fakeGh(issues: Record<number, FakeIssue>, opts: { failMutations?: numbe
         };
       const ticket: Ticket = {
         number: n,
-        title: `Task ${n}`,
+        title: `DevTask-${String(n).padStart(4, "0")}-Task ${n}`,
         state: "OPEN",
-        body: "## Acceptance\n- [ ] done",
+        body: "## Objective\nx\n\n## Acceptance\n- [ ] done",
         issueType: { name: "Task" },
         labels: { totalCount: 1, nodes: [{ name: "type:dev-task" }] },
         parent: parent && {
@@ -188,6 +188,7 @@ test("blocked dependency or non-executable type: nothing is created", () => {
     6: {
       status: "Ready",
       ticket: {
+        title: "Feature-0006-Task 6",
         labels: { totalCount: 1, nodes: [{ name: "type:feature" }] },
         issueType: { name: "Feature" },
       },

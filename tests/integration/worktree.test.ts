@@ -55,9 +55,10 @@ const code = (fn: () => unknown) => {
 test("branchName: prefix by type, ASCII slug", () => {
   assert.equal(
     branchName("dev-task", 7, "Fix  Login — Đăng nhập!"),
-    "feature/7-fix-login-ang-nhap",
+    "feature/7-fix-login-dang-nhap",
   );
-  assert.equal(branchName("bug", 8, "x"), "bugfix/8-x");
+  // The title's <IssueType>-<NNNN>- prefix is not repeated in the slug (#128).
+  assert.equal(branchName("dev-task", 8, "DevTask-0045-Ma trận đầu"), "feature/8-ma-tran-dau");
   assert.equal(branchName("documentation-task", 9, "!!!"), "docs/9");
   assert.ok(branchName("spike", 1, "a".repeat(80)).length <= "feature/1-".length + 40);
 });

@@ -20,6 +20,7 @@ import { classify } from "../adapters/github/client.ts";
 import type { OmiConfig } from "../core/config.ts";
 import { type IssueType, parseContract, SCHEMA_VERSION } from "../core/contracts.ts";
 import { type ErrorCode, OmiError } from "../core/errors/errors.ts";
+import { TITLE_PREFIX } from "../core/hierarchy.ts";
 import type { Db } from "../persistence/db.ts";
 import {
   acquireLease,
@@ -51,15 +52,19 @@ const MARKER = "omi-owner.json";
 const LEASE_MS = 120_000;
 
 const PREFIX: Partial<Record<IssueType, string>> = {
-  bug: "bugfix",
   "documentation-task": "docs",
   "test-task": "test",
   "devops-task": "chore",
 };
 
-/** `<prefix>/<issue>-<slug>` (spec §7); slug is ASCII, at most 40 chars. */
+/**
+ * `<prefix>/<issue>-<slug>` (spec §7); slug is ASCII, at most 40 chars, without the title's
+ * `<IssueType>-<NNNN>-` prefix (already in the issue number).
+ */
 export function branchName(type: IssueType, issue: number, title: string): string {
   const slug = title
+    .replace(TITLE_PREFIX, "")
+    .replace(/[đĐ]/g, "d") // NFKD does not decompose đ
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")
     .toLowerCase()
