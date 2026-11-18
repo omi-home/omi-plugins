@@ -9,7 +9,7 @@ Plugin Claude Code (`omi-engineering`) và runtime cục bộ xác định cho q
 | Thành phần | Hỗ trợ | Kiểm chứng |
 |---|---|---|
 | Node | ≥ 22.18 (type stripping) | CI: 22.18.0 và 24 |
-| OS | Linux, macOS, Windows | CI cả 3; WSL chưa kiểm chứng |
+| OS | Linux, Windows | CI: ubuntu-latest, windows-latest; **macOS chưa kiểm chứng**, WSL chưa kiểm chứng |
 | Claude Code | ≥ 2.1.277 (đọc AGENTS.md native) | 2.1.325 |
 | Git, `gh` | bản hiện hành; `gh` đã `auth login` với scope `repo`, `project` | git 2.55, gh 2.100 |
 | GitHub | Free/Team; repo public khuyến nghị — private trên Free không có bảo vệ branch phía server | org `omi-home`, gói Free |
