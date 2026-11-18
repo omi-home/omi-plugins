@@ -148,9 +148,13 @@ function ancestors(config: OmiConfig, t: Ticket, gh: GhRunner, maxDepth: number)
 /**
  * Definition of Ready (#128): Objective section, title ↔ `type:*`, required sections of the type's Issue Form (#130), hierarchy. Checked when work
  * starts (`task start`, `ticket validate`), not again at PR time: a run already under way keeps
- * the rules it started with.
+ * the rules it started with. Also returns the parent's type, read with the chain (branch prefix).
  */
-function readyGates(t: Ticket, config: OmiConfig, gh: GhRunner): Check[] {
+function readyGates(
+  t: Ticket,
+  config: OmiConfig,
+  gh: GhRunner,
+): { checks: Check[]; parent?: IssueType } {
   const checks: Check[] = [
     /^#{1,6}\s+\W*(objectives?|mục tiêu)/imu.test(t.body.normalize("NFC"))
       ? { name: "objective", status: "pass", detail: "objective present" }
@@ -162,13 +166,14 @@ function readyGates(t: Ticket, config: OmiConfig, gh: GhRunner): Check[] {
         },
   ];
   const type = typeOf(t);
-  if (!type) return checks; // the type gate reports it
+  if (!type) return { checks }; // the type gate reports it
   const h = loadHierarchy();
   checks.push(titleCheck(t.title, type), sectionsCheck(t.body, type));
+  let parent: IssueType | undefined;
   try {
-    checks.push(
-      ...hierarchyChecks({ number: t.number, type }, ancestors(config, t, gh, h.maxDepth), h),
-    );
+    const chain = ancestors(config, t, gh, h.maxDepth);
+    parent = chain[0]?.type;
+    checks.push(...hierarchyChecks({ number: t.number, type }, chain, h));
   } catch (e) {
     const err = e instanceof OmiError ? e : new OmiError("INTERNAL", (e as Error).message);
     checks.push({
@@ -178,7 +183,7 @@ function readyGates(t: Ticket, config: OmiConfig, gh: GhRunner): Check[] {
       detail: `cannot read the parent chain: ${err.message}`,
     });
   }
-  return checks;
+  return { checks, parent };
 }
 
 /** Ticket gates plus "may this Issue own a worktree" (spec §6: work happens on terminal tasks). */
@@ -208,7 +213,7 @@ export function ticketValidate(deps: TaskDeps, issue: number): Check[] {
   const { config } = repo(deps.cwd);
   const gh = deps.gh ?? spawnGh;
   const t = fetchTicket(config, issue, gh);
-  return [...startGates(t, config), ...readyGates(t, config, gh)];
+  return [...startGates(t, config), ...readyGates(t, config, gh).checks];
 }
 
 function step(db: Db, r: RunRow, type: Exclude<WorkflowEventType, "TECHNICAL_FAILURE">): RunRow {
@@ -234,7 +239,8 @@ export function taskStart(deps: TaskDeps, issue: number): StartResult {
     acquireLease(db, { key: lease, holder: session, ttlMs: START_LEASE_MS });
     try {
       const ticket = fetchTicket(config, issue, gh);
-      const checks = [...startGates(ticket, config), ...readyGates(ticket, config, gh)];
+      const ready = readyGates(ticket, config, gh);
+      const checks = [...startGates(ticket, config), ...ready.checks];
       const bad = checks.find((c) => c.status === "fail");
       if (bad) {
         throw new OmiError(bad.code ?? "TICKET_INVALID", `${bad.name}: ${bad.detail}`, {
@@ -249,7 +255,8 @@ export function taskStart(deps: TaskDeps, issue: number): StartResult {
       if (run.state === "CREATED") run = step(db, run, "TICKET_VALID");
 
       // A resumed task keeps its branch even if the Issue title changed since.
-      const branch = ownedRefs(db, run.id, "branch")[0] ?? branchName(type, issue, ticket.title);
+      const branch =
+        ownedRefs(db, run.id, "branch")[0] ?? branchName(type, issue, ticket.title, ready.parent);
       const workspace = ensureWorktree(db, {
         repoRoot: root,
         config,

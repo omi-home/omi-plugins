@@ -59,9 +59,15 @@ const PREFIX: Partial<Record<IssueType, string>> = {
 
 /**
  * `<prefix>/<issue>-<slug>` (spec §7); slug is ASCII, at most 40 chars, without the title's
- * `<IssueType>-<NNNN>-` prefix (already in the issue number).
+ * `<IssueType>-<NNNN>-` prefix (already in the issue number). A task under a Bug is the Bug
+ * Resolution workflow: `bugfix/` (PO 2026-11-18, #132).
  */
-export function branchName(type: IssueType, issue: number, title: string): string {
+export function branchName(
+  type: IssueType,
+  issue: number,
+  title: string,
+  parent?: IssueType,
+): string {
   const slug = title
     .replace(new RegExp(`^${titleType(type)}-\\d{4}-`), "")
     .replace(/[đĐ]/g, "d") // NFKD does not decompose đ
@@ -71,7 +77,8 @@ export function branchName(type: IssueType, issue: number, title: string): strin
     .replace(/[^a-z0-9]+/g, "-")
     .slice(0, 40)
     .replace(/^-+|-+$/g, "");
-  return `${PREFIX[type] ?? "feature"}/${issue}${slug ? `-${slug}` : ""}`;
+  const prefix = parent === "bug" ? "bugfix" : (PREFIX[type] ?? "feature");
+  return `${prefix}/${issue}${slug ? `-${slug}` : ""}`;
 }
 
 export function git(args: string[], cwd: string): string {

@@ -61,6 +61,11 @@ test("branchName: prefix by type, ASCII slug", () => {
   assert.equal(branchName("dev-task", 8, "DevTask-0045-Ma trận đầu"), "feature/8-ma-tran-dau");
   assert.equal(branchName("dev-task", 8, "Roadmap-2026-cleanup"), "feature/8-roadmap-2026-cleanup");
   assert.equal(branchName("documentation-task", 9, "!!!"), "docs/9");
+  // Under a Bug: bugfix/ for any task type; any other parent keeps the type's prefix.
+  assert.equal(branchName("dev-task", 10, "DevTask-0050-Sửa lỗi", "bug"), "bugfix/10-sua-loi");
+  assert.equal(branchName("test-task", 11, "Repro", "bug"), "bugfix/11-repro");
+  assert.equal(branchName("dev-task", 12, "Việc", "feature"), "feature/12-viec");
+  assert.equal(branchName("test-task", 13, "Thử", "feature"), "test/13-thu");
   assert.ok(branchName("spike", 1, "a".repeat(80)).length <= "feature/1-".length + 40);
 });
 
