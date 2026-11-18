@@ -37,7 +37,12 @@ function fakeGh(issues: Record<number, I>, page = 2) {
               ],
       },
       closedByPullRequestsReferences: {
-        nodes: i.pr ? [{ number: i.pr, url: `https://x/pull/${i.pr}`, isDraft: false }] : [],
+        nodes: i.pr
+          ? [
+              { number: i.pr, url: `https://x/pull/${i.pr}`, isDraft: false, state: "OPEN" },
+              { number: i.pr + 1, url: "merged", isDraft: false, state: "MERGED" },
+            ]
+          : [],
       },
       subIssuesSummary: { total: i.kids?.length ?? 0 },
     };
@@ -121,4 +126,21 @@ test("tree: no permission to read the Project is an auth error", () => {
     () => readTree(config, 64, run),
     (e: OmiError) => e.code === "GITHUB_AUTH",
   );
+});
+
+test("status groups: unknown and unset Status are labelled, never a raw group", async () => {
+  const { statusKey } = await import("../../runtime/cli/status.ts");
+  const base = {
+    number: 1,
+    title: "",
+    state: "OPEN" as const,
+    type: null,
+    parent: null,
+    depth: 1,
+    prs: [],
+  };
+  assert.equal(statusKey({ ...base, status: "In Review", inProject: true }), "In Review");
+  assert.equal(statusKey({ ...base, status: "Todo", inProject: true }), "unknown Status 'Todo'");
+  assert.equal(statusKey({ ...base, status: null, inProject: true }), "no Status");
+  assert.equal(statusKey({ ...base, status: null, inProject: false }), "not in Project");
 });

@@ -23,7 +23,7 @@ import { redact, redactDeep } from "../reporting/redact.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { type Check, doctor } from "./doctor.ts";
 import { projectInit } from "./init.ts";
-import { NOT_IN_PROJECT, status } from "./status.ts";
+import { NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "./status.ts";
 import {
   prCreate,
   prMerge,
@@ -325,16 +325,17 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       case "status": {
         const milestone = values.milestone === undefined ? undefined : issueArg(values.milestone);
         const r = status({ cwd, milestone });
-        const order = [...ProjectStatus.options, "no Status", NOT_IN_PROJECT];
-        const keys = Object.keys(r.byStatus).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+        const order: string[] = [...ProjectStatus.options, NO_STATUS, NOT_IN_PROJECT];
+        const rank = (k: string) => (order.includes(k) ? order.indexOf(k) : order.length);
+        const keys = Object.keys(r.byStatus).sort((a, b) => rank(a) - rank(b));
+        const counted: string[] = [ProjectStatus.enum.Done, ProjectStatus.enum.Cancelled];
         const fail = (s: { ok: false; error: { code: string; message: string } }) =>
           `unavailable (${s.error.code}: ${s.error.message})`;
         const human = [
-          `milestone #${r.milestone.number} ${r.milestone.title} (${r.milestone.status ?? NOT_IN_PROJECT})`,
+          `milestone #${r.milestone.number} ${r.milestone.title} (${statusKey(r.milestone)})`,
           ...keys.flatMap((k) => {
             const all = r.byStatus[k] ?? [];
-            if (k === "Done" || k === "Cancelled")
-              return [`${k.padEnd(12)} ${all.length} issue(s)`];
+            if (counted.includes(k)) return [`${k.padEnd(12)} ${all.length} issue(s)`];
             return all.map(
               (i, n) =>
                 `${(n ? "" : k).padEnd(12)} ${"  ".repeat(i.depth - 1)}#${i.number} ${i.title}${i.state === "CLOSED" ? " (closed)" : ""}${i.prs.map((p) => ` PR #${p.number}${p.draft ? " (draft)" : ""}`).join("")}`,

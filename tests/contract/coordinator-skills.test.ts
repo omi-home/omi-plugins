@@ -6,9 +6,10 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { HELP } from "../../runtime/cli/main.ts";
 
-const SCRIPT_ONLY = ["omi-resume", "omi-status"];
+/** Skill → minimum number of `omi …` commands it must name. */
+const SCRIPT_ONLY = { "omi-resume": 6, "omi-status": 3 };
 
-for (const name of SCRIPT_ONLY) {
+for (const [name, min] of Object.entries(SCRIPT_ONLY)) {
   test(`skills/${name} has frontmatter and only calls omi commands`, () => {
     const text = readFileSync(new URL(`../../skills/${name}/SKILL.md`, import.meta.url), "utf8");
     const front = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? "";
@@ -18,7 +19,7 @@ for (const name of SCRIPT_ONLY) {
 
     const code = [...text.matchAll(/`([^`\n]+)`/g)].map((m) => m[1] as string);
     const commands = code.filter((c) => /^omi /.test(c));
-    assert.ok(commands.length > 0);
+    assert.ok(commands.length >= min, `${name}: ${commands.length} omi commands`);
     for (const c of commands) {
       // Every leading word is the command: `omi task status <n>` → "task status".
       const words = c.split(" ").slice(1);

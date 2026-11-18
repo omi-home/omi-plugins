@@ -14,7 +14,7 @@ const MAX_ISSUES = 500;
 const FIELDS = `number title state labels(first:20){ nodes{ name } }
   projectItems(first:20){ nodes{ project{ number owner{... on Organization{login} ... on User{login}} }
     fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} } }
-  closedByPullRequestsReferences(first:10,includeClosedPrs:false){ nodes{ number url isDraft } }
+  closedByPullRequestsReferences(first:10,includeClosedPrs:false){ nodes{ number url isDraft state } }
   subIssuesSummary{ total }`;
 
 const QUERY = `query($owner:String!,$repo:String!,$number:Int!,$after:String){
@@ -38,7 +38,14 @@ const Node = z.strictObject({
     ),
   }),
   closedByPullRequestsReferences: z.strictObject({
-    nodes: z.array(z.strictObject({ number: z.int(), url: z.string(), isDraft: z.boolean() })),
+    nodes: z.array(
+      z.strictObject({
+        number: z.int(),
+        url: z.string(),
+        isDraft: z.boolean(),
+        state: z.enum(["OPEN", "CLOSED", "MERGED"]),
+      }),
+    ),
   }),
   subIssuesSummary: z.strictObject({ total: z.int() }),
 });
@@ -88,11 +95,14 @@ export function readTree(config: OmiConfig, root: number, run: GhRunner = spawnG
       inProject: Boolean(item),
       parent,
       depth,
-      prs: n.closedByPullRequestsReferences.nodes.map((p) => ({
-        number: p.number,
-        url: p.url,
-        draft: p.isDraft,
-      })),
+      // includeClosedPrs:false still returns merged PRs.
+      prs: n.closedByPullRequestsReferences.nodes
+        .filter((p) => p.state === "OPEN")
+        .map((p) => ({
+          number: p.number,
+          url: p.url,
+          draft: p.isDraft,
+        })),
     };
   };
   const page = (number: number, after: string | null) => {
