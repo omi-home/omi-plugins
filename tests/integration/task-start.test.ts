@@ -335,3 +335,37 @@ test("unblock: only a BLOCKED run; FSM resumes it, one report names who and why 
     "INVALID_TRANSITION",
   );
 });
+
+test("Definition of Ready: real parent chain checked, wrong pair / title / Objective refused (#128)", () => {
+  const { root } = repo();
+  const typed = (type: string, title: string, parent?: number): FakeIssue => ({
+    status: "Ready",
+    parent,
+    ticket: {
+      title,
+      labels: { totalCount: 1, nodes: [{ name: `type:${type}` }] },
+      ...(title.includes("No objective") ? { body: "## Acceptance\n- [ ] done" } : {}),
+    },
+  });
+  const gh = fakeGh({
+    1: typed("milestone", "Milestone-0001-M"),
+    3: typed("feature", "Feature-0003-F", 1),
+    5: typed("dev-task", "DevTask-0005-T", 3),
+    6: typed("feature", "Feature-0006-Wrong", 5), // a Feature under a DevTask
+    7: typed("dev-task", "Feature-0007-Mislabelled", 3),
+    8: typed("dev-task", "DevTask-0008-No objective", 3),
+    9: typed("bug", "Bug-0009-B", 3),
+  });
+  const status = (n: number, name: string) =>
+    ticketValidate({ cwd: root, gh: gh.run }, n).find((c) => c.name === name)?.status;
+  assert.equal(status(5, "hierarchy"), "pass");
+  assert.equal(status(6, "hierarchy"), "fail");
+  assert.equal(status(7, "title"), "fail");
+  assert.equal(status(9, "executable"), "fail");
+  assert.equal(status(5, "objective"), "pass");
+  assert.equal(status(8, "objective"), "fail");
+  assert.equal(
+    code(() => taskStart({ cwd: root, gh: gh.run }, 7)),
+    "TICKET_INVALID",
+  );
+});

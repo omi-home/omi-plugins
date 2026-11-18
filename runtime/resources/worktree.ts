@@ -20,7 +20,7 @@ import { classify } from "../adapters/github/client.ts";
 import type { OmiConfig } from "../core/config.ts";
 import { type IssueType, parseContract, SCHEMA_VERSION } from "../core/contracts.ts";
 import { type ErrorCode, OmiError } from "../core/errors/errors.ts";
-import { TITLE_PREFIX } from "../core/hierarchy.ts";
+import { titleType } from "../core/hierarchy.ts";
 import type { Db } from "../persistence/db.ts";
 import {
   acquireLease,
@@ -63,7 +63,7 @@ const PREFIX: Partial<Record<IssueType, string>> = {
  */
 export function branchName(type: IssueType, issue: number, title: string): string {
   const slug = title
-    .replace(TITLE_PREFIX, "")
+    .replace(new RegExp(`^${titleType(type)}-\\d{4}-`), "")
     .replace(/[đĐ]/g, "d") // NFKD does not decompose đ
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")

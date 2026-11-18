@@ -11,14 +11,15 @@ export const Hierarchy = z.strictObject({
 });
 export type Hierarchy = z.infer<typeof Hierarchy>;
 
+let cached: Hierarchy | undefined;
 export const loadHierarchy = (): Hierarchy =>
-  parseContract(
+  (cached ??= parseContract(
     Hierarchy,
     parse(
       readFileSync(new URL("../../config/github/issue-hierarchy.yaml", import.meta.url), "utf8"),
     ),
     "issue hierarchy",
-  );
+  ));
 
 /** One issue of a parent chain, nearest first; `type` undefined when its label is invalid. */
 export interface Link {
@@ -56,6 +57,7 @@ export function hierarchyChecks(self: Link, ancestors: Link[], h: Hierarchy): Ch
 const PASCAL: Partial<Record<IssueType, string>> = {
   fr: "FunctionalRequirement",
   nfr: "NonFunctionalRequirement",
+  "devops-task": "DevOpsTask",
 };
 /** Title prefix of an OMI type: `dev-task` → `DevTask`. */
 export const titleType = (t: IssueType): string =>

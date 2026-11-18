@@ -142,13 +142,13 @@ function ancestors(config: OmiConfig, t: Ticket, gh: GhRunner, maxDepth: number)
 }
 
 /**
- * Ticket gates, Definition of Ready (Objective, title ↔ `type:*`, hierarchy) and "may this Issue
- * own a worktree" (spec §6: work happens on terminal tasks).
+ * Definition of Ready (#128): Objective section, title ↔ `type:*`, hierarchy. Checked when work
+ * starts (`task start`, `ticket validate`), not again at PR time: a run already under way keeps
+ * the rules it started with.
  */
-export function startGates(t: Ticket, config: OmiConfig, gh: GhRunner): Check[] {
-  const checks = validateTicket(t, config);
-  checks.push(
-    /^#{1,6}\s+(objective|mục tiêu)\b/im.test(t.body)
+function readyGates(t: Ticket, config: OmiConfig, gh: GhRunner): Check[] {
+  const checks: Check[] = [
+    /^#{1,6}\s+\W*(objectives?|mục tiêu)/imu.test(t.body.normalize("NFC"))
       ? { name: "objective", status: "pass", detail: "objective present" }
       : {
           name: "objective",
@@ -156,13 +156,33 @@ export function startGates(t: Ticket, config: OmiConfig, gh: GhRunner): Check[] 
           code: "TICKET_INVALID",
           detail: "no Objective section",
         },
-  );
+  ];
+  const type = typeOf(t);
+  if (!type) return checks; // the type gate reports it
+  const h = loadHierarchy();
+  checks.push(titleCheck(t.title, type));
+  try {
+    checks.push(
+      ...hierarchyChecks({ number: t.number, type }, ancestors(config, t, gh, h.maxDepth), h),
+    );
+  } catch (e) {
+    const err = e instanceof OmiError ? e : new OmiError("INTERNAL", (e as Error).message);
+    checks.push({
+      name: "hierarchy",
+      status: "fail",
+      code: err.code,
+      detail: `cannot read the parent chain: ${err.message}`,
+    });
+  }
+  return checks;
+}
+
+/** Ticket gates plus "may this Issue own a worktree" (spec §6: work happens on terminal tasks). */
+export function startGates(t: Ticket, config: OmiConfig): Check[] {
+  const checks = validateTicket(t, config);
   const type = typeOf(t);
   if (type) {
-    const h = loadHierarchy();
     checks.push(
-      titleCheck(t.title, type),
-      ...hierarchyChecks({ number: t.number, type }, ancestors(config, t, gh, h.maxDepth), h),
       EXECUTABLE.includes(type)
         ? { name: "executable", status: "pass", detail: type }
         : {
@@ -183,7 +203,8 @@ export function ticketValidate(deps: TaskDeps, issue: number): Check[] {
   // Read-only: no state database is opened or created.
   const { config } = repo(deps.cwd);
   const gh = deps.gh ?? spawnGh;
-  return startGates(fetchTicket(config, issue, gh), config, gh);
+  const t = fetchTicket(config, issue, gh);
+  return [...startGates(t, config), ...readyGates(t, config, gh)];
 }
 
 function step(db: Db, r: RunRow, type: Exclude<WorkflowEventType, "TECHNICAL_FAILURE">): RunRow {
@@ -209,7 +230,7 @@ export function taskStart(deps: TaskDeps, issue: number): StartResult {
     acquireLease(db, { key: lease, holder: session, ttlMs: START_LEASE_MS });
     try {
       const ticket = fetchTicket(config, issue, gh);
-      const checks = startGates(ticket, config, gh);
+      const checks = [...startGates(ticket, config), ...readyGates(ticket, config, gh)];
       const bad = checks.find((c) => c.status === "fail");
       if (bad) {
         throw new OmiError(bad.code ?? "TICKET_INVALID", `${bad.name}: ${bad.detail}`, {
@@ -548,7 +569,7 @@ export function prCreate(
   if (release) {
     if (ticket.state !== "OPEN") throw new OmiError("TICKET_INVALID", `${primary} is closed`);
   } else {
-    const bad = startGates(ticket, config, gh).find((c) => c.status === "fail");
+    const bad = startGates(ticket, config).find((c) => c.status === "fail");
     if (bad) throw new OmiError(bad.code ?? "TICKET_INVALID", `${bad.name}: ${bad.detail}`);
     const db = openState(statePath(deps.cwd));
     let worktree: string | undefined;
@@ -649,7 +670,7 @@ function taskPr(deps: TaskDeps, issue: number): TaskPr {
   if (typeOf(ticket) === "release") {
     throw new OmiError("POLICY_VIOLATION", "release PRs (develop → main) are merged by the PO");
   }
-  const bad = startGates(ticket, config, gh).find((c) => c.status === "fail");
+  const bad = startGates(ticket, config).find((c) => c.status === "fail");
   if (bad) throw new OmiError(bad.code ?? "TICKET_INVALID", `${bad.name}: ${bad.detail}`);
   const db = openState(statePath(deps.cwd));
   let head: string | undefined;
