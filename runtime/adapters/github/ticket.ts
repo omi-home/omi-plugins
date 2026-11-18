@@ -77,7 +77,7 @@ export function fetchTicket(config: OmiConfig, number: number, run: GhRunner = s
 }
 
 /** Native Issue Type expected for an OMI type (ADR-0001 D6); unlisted types have none. */
-const NATIVE_TYPE: Partial<Record<IssueType, string>> = {
+export const NATIVE_TYPE: Partial<Record<IssueType, string>> = {
   bug: "Bug",
   feature: "Feature",
   "dev-task": "Task",

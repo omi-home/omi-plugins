@@ -55,6 +55,12 @@ Commands:
                          Issue, tip, conflicts, CI, reviews, merge method, protection, risk
   pr merge <n>           Merge Issue #n's task PR when every gate passes (configured method, pinned
                          to the validated head); risk:high goes to Waiting PO and is not merged
+  issue create           Create an Issue: --type <OMI type> --title <text> --body-file <path>
+                         [--parent <n|owner/repo#n>]. Numbered <IssueType>-<NNNN>- per type, linked
+                         as a sub-issue (hierarchy matrix checked first), added to the Project.
+                         Re-running with the same type and title completes the same Issue
+  issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
+  issue section set <n> <name>   Replace (or append) that section with --body-file <path>
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
@@ -85,6 +91,14 @@ const matrix: [string[], number, string | null][] = [
   [["task", "start", "abc"], 2, "USAGE_INVALID"],
   [["ticket", "validate", "0"], 2, "USAGE_INVALID"],
   [["task", "start", "5", "extra"], 2, "USAGE_INVALID"],
+  [["issue"], 2, "USAGE_INVALID"],
+  [["issue", "create", "--title", "x"], 2, "USAGE_INVALID"], // no --type
+  [["issue", "create", "--type", "bogus", "--title", "x"], 2, "USAGE_INVALID"],
+  [["issue", "create", "--type", "dev-task", "--body-file", "nope.md"], 2, "USAGE_INVALID"],
+  [["issue", "section", "bogus", "5", "x"], 2, "USAGE_INVALID"],
+  [["issue", "section", "get", "5", "Bad Name"], 2, "USAGE_INVALID"],
+  [["issue", "section", "set", "5", "x", "--body-file", "nope.md"], 2, "USAGE_INVALID"],
+  [["issue", "section", "get", "5", "x"], 1, "CONFIG_INVALID"], // not a git repository
   [["task", "status", "#5"], 1, "CONFIG_INVALID"], // not a git repository
 ];
 

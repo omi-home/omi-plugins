@@ -25,17 +25,20 @@ export const loadHierarchy = (): Hierarchy =>
 export interface Link {
   number: number;
   type: IssueType | undefined;
+  /** `owner/repo` when the chain crosses repositories; numbers alone collide there. */
+  repo?: string;
 }
 
-/** `self` and its ancestors (nearest parent first) against the matrix, depth and cycles. */
+/** `self` (number 0: not created yet) and its ancestors (nearest parent first) against the matrix, depth and cycles. */
 export function hierarchyChecks(self: Link, ancestors: Link[], h: Hierarchy): Check[] {
   const chain = [self, ...ancestors];
-  const seen = new Set<number>();
+  const seen = new Set<string>();
   for (const l of chain) {
-    if (seen.has(l.number)) {
+    const key = `${l.repo?.toLowerCase() ?? ""}#${l.number}`;
+    if (seen.has(key)) {
       return [fail("hierarchy", `cycle: #${l.number} is its own ancestor`)];
     }
-    seen.add(l.number);
+    seen.add(key);
   }
   for (let i = 1; i < chain.length; i++) {
     const [child, parent] = [chain[i - 1] as Link, chain[i] as Link];
@@ -44,7 +47,7 @@ export function hierarchyChecks(self: Link, ancestors: Link[], h: Hierarchy): Ch
       return [
         fail(
           "hierarchy",
-          `#${child.number} (${child.type}) cannot be a child of #${parent.number} (${parent.type})`,
+          `${child.number ? `#${child.number}` : "the new Issue"} (${child.type}) cannot be a child of #${parent.number} (${parent.type})`,
         ),
       ];
     }

@@ -3,6 +3,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { writeSection } from "../adapters/github/context.ts";
+import { createIssue, readSection } from "../adapters/github/issue.ts";
+import { IssueType } from "../core/contracts.ts";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
@@ -11,6 +14,7 @@ import {
   prCreate,
   prMerge,
   prValidate,
+  repo,
   taskAnalyze,
   taskFinalize,
   taskRun,
@@ -65,6 +69,12 @@ Commands:
                          Issue, tip, conflicts, CI, reviews, merge method, protection, risk
   pr merge <n>           Merge Issue #n's task PR when every gate passes (configured method, pinned
                          to the validated head); risk:high goes to Waiting PO and is not merged
+  issue create           Create an Issue: --type <OMI type> --title <text> --body-file <path>
+                         [--parent <n|owner/repo#n>]. Numbered <IssueType>-<NNNN>- per type, linked
+                         as a sub-issue (hierarchy matrix checked first), added to the Project.
+                         Re-running with the same type and title completes the same Issue
+  issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
+  issue section set <n> <name>   Replace (or append) that section with --body-file <path>
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
@@ -100,6 +110,21 @@ const issueArg = (a: string | undefined) => {
   const m = /^#?(\d+)$/.exec(a ?? "");
   if (!m || Number(m[1]) < 1) throw new OmiError("USAGE_INVALID", "expected an issue number");
   return Number(m[1]);
+};
+
+const sectionArg = (a: string | undefined) => {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(a ?? "")) {
+    throw new OmiError("USAGE_INVALID", "expected a section name (lowercase letters, digits, -)");
+  }
+  return a as string;
+};
+
+/** `59`, `#59` or `owner/repo#59`. */
+const parentArg = (a: string, home: { owner: string; repo: string }) => {
+  const m = /^(?:([\w.-]+)\/([\w.-]+))?#?(\d+)$/.exec(a);
+  if (!m || Number(m[3]) < 1)
+    throw new OmiError("USAGE_INVALID", "--parent expects n or owner/repo#n");
+  return { owner: m[1] ?? home.owner, repo: m[2] ?? home.repo, number: Number(m[3]) };
 };
 
 /** Subcommands: <group> <action> <issue>. */
@@ -158,10 +183,34 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
     ) {
       command = `${command} ${rest[0]}`;
       rest = rest.slice(1);
-    } else if (["ticket", "task", "pr", "cleanup"].includes(command)) {
+    } else if (command === "issue" && (rest[0] === "create" || rest[0] === "section")) {
+      command = rest[0] === "create" ? "issue create" : `issue section ${rest[1] ?? ""}`;
+      rest = rest.slice(rest[0] === "create" ? 1 : 2);
+      if (
+        command !== "issue create" &&
+        command !== "issue section get" &&
+        command !== "issue section set"
+      ) {
+        throw new OmiError("USAGE_INVALID", "expected issue section get|set <n> <name>");
+      }
+    } else if (["ticket", "task", "pr", "cleanup", "issue"].includes(command)) {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
     }
-    const issue = NESTED.has(command) ? issueArg(rest.shift()) : 0;
+    const issue =
+      NESTED.has(command) || command.startsWith("issue section") ? issueArg(rest.shift()) : 0;
+    const section = command.startsWith("issue section") ? sectionArg(rest.shift()) : "";
+    const bodyFile = (required: boolean) => {
+      const file = values["body-file"];
+      if (!file) {
+        if (required) throw new OmiError("USAGE_INVALID", "--body-file is required");
+        return undefined;
+      }
+      try {
+        return readFileSync(resolve(cwd, file), "utf8");
+      } catch {
+        throw new OmiError("USAGE_INVALID", `cannot read --body-file ${file}`);
+      }
+    };
     if (rest.length) throw new OmiError("USAGE_INVALID", `unexpected argument: ${rest[0]}`);
 
     switch (command) {
@@ -231,14 +280,51 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         ];
         return ok(r, lines(human));
       }
-      case "pr create": {
-        const file = values["body-file"];
-        let body: string | undefined;
-        try {
-          body = file ? readFileSync(resolve(cwd, file), "utf8") : undefined;
-        } catch {
-          throw new OmiError("USAGE_INVALID", `cannot read --body-file ${file}`);
+      case "issue create": {
+        const type = IssueType.safeParse(values.type).data;
+        if (!type) {
+          throw new OmiError(
+            "USAGE_INVALID",
+            `--type must be one of ${IssueType.options.join(", ")}`,
+          );
         }
+        if (!values.title) throw new OmiError("USAGE_INVALID", "--title is required");
+        const body = bodyFile(true) ?? "";
+        const { config } = repo(cwd);
+        const parent =
+          values.parent === undefined ? undefined : parentArg(values.parent, config.github);
+        const r = createIssue(config, {
+          type,
+          title: values.title,
+          body,
+          parent,
+        });
+        const human = [
+          `issue     ${r.url}${r.created ? "" : " (existing)"}`,
+          `title     ${r.title}`,
+          `changes   ${r.changes.join(", ") || "none"}`,
+        ];
+        return ok(r, lines(human));
+      }
+      case "issue section get": {
+        const text = readSection(repo(cwd).config, issue, section);
+        return ok(
+          { issue, section, text },
+          `${text}
+`,
+        );
+      }
+      case "issue section set": {
+        const text = bodyFile(true) ?? "";
+        writeSection(repo(cwd).config, issue, section, text);
+        return ok(
+          { issue, section },
+          `section   #${issue} ${section} updated
+`,
+        );
+      }
+      case "pr create": {
+        const body = bodyFile(false);
         const r = prCreate({ cwd, title: values.title, body }, issue);
         const human = [
           `pr        ${r.pr.url}${r.created ? "" : " (existing)"}`,
@@ -318,5 +404,7 @@ const parse = (args: string[]) =>
       "dry-run": { type: "boolean" },
       safe: { type: "boolean" },
       reason: { type: "string" },
+      type: { type: "string" },
+      parent: { type: "string" },
     },
   });
