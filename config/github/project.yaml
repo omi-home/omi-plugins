@@ -1,5 +1,5 @@
-# Desired state of the Project's custom fields (DevTask-0030 #62). `omi project plan` diffs it
-# against GitHub, `omi project apply` writes the difference. IDs are always read from GitHub,
+# Desired state of the Project's custom fields (DevTask-0030 #62). `omi github project plan` diffs it
+# against GitHub, `omi github project apply` writes the difference. IDs are always read from GitHub,
 # never written here. Apply only adds: missing fields and options are created, an option's
 # color/description is updated in place (its ID and item values are kept); fields and options
 # GitHub has but this file does not are reported, never deleted. Built-in fields (Title,

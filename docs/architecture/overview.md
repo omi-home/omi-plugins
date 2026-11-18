@@ -128,7 +128,7 @@ omi-plugins/
 │       ├── project.yaml                # custom fields + initial Status (`omi github project plan|apply`)
 │       ├── issue-types.yaml
 │       ├── issue-hierarchy.yaml        # allowed parent → child matrix
-│       ├── status-transitions.yaml     # Status lifecycle per type, drift in `omi project plan`
+│       ├── status-transitions.yaml     # Status lifecycle per type, drift in `omi github project plan`
 │       ├── views.yaml                  # views, built-in workflows, Insights (`omi github project`)
 │       └── repository.yaml             # labels, branch protection, merge methods (`omi github repo`)
 ├── schemas/

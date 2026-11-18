@@ -4,7 +4,7 @@
 #   - Blocked: from any status except Done/Cancelled, and back to any status of the type;
 #   - Cancelled: from any status except Done (reason + `resolution:*` label);
 #   - Done → In Progress: a deliberate reopen.
-# `omi project plan` reports items whose Status is outside their type's set. GitHub keeps no
+# `omi github project plan` reports items whose Status is outside their type's set. GitHub keeps no
 # Status history, so a wrong manual move between two allowed statuses is not detectable.
 # The CLI's own moves are checked against this file by tests (workflow projection + roll-up).
 

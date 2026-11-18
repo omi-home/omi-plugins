@@ -188,7 +188,10 @@ const describe = (a: ProjectAction) =>
 const humanPlan = (p: Omit<ProjectPlan, "drift">, drift: StatusDrift[]) => {
   const actions = [...p.actions, ...p.views.actions];
   return [
-    ...actions.map((a) => `${a.kind === "manual" ? "manual " : "pending"}   ${describe(a)}`),
+    ...actions.map(
+      (a) =>
+        `${a.kind === "manual" || a.kind === "workflow" ? "manual " : "pending"}   ${describe(a)}`,
+    ),
     ...(actions.length ? [] : ["project   in the desired state"]),
     ...p.extra.map((e) => `extra     ${e} (not managed: kept)`),
     ...p.views.extraViews.map((v) => `extra     view ${v} (not managed: kept)`),

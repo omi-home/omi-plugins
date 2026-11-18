@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { OmiConfig } from "../../core/config.ts";
 import type { ProjectStatus } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
-import { type GhRunner, graphql, spawnGh } from "./client.ts";
+import { classify, type GhRunner, graphql, spawnGh } from "./client.ts";
 
 export const OWNER_PROJECT = (body: string) =>
   `repositoryOwner(login:$owner){ ... on Organization{projectV2(number:$number){${body}}} ... on User{projectV2(number:$number){${body}}} }`;
@@ -276,4 +276,95 @@ export function markFinished(
     at = parent;
   }
   return changes;
+}
+
+// --- bootstrap: find or create the Project, link it to the repo (DevTask-0031 #63) ------------
+
+export interface ProjectRef {
+  id: string;
+  number: number;
+  title: string;
+}
+const Ref = z.strictObject({ id: z.string(), number: z.int(), title: z.string() });
+
+const BY_NUMBER = `query($owner:String!,$number:Int!){ ${OWNER_PROJECT("id number title")} }`;
+const ByNumber = z.strictObject({
+  repositoryOwner: z.strictObject({ projectV2: Ref.nullable().optional() }).nullable(),
+});
+
+/** The owner's Project #n, or null. */
+export const projectByNumber = (owner: string, number: number, run: GhRunner = spawnGh) =>
+  graphql(BY_NUMBER, { owner, number }, ByNumber, "project", run).repositoryOwner?.projectV2 ??
+  null;
+
+const owned = (body: string) =>
+  `repositoryOwner(login:$owner){ ... on Organization{${body}} ... on User{${body}} }`;
+// Search matches loosely; the exact title is compared below. Closed Projects are included.
+const BY_TITLE = `query($owner:String!,$q:String!){ ${owned(
+  "projectsV2(first:100,query:$q){ nodes{ id number title } }",
+)} }`;
+const ByTitle = z.strictObject({
+  repositoryOwner: z
+    .strictObject({ projectsV2: z.strictObject({ nodes: z.array(Ref) }).optional() })
+    .nullable(),
+});
+
+const byTitle = (owner: string, title: string, run: GhRunner) =>
+  (
+    graphql(BY_TITLE, { owner, q: title }, ByTitle, "projects", run).repositoryOwner?.projectsV2
+      ?.nodes ?? []
+  ).filter((p) => p.title === title);
+
+/**
+ * The owner's Project titled `title`, created (`gh project create`, Spike-0005) when none exists.
+ * Two with that title: refused (the caller must pick a number). Read → write → read back.
+ * ponytail: first 100 search hits; a match past that would be created again.
+ */
+export function findOrCreateProject(
+  owner: string,
+  title: string,
+  run: GhRunner = spawnGh,
+): ProjectRef & { created: boolean } {
+  const found = byTitle(owner, title, run);
+  if (found.length > 1) {
+    throw new OmiError(
+      "CONFIG_INVALID",
+      `${found.length} Projects of ${owner} are titled '${title}': set github.projectNumber in .omi/config.yaml`,
+    );
+  }
+  if (found[0]) return { ...found[0], created: false };
+  const r = run(["project", "create", "--owner", owner, "--title", title, "--format", "json"]);
+  if (r.status !== 0) throw classify(r, "create project");
+  const made = byTitle(owner, title, run)[0];
+  if (!made)
+    throw new OmiError("GITHUB_UNAVAILABLE", `created Project '${title}' not readable yet`);
+  return { ...made, created: true };
+}
+
+const LINKED = `query($owner:String!,$repo:String!){ repository(owner:$owner,name:$repo){
+  projectsV2(first:100){ nodes{ id } } } }`;
+const Linked = z.strictObject({
+  repository: z
+    .strictObject({
+      projectsV2: z.strictObject({ nodes: z.array(z.strictObject({ id: z.string() })) }),
+    })
+    .nullable(),
+});
+
+/** Links Project `p` to owner/repo unless it already is (by node ID). Returns whether it linked. */
+export function linkProject(owner: string, repo: string, p: ProjectRef, run: GhRunner = spawnGh) {
+  const r = graphql(LINKED, { owner, repo }, Linked, "linked projects", run).repository;
+  if (!r) throw new OmiError("CONFIG_INVALID", `repository ${owner}/${repo} not found`);
+  if (r.projectsV2.nodes.some((n) => n.id === p.id)) return false;
+  const out = run([
+    "project",
+    "link",
+    String(p.number),
+    "--owner",
+    owner,
+    "--repo",
+    `${owner}/${repo}`,
+  ]);
+  if (out.status !== 0) throw classify(out, "link project");
+  return true;
 }

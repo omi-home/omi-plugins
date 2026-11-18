@@ -359,8 +359,8 @@ export function createIssue(
     changes.push("project");
   }
   // Initial Status from the desired state (DevTask-0030 #62); set once, never overwritten.
-  // A Project without that option (`omi project apply` not run) leaves it unset, reported as
-  // drift by `omi project plan`, rather than failing an Issue that is already created.
+  // A Project without that option (`omi github project apply` not run) leaves it unset, reported as
+  // drift by `omi github project plan`, rather than failing an Issue that is already created.
   if (itemId && !item?.fieldValueByName?.name) {
     try {
       setItemStatus(statusField(c, run), itemId, loadProjectConfig().initialStatus, run);

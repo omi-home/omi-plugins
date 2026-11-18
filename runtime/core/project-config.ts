@@ -284,8 +284,10 @@ export type ActualView = { id: string } & Required<Omit<View, "layout">> & { lay
 
 export type ViewAction =
   | { kind: "create-view"; view: View }
-  /** UI-only change: a setting, a layout, a duplicate name or a built-in workflow. */
-  | { kind: "manual"; name: string; reason: string };
+  /** UI-only change: a setting, a layout, a name or a duplicate. */
+  | { kind: "manual"; name: string; reason: string }
+  /** A built-in workflow to toggle in Project settings (no API). */
+  | { kind: "workflow"; name: string; reason: string };
 
 export interface ViewPlan {
   actions: ViewAction[];
@@ -338,6 +340,12 @@ export function planViews(
       });
     } else if (!have) {
       actions.push({ kind: "create-view", view: want }, ...settingsToSet(want));
+    } else if (have.name !== want.name) {
+      actions.push({
+        kind: "manual",
+        name: want.name,
+        reason: `rename view '${have.name}' to '${want.name}' in the Project UI`,
+      });
     } else if (have.layout !== want.layout) {
       actions.push({
         kind: "manual",
@@ -352,13 +360,13 @@ export function planViews(
     const have = workflows.find((w) => key(w.name) === key(name));
     if (!have) {
       actions.push({
-        kind: "manual",
+        kind: "workflow",
         name: `workflow ${name}`,
         reason: "not found on the Project",
       });
     } else if (have.enabled !== enabled) {
       actions.push({
-        kind: "manual",
+        kind: "workflow",
         name: `workflow ${name}`,
         reason: `${enabled ? "enable" : "disable"} it in Project settings → Workflows (no API)`,
       });

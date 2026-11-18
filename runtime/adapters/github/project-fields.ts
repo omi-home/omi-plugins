@@ -247,7 +247,8 @@ export function projectPlan(
 }
 
 export type ProjectAction = FieldAction | ViewAction;
-const writable = (a: ProjectAction) => a.kind !== "manual";
+const writable = (a: ProjectAction) =>
+  a.kind === "create" || a.kind === "update-options" || a.kind === "create-view";
 
 /**
  * Writes the field and view diff: creates missing fields and views (by name + layout), writes
@@ -326,7 +327,7 @@ export function projectValidate(
         : a.kind === "create-view"
           ? `missing view ${a.view.name}`
           : `${a.name}: ${a.reason}`;
-  const isWorkflow = (a: ViewAction) => a.kind === "manual" && a.name.startsWith("workflow ");
+  const isWorkflow = (a: ViewAction) => a.kind === "workflow";
   const checks: Check[] = [
     check("fields", plan.actions.map(say), `${desired.fields.fields.length} in the desired state`),
     check(

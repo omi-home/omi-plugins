@@ -300,7 +300,7 @@ test("views: apply creates missing ones by name + layout once; settings stay man
     "extra view never deleted",
   );
   assert.deepEqual(
-    r.plan.views.actions.map((a) => (a.kind === "manual" ? a.reason : a.kind)),
+    r.plan.views.actions.map((a) => ("reason" in a ? a.reason : a.kind)),
     [
       "set filter to 'status:Blocked,\"Waiting PO\"' in the Project UI (now (none))",
       "set group by to 'Status' in the Project UI (now (none))",

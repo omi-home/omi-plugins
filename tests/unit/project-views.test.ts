@@ -61,6 +61,7 @@ test("existing view: wrong layout, duplicate name and setting drift are manual; 
       { name: "B", layout: "table" },
       { name: "C", layout: "table", filter: "is:open", groupBy: "Status" },
       { name: "D", layout: "roadmap" },
+      { name: "WBS", layout: "table" },
     ],
     workflows: { "Item closed": false, Missing: true },
   });
@@ -68,21 +69,23 @@ test("existing view: wrong layout, duplicate name and setting drift are manual; 
   const plan = planViews(
     cfg,
     [
-      { id: "1", name: "a", layout: "table", ...base },
+      { id: "1", name: "A", layout: "table", ...base },
       { id: "2", name: "B", layout: "table", ...base },
       { id: "3", name: "b", layout: "table", ...base },
       { id: "4", name: "C", layout: "table", ...base, filter: " is:open " },
       { id: "5", name: "D", layout: "roadmap", ...base, groupBy: "Phase" },
       { id: "6", name: "Old", layout: "table", ...base },
+      { id: "7", name: "wbs", layout: "table", ...base },
     ],
     [{ name: "Item closed", enabled: true }],
   );
   assert.deepEqual(
-    plan.actions.map((a) => (a.kind === "manual" ? `${a.name}: ${a.reason}` : a.kind)),
+    plan.actions.map((a) => ("reason" in a ? `${a.name}: ${a.reason}` : a.kind)),
     [
       "A: layout is table, desired board: change it in the Project UI",
       "B: 2 views share this name: delete the extra ones in the Project UI",
       "C: set group by to 'Status' in the Project UI (now (none))",
+      "WBS: rename view 'wbs' to 'WBS' in the Project UI",
       "workflow Item closed: disable it in Project settings → Workflows (no API)",
       "workflow Missing: not found on the Project",
     ],
