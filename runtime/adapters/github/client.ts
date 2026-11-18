@@ -62,11 +62,17 @@ export function graphql<S extends z.ZodType>(
   schema: S,
   name: string,
   run: GhRunner = spawnGh,
+  /** Send query and variables as JSON on stdin: large values (Issue bodies) exceed argv limits. */
+  viaStdin = false,
 ): z.infer<S> {
-  const args = ["api", "graphql", "-f", `query=${query}`];
-  for (const [k, v] of Object.entries(vars))
-    args.push(typeof v === "number" ? "-F" : "-f", `${k}=${v}`);
-  const r = run(args);
+  const args = ["api", "graphql"];
+  if (viaStdin) args.push("--input", "-");
+  else {
+    args.push("-f", `query=${query}`);
+    for (const [k, v] of Object.entries(vars))
+      args.push(typeof v === "number" ? "-F" : "-f", `${k}=${v}`);
+  }
+  const r = viaStdin ? run(args, JSON.stringify({ query, variables: vars })) : run(args);
   let body: unknown;
   try {
     body = JSON.parse(r.stdout);

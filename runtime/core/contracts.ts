@@ -91,7 +91,10 @@ export const IssueType = z.enum([
 export type IssueType = z.infer<typeof IssueType>;
 
 export const ProjectStatus = z.enum([
+  "Triage",
   "Backlog",
+  "Analysis",
+  "Approved",
   "Ready",
   "In Progress",
   "In Review",
@@ -150,6 +153,8 @@ export const WorkflowEventType = z.enum([
   "FAIL",
   "INCONSISTENCY_DETECTED",
   "RECOVERED",
+  /** An analysis run (no worktree, no PR) posted every report: the PO decides on GitHub. */
+  "ANALYSIS_COMPLETED",
 ]);
 export type WorkflowEventType = z.infer<typeof WorkflowEventType>;
 

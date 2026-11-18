@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type GhRunner, spawnGh } from "../adapters/github/client.ts";
+import { writeSection } from "../adapters/github/context.ts";
 import {
   type MergeReceipt,
   mergeEligibility,
@@ -46,7 +47,8 @@ import {
 } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
 import { PRE_MERGE, PROJECT_STATUS } from "../core/workflow-engine/fsm.ts";
-import { runSlice, type SliceDeps } from "../core/workflow-engine/slice.ts";
+import { planWorkflow, type WorkflowPlan } from "../core/workflow-engine/plan.ts";
+import { runAnalysis, runSlice, type SliceDeps } from "../core/workflow-engine/slice.ts";
 import { type Db, openState, statePath } from "../persistence/db.ts";
 import {
   acquireLease,
@@ -242,8 +244,13 @@ export function taskRun(
   issue: number,
 ): RunResult {
   const gh = deps.gh ?? spawnGh;
-  const start = taskStart(deps, issue);
   const { config } = repo(deps.cwd);
+  // Plan first: a bad role label or a non-delivery type fails before any worktree exists.
+  const plan = planFor(config, fetchTicket(config, issue, gh), gh);
+  if (plan.kind !== "delivery") {
+    throw new OmiError("POLICY_VIOLATION", `${plan.workflow}: use \`omi task analyze ${issue}\``);
+  }
+  const start = taskStart(deps, issue);
   const file = statePath(deps.cwd);
   const db = openState(file);
   const lease = `task:${start.run.repository}#${issue}`;
@@ -261,7 +268,12 @@ export function taskRun(
           runAgent: deps.runAgent,
           fromSource: deps.fromSource,
         },
-        { run: start.run, worktree: start.workspace.path, baseSha: start.workspace.baseSha },
+        {
+          run: start.run,
+          worktree: start.workspace.path,
+          baseSha: start.workspace.baseSha,
+          plan,
+        },
       );
       const status = setStatus(config, issue, PROJECT_STATUS[ctx.state], gh);
       return {
@@ -270,6 +282,87 @@ export function taskRun(
         round: ctx.round,
         status,
       };
+    } finally {
+      releaseLease(db, { key: lease, holder: session });
+    }
+  } finally {
+    db.close();
+  }
+}
+
+/** Workflow plan from the Issue's type and labels, plus its parent's type (Bug → Bug Resolution). */
+function planFor(config: OmiConfig, ticket: Ticket, gh: GhRunner): WorkflowPlan {
+  const type = typeOf(ticket);
+  if (!type) throw new OmiError("TICKET_INVALID", `#${ticket.number} has no single type:* label`);
+  const repoName = `${config.github.owner}/${config.github.repo}`;
+  const parent = ticket.parent;
+  const parentType =
+    parent && parent.repository.nameWithOwner.toLowerCase() === repoName.toLowerCase()
+      ? (typeOf(fetchTicket(config, parent.number, gh)) ?? null)
+      : null;
+  return planWorkflow({ type, labels: ticket.labels.nodes.map((l) => l.name), parentType });
+}
+
+/**
+ * `omi task analyze <n>` (PO 2026-11-18): run the analysis workflow of a Feature, Change Request
+ * or requirement without a worktree. Analysts read the main checkout; their sections are written
+ * into the Issue body; the Issue then waits for the PO (Waiting PO). A held earlier analysis is
+ * superseded (cancelled) by the new run. Spends tokens.
+ */
+export function taskAnalyze(
+  deps: TaskDeps & Pick<SliceDeps, "runAgent" | "fromSource">,
+  issue: number,
+): RunResult {
+  const gh = deps.gh ?? spawnGh;
+  const { root, config } = repo(deps.cwd);
+  const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
+  const ticket = fetchTicket(config, issue, gh);
+  const bad = validateTicket(ticket, config).find((c) => c.status === "fail");
+  if (bad) throw new OmiError(bad.code ?? "TICKET_INVALID", `${bad.name}: ${bad.detail}`);
+  const plan = planFor(config, ticket, gh);
+  if (plan.kind !== "analysis") {
+    throw new OmiError("POLICY_VIOLATION", `${plan.workflow}: use \`omi task run ${issue}\``);
+  }
+  const file = statePath(deps.cwd);
+  const db = openState(file);
+  const lease = `task:${ref.repository}#${issue}`;
+  const session = deps.session ?? randomUUID();
+  try {
+    acquireLease(db, { key: lease, holder: session, ttlMs: RUN_LEASE_MS });
+    try {
+      let run = liveRun(db, ref);
+      if (run && run.state !== "TICKET_VALIDATED") {
+        advanceRun(db, run.id, { type: "CANCEL" }); // superseded by this new analysis
+        run = undefined;
+      }
+      run ??= createRun(db, {
+        id: `${issue}-${randomUUID().slice(0, 8)}`,
+        issue: ref,
+        workflow: typeOf(ticket) as IssueType,
+      });
+      if (run.state === "CREATED") run = step(db, run, "TICKET_VALID");
+      setStatus(config, issue, "Analysis", gh);
+      const ctx = runAnalysis(
+        {
+          db,
+          config,
+          gh,
+          pluginRoot: PLUGIN_ROOT,
+          evidenceDir: join(dirname(file), "evidence", run.id),
+          runAgent: deps.runAgent,
+          fromSource: deps.fromSource,
+          writeSection: (section, md) => writeSection(config, issue, section, md, gh),
+        },
+        { run, worktree: root, baseSha: gitOut(root, ["rev-parse", "HEAD"]), plan },
+      );
+      // Analysis done or an open question: either way the PO decides next.
+      const status = setStatus(
+        config,
+        issue,
+        ctx.state === "BLOCKED" ? "Blocked" : "Waiting PO",
+        gh,
+      );
+      return { run: getRun(db, run.id) as RunRow, state: ctx.state, round: ctx.round, status };
     } finally {
       releaseLease(db, { key: lease, holder: session });
     }

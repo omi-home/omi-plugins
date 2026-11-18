@@ -34,9 +34,13 @@ Commands:
   ticket validate <n>    Check Issue #n against the ticket-first gates (no changes)
   task start <n>         Validate Issue #n, create or reuse its run and worktree, mark it In Progress
   task status <n>        Show the local run, worktree and transitions of Issue #n
-  task run <n>           Start Issue #n and drive Engineer → checks → Reviewer (→ Architect) until
-                         it needs a person (In QA, Waiting PO, Blocked). Runs agents: spends tokens.
+  task run <n>           Start Issue #n and drive its planned Engineer (label role:*) → checks → Code
+                         Reviewer (→ Security Reviewer when risk:high/security or asked) (→ Architect)
+                         until it needs a person (In QA, Waiting PO, Blocked). Runs agents: spends tokens.
                          --from-source loads the agents from this checkout instead of the installed plugin
+  task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
+                         write their sections into the Issue body, then Waiting PO. No worktree.
+                         Runs agents: spends tokens. --from-source as for task run
   task finalize <n>      After Issue #n's PR is merged: verify the merge receipt, clean the owned
                          worktree, branch and temp dirs safely (no --force), post one cleanup report,
                          then Done + parent roll-up. --dry-run shows the cleanup plan only

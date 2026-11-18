@@ -228,6 +228,9 @@ export interface FinishChange extends StatusChange {
   closed: boolean;
 }
 
+/** Types whose finished children send them to In QA for verification (DocumentationTask-0007 #99). */
+const VERIFY_TYPES = ["bug", "fr", "nfr", "change-request"];
+
 /**
  * After merge + verified cleanup (spec §8 gate 7, AGENTS.md rule 6): the task → Done, then up
  * the native parent chain while every sub-issue of a parent is closed: a Feature (or any
@@ -254,17 +257,20 @@ export function markFinished(
   for (let depth = 0; at && depth < MAX_DEPTH; depth++) {
     const info = graphql(PARENT_QUERY, at, ParentData, "parent issue", run).repository?.issue;
     if (!info || info.subIssuesSummary.completed < info.subIssuesSummary.total) break;
-    const milestone = info.labels.nodes.some((l) => l.name === "type:milestone");
-    const to: ProjectStatus = milestone ? "In Review" : "Done";
+    const label = (t: string) => info.labels.nodes.some((l) => l.name === `type:${t}`);
+    const milestone = label("milestone");
+    // Bug / requirement: children done means "verify" (#99), not done: a person accepts it.
+    const verify = VERIFY_TYPES.some(label);
+    const to: ProjectStatus = milestone ? "In Review" : verify ? "In QA" : "Done";
     const { item, from, parent } = projectItem(config, at, run);
-    const close = !milestone && info.state === "OPEN";
+    const close = !milestone && !verify && info.state === "OPEN";
     if (close) graphql(CLOSE, { id: info.id }, z.unknown(), "close issue", run);
     const move = item && from !== to && from !== "Done";
     if (move) write(field, item.id, to, run);
     if (close || move) {
       changes.push({ issue: `${at.owner}/${at.repo}#${at.number}`, from, to, closed: close });
     }
-    if (milestone) break; // the PO accepts a Milestone; nothing above rolls up automatically
+    if (milestone || verify) break; // a person accepts these; nothing above rolls up automatically
     at = parent;
   }
   return changes;

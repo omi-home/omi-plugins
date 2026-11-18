@@ -1,5 +1,6 @@
-// Vertical slice (spec §10–§12): Backend Engineer → deterministic checks → Code Reviewer, with
-// the Solution Architect once after two failed review rounds. Every step: task packet → named
+// Delivery workflow (spec §10–§12): the planned engineer → deterministic checks → Code Reviewer
+// (→ Security Reviewer when required), with the Solution Architect once after two failed review
+// rounds; and the analysis workflow (analysts write Issue sections, the PO decides). Every step: task packet → named
 // agent process (ADR-0001 D1) → verified result → persisted with its report → report posted
 // before the next step. The FSM decides every move; agents only recommend.
 import { spawnSync } from "node:child_process";
@@ -39,6 +40,7 @@ import { OmiError } from "../errors/errors.ts";
 import { acceptStepResult, buildTaskPacket, packetPrompt } from "../handoff/packet.ts";
 import { runChecks } from "./checks.ts";
 import { policyFrom, type WorkflowEvent } from "./fsm.ts";
+import type { AnalysisPlan, DeliveryPlan, WorkflowPlan } from "./plan.ts";
 
 export interface SliceDeps {
   db: Db;
@@ -58,6 +60,8 @@ export interface SliceTarget {
   run: RunRow;
   worktree: string;
   baseSha: string;
+  /** Defaults to the original slice: Backend Engineer, Feature Implementation. */
+  plan?: WorkflowPlan;
 }
 
 interface StepSpec {
@@ -68,7 +72,7 @@ interface StepSpec {
   edits: boolean;
 }
 
-const DEV: StepSpec = {
+const DEV_BASE: StepSpec = {
   stepId: "implement",
   role: "backend-engineer",
   category: "implementation",
@@ -89,7 +93,24 @@ const ARCHITECT: StepSpec = {
   title: "Architect Diagnosis",
   edits: false,
 };
-const WORKFLOW = "Feature Implementation";
+const SECURITY: StepSpec = {
+  stepId: "security-review",
+  role: "security-reviewer",
+  category: "review",
+  title: "Security Review",
+  edits: false,
+};
+const DEFAULT_PLAN: DeliveryPlan = {
+  kind: "delivery",
+  workflow: "Feature Implementation",
+  engineer: "backend-engineer",
+  security: false,
+  regressionTest: false,
+};
+const workflowOf = (t: SliceTarget) => t.plan?.workflow ?? DEFAULT_PLAN.workflow;
+/** A test file by the usual conventions (`test/`, `tests/`, `*.test.*`, `*_test.*`, `*.spec.*`). */
+export const isTest = (f: string) =>
+  /(^|[\\/])(tests?|__tests__)[\\/]|[._-](test|spec)\.[^\\/]+$/i.test(f);
 const AGENT_TIMEOUT_MS = 30 * 60_000;
 
 export const spawnAgent = (l: AgentLaunch): string => {
@@ -185,7 +206,7 @@ function agentStep(
           issue,
           workflowRunId: t.run.id,
           category: spec.category,
-          workflow: WORKFLOW,
+          workflow: workflowOf(t),
           stepId: spec.stepId,
           stepTitle: spec.title,
           round: ctx.round,
@@ -242,6 +263,8 @@ function checksStep(
   d: SliceDeps,
   t: SliceTarget,
   ctx: WorkflowContext,
+  /** Gate findings decided by the runtime itself (e.g. a missing regression test). */
+  extra: Finding[] = [],
 ): { findings: Finding[]; results: CheckRun[] } {
   const n = ctx.validationFixes + 1;
   const { passed, results } = runChecks({
@@ -254,15 +277,19 @@ function checksStep(
   }
   const findings: Finding[] = results
     .filter((r) => r.outcome !== "pass" && r.outcome !== "skipped")
-    .map((r, i) => ({
-      id: `CHK-${String(i + 1).padStart(3, "0")}`,
-      severity: "high",
-      observed: cut(
-        `${r.name}: ${r.outcome}${r.exitCode === null ? "" : ` (exit ${r.exitCode})`}\n${r.summary}`,
-        1000,
-      ),
-      expected: `\`${r.name}\` passes`,
-    }));
+    .map(
+      (r, i): Finding => ({
+        id: `CHK-${String(i + 1).padStart(3, "0")}`,
+        severity: "high",
+        observed: cut(
+          `${r.name}: ${r.outcome}${r.exitCode === null ? "" : ` (exit ${r.exitCode})`}\n${r.summary}`,
+          1000,
+        ),
+        expected: `\`${r.name}\` passes`,
+      }),
+    )
+    .concat(extra);
+  const ok = passed && !findings.length;
   const comment = parseContract(
     StepComment,
     {
@@ -270,7 +297,7 @@ function checksStep(
       issue: { repository: t.run.repository, number: t.run.issue },
       workflowRunId: t.run.id,
       category: "checks",
-      workflow: WORKFLOW,
+      workflow: workflowOf(t),
       stepId: "checks",
       stepTitle: "Deterministic Checks",
       round: ctx.round,
@@ -280,10 +307,10 @@ function checksStep(
       actualModel: null,
       requestedEffort: null,
       actualEffort: null,
-      status: passed ? "PASSED" : "FAILED",
+      status: ok ? "PASSED" : "FAILED",
       summary: results.map((r) => `${r.name}: ${r.outcome}`).join(", "),
       findings,
-      nextAction: passed ? "Code review." : "The engineer fixes the failed checks.",
+      nextAction: ok ? "Code review." : "The engineer fixes the failed checks.",
       executionId: `${t.run.id}.checks.r${ctx.round}.${n}`,
       createdAt: (d.now?.() ?? new Date()).toISOString(),
     },
@@ -304,6 +331,8 @@ function checksStep(
  * needs someone else: IN_QA, WAITING_PO or BLOCKED. Returns the final FSM context.
  */
 export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
+  const plan = t.plan?.kind === "delivery" ? t.plan : DEFAULT_PLAN;
+  const DEV: StepSpec = { ...DEV_BASE, role: plan.engineer };
   const policy = policyFrom(d.config);
   mkdirSync(d.evidenceDir, { recursive: true });
   publishPending(d.db, t.run.id, { gh: d.gh }); // finish what a crashed invocation persisted
@@ -323,6 +352,7 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
         needDev = true;
         break;
       case "RUNNING": {
+        let devFiles: string[] | null = null;
         if (needDev) {
           const spec = ctx.validationFixes
             ? { ...DEV, stepId: `implement-fix${ctx.validationFixes}` }
@@ -333,8 +363,21 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
             advance({ type: "BLOCK" }); // engineer could not finish: a person decides
             return ctx;
           }
+          devFiles = dev.changedFiles;
         }
-        const gate = checksStep(d, t, ctx);
+        // Bug Resolution: reproduction + regression (spec §10 catalogue) is a deterministic gate.
+        const regression: Finding[] =
+          plan.regressionTest && devFiles && !devFiles.some(isTest)
+            ? [
+                {
+                  id: "REG-001", // finding ids are PREFIX-NNN
+                  severity: "high",
+                  observed: "The bug fix changes no test file.",
+                  expected: "Add a regression test that fails without the fix and passes with it.",
+                },
+              ]
+            : [];
+        const gate = checksStep(d, t, ctx, regression);
         checks = gate.results;
         if (gate.findings.length) {
           advance({ type: "CHECKS_FAILED" });
@@ -348,8 +391,24 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
           advance({ type: "BLOCK" });
           return ctx;
         }
-        findings = review.findings;
-        advance({ type: review.status === "PASSED" ? "REVIEW_PASSED" : "REVIEW_FAILED" });
+        let verdict = review;
+        // Security gate (PO 2026-11-18): label risk:high/security, or the reviewer routes it.
+        if (
+          review.status === "PASSED" &&
+          (plan.security || /^security-review:/.test(review.nextAction ?? ""))
+        ) {
+          const sec = agentStep(d, t, SECURITY, ctx, findings, checks);
+          if (!sec) return refresh();
+          if (sec.status === "BLOCKED") {
+            // A critical finding escalates to the PO at once; any other block stops for a person.
+            const critical = sec.findings.some((f) => f.severity === "critical");
+            advance({ type: critical ? "ESCALATE_TO_PO" : "BLOCK" });
+            return ctx;
+          }
+          verdict = sec;
+        }
+        findings = verdict.findings;
+        advance({ type: verdict.status === "PASSED" ? "REVIEW_PASSED" : "REVIEW_FAILED" });
         needDev = false;
         break;
       }
@@ -368,4 +427,47 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
         return ctx;
     }
   }
+}
+
+const ANALYST_STEP: Partial<Record<Role, Omit<StepSpec, "role" | "edits">>> = {
+  "business-analyst": { stepId: "analysis", category: "analysis", title: "Requirement Analysis" },
+  "ui-ux-designer": { stepId: "design", category: "design", title: "UX Design" },
+  // Not "architect": that step id is the review-escalation diagnosis.
+  "solution-architect": {
+    stepId: "architecture",
+    category: "architecture",
+    title: "Technical Design",
+  },
+};
+
+/**
+ * Analysis workflow for an Issue without a worktree (PO 2026-11-18): each analyst in turn reads
+ * the Issue chain (with the sections written so far) and proposes its own section; the CLI writes
+ * it into the Issue body before the next analyst runs. Ends COMPLETED (handed to the PO) or
+ * WAITING_PO / BLOCKED when an analyst could not finish. `t.worktree` is the main checkout.
+ */
+export function runAnalysis(
+  d: SliceDeps & { writeSection: (section: string, markdown: string) => void },
+  t: SliceTarget & { plan: AnalysisPlan },
+): WorkflowContext {
+  mkdirSync(d.evidenceDir, { recursive: true });
+  publishPending(d.db, t.run.id, { gh: d.gh });
+  let ctx = runContext(d.db, t.run.id);
+  for (const role of t.plan.analysts) {
+    if (ctx.state !== "TICKET_VALIDATED") return ctx;
+    const spec = {
+      ...(ANALYST_STEP[role] as Omit<StepSpec, "role" | "edits">),
+      role,
+      edits: false,
+    };
+    const r = agentStep(d, t, spec, { ...ctx, round: 1 }, []);
+    if (!r) return runContext(d.db, t.run.id);
+    if (r.status !== "PASSED") {
+      // An open question (BLOCKED) or a failed analysis: the PO decides before anyone continues.
+      return advanceRun(d.db, t.run.id, { type: "ESCALATE_TO_PO" }).context;
+    }
+    for (const u of r.sectionUpdates) d.writeSection(u.section, u.markdown);
+    ctx = runContext(d.db, t.run.id);
+  }
+  return advanceRun(d.db, t.run.id, { type: "ANALYSIS_COMPLETED" }).context;
 }

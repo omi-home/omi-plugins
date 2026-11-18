@@ -11,7 +11,8 @@ import type { AgentLaunch } from "../../runtime/adapters/claude/launch.ts";
 import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { parseConfig } from "../../runtime/core/config.ts";
 import type { TaskPacket } from "../../runtime/core/contracts.ts";
-import { runSlice } from "../../runtime/core/workflow-engine/slice.ts";
+import type { DeliveryPlan, WorkflowPlan } from "../../runtime/core/workflow-engine/plan.ts";
+import { runAnalysis, runSlice } from "../../runtime/core/workflow-engine/slice.ts";
 import { openState } from "../../runtime/persistence/db.ts";
 import * as repo from "../../runtime/persistence/repository.ts";
 
@@ -23,6 +24,14 @@ interface Script {
   breakChecksInRound?: number;
   /** Engineer claims a file it never touched. */
   fakeClaim?: boolean;
+  /** Engineer also adds a test file from this step id on (regression test). */
+  addsTestFrom?: "implement" | "implement-fix1";
+  /** Code Reviewer's nextAction. */
+  reviewNext?: string;
+  /** Security Reviewer verdict; CRITICAL = BLOCKED with a critical finding. */
+  security?: Verdict | "CRITICAL";
+  /** This analyst stops with an open question. */
+  analysisBlocks?: string;
 }
 
 const git = (cwd: string, ...a: string[]) =>
@@ -98,11 +107,33 @@ function stubAgents(script: Script) {
       role,
     };
     let result: Record<string, unknown>;
-    if (role === "backend-engineer") {
+    const section = (
+      { analysis: "analysis", design: "design", architecture: "architecture" } as Record<
+        string,
+        string
+      >
+    )[packet.stepId];
+    if (section) {
+      const blocks = script.analysisBlocks === role;
+      result = {
+        ...base,
+        status: blocks ? "BLOCKED" : "PASSED",
+        summary: `${section} done`,
+        ...(blocks
+          ? { blockerReason: "PO must decide the scope" }
+          : { sectionUpdates: [{ section, markdown: `### ${section} by ${role}` }] }),
+      };
+    } else if (role.endsWith("-engineer")) {
       const wt = packet.worktree;
       const file = `src/${packet.stepId}-r${packet.round}.txt`;
       mkdirSync(join(wt, "src"), { recursive: true });
       writeFileSync(join(wt, file), "work\n");
+      const files = [file];
+      if (script.addsTestFrom && packet.stepId >= script.addsTestFrom) {
+        mkdirSync(join(wt, "tests"), { recursive: true });
+        writeFileSync(join(wt, "tests", "regression.test.txt"), "t\n");
+        files.push("tests/regression.test.txt");
+      }
       const breaking = script.breakChecksInRound === packet.round && packet.stepId === "implement";
       if (breaking) writeFileSync(join(wt, "broken"), "");
       else rmSync(join(wt, "broken"), { force: true });
@@ -112,7 +143,7 @@ function stubAgents(script: Script) {
         ...base,
         status: "PASSED",
         summary: `implemented ${packet.stepId} r${packet.round}`,
-        changedFiles: script.fakeClaim ? ["src/never.txt"] : [file],
+        changedFiles: script.fakeClaim ? ["src/never.txt"] : files,
         commitSha: git(wt, "rev-parse", "HEAD"),
       };
     } else if (role === "code-reviewer") {
@@ -126,6 +157,27 @@ function stubAgents(script: Script) {
             ? [{ id: "CR-001", severity: "high", observed: "no greeting", expected: "greeting" }]
             : [],
         ...(v === "BLOCKED" ? { blockerReason: "cannot review" } : {}),
+        ...(script.reviewNext ? { nextAction: script.reviewNext } : {}),
+      };
+    } else if (role === "security-reviewer") {
+      const v = script.security ?? "PASSED";
+      const critical = v === "CRITICAL";
+      result = {
+        ...base,
+        status: critical ? "BLOCKED" : v,
+        summary: "security",
+        findings:
+          v === "PASSED"
+            ? []
+            : [
+                {
+                  id: "SEC-001",
+                  severity: critical ? "critical" : "high",
+                  observed: "SQL built from input",
+                  expected: "parameterize",
+                },
+              ],
+        ...(critical || v === "BLOCKED" ? { blockerReason: "security decision" } : {}),
       };
     } else {
       const v = script.architect ?? "PASSED";
@@ -162,7 +214,7 @@ function stubAgents(script: Script) {
   return { calls, packets, runAgent };
 }
 
-function setup(script: Script = {}) {
+function setup(script: Script = {}, plan?: WorkflowPlan) {
   const { dir, base } = worktree();
   const db = openState(":memory:");
   const run = repo.createRun(db, {
@@ -186,7 +238,7 @@ function setup(script: Script = {}) {
     evidenceDir: mkdtempSync(join(tmpdir(), "omi-evidence-")),
     runAgent: agents.runAgent,
   };
-  const target = { run, worktree: dir, baseSha: base };
+  const target = { run, worktree: dir, baseSha: base, plan };
   return { db, gh, agents, deps, target };
 }
 
@@ -350,4 +402,124 @@ test("crash before the report is posted: rerun posts it without re-running the a
     "checks:1",
     "code-review:1",
   ]);
+});
+
+// ---- DevTask-0026 #55: composed workflows ----
+
+const delivery = (p: Partial<DeliveryPlan> = {}): DeliveryPlan => ({
+  kind: "delivery",
+  workflow: "Feature Implementation",
+  engineer: "backend-engineer",
+  security: false,
+  regressionTest: false,
+  ...p,
+});
+const roles = (calls: string[]) => calls.map((c) => c.split(":")[0]);
+
+test("planned engineer runs; no Security Reviewer unless required", () => {
+  const s = setup({}, delivery({ engineer: "frontend-engineer" }));
+  assert.equal(runSlice(s.deps, s.target).state, "IN_QA");
+  assert.deepEqual(s.agents.calls, ["frontend-engineer:1", "code-reviewer:1"]);
+});
+
+test("security label: Security Reviewer after Code Review; its FAILED is a review round", () => {
+  const s = setup({ security: "FAILED" }, delivery({ security: true }));
+  const ctx = runSlice(s.deps, s.target);
+  assert.equal(ctx.state, "WAITING_PO"); // every round fails security: 2 + Architect + 2
+  assert.deepEqual(roles(s.agents.calls).slice(0, 4), [
+    "backend-engineer",
+    "code-reviewer",
+    "security-reviewer",
+    "backend-engineer",
+  ]);
+  // The engineer's round 2 packet carries the security findings (delta rework).
+  const dev2 = s.agents.packets.find((p) => p.role === "backend-engineer" && p.round === 2);
+  assert.deepEqual(
+    dev2?.openFindings.map((f) => f.id),
+    ["SEC-001"],
+  );
+});
+
+test("Code Reviewer routes to security review without a label", () => {
+  const s = setup({ reviewNext: "security-review: touches auth" }, delivery());
+  assert.equal(runSlice(s.deps, s.target).state, "IN_QA");
+  assert.deepEqual(roles(s.agents.calls), [
+    "backend-engineer",
+    "code-reviewer",
+    "security-reviewer",
+  ]);
+});
+
+test("critical security finding escalates to the PO at once", () => {
+  const s = setup({ security: "CRITICAL" }, delivery({ security: true }));
+  assert.equal(runSlice(s.deps, s.target).state, "WAITING_PO");
+  assert.equal(s.agents.calls.length, 3); // no rework round
+});
+
+test("Bug Resolution: a fix without a regression test is a failed gate, not a review", () => {
+  const s = setup(
+    { addsTestFrom: "implement-fix1" },
+    delivery({ workflow: "Bug Resolution", regressionTest: true }),
+  );
+  assert.equal(runSlice(s.deps, s.target).state, "IN_QA");
+  assert.deepEqual(roles(s.agents.calls), [
+    "backend-engineer",
+    "backend-engineer",
+    "code-reviewer",
+  ]);
+  const checks = s.gh.comments.map((c) => c.body).filter((b) => /step=checks/.test(b));
+  assert.match(checks[0] ?? "", /\| Status \| FAILED \|[\s\S]*REG-001/);
+  assert.match(checks[1] ?? "", /\| Status \| PASSED \|/);
+  assert.equal(s.agents.packets[1]?.openFindings[0]?.id, "REG-001");
+});
+
+/** Analysis run: TICKET_VALIDATED, the main checkout as cwd, sections captured. */
+function analysisSetup(script: Script, analysts: WorkflowPlan & { kind: "analysis" }) {
+  const s = setup(script);
+  const db = openState(":memory:");
+  const run = repo.createRun(db, {
+    id: "an",
+    issue: { repository: "o/r", number: 9 },
+    workflow: "feature",
+  });
+  repo.advanceRun(db, "an", { type: "TICKET_VALID" });
+  const written: string[] = [];
+  const deps = {
+    ...s.deps,
+    db,
+    writeSection: (sec: string, md: string) => written.push(`${sec}:${md}`),
+  };
+  return { ...s, db, written, deps, target: { ...s.target, run, plan: analysts } };
+}
+
+test("analysis: BA → Architect write their sections in order, run COMPLETED, no engineer", () => {
+  const a = analysisSetup(
+    {},
+    {
+      kind: "analysis",
+      workflow: "Feature Analysis",
+      analysts: ["business-analyst", "solution-architect"],
+    },
+  );
+  assert.equal(runAnalysis(a.deps, a.target).state, "COMPLETED");
+  assert.deepEqual(a.agents.calls, ["business-analyst:1", "solution-architect:1"]);
+  assert.deepEqual(a.written, [
+    "analysis:### analysis by business-analyst",
+    "architecture:### architecture by solution-architect",
+  ]);
+  assert.deepEqual(titles(a.gh.comments.map((c) => c.body)), ["analysis:1", "architecture:1"]);
+});
+
+test("analysis: an open question stops before the next analyst and waits for the PO", () => {
+  const a = analysisSetup(
+    { analysisBlocks: "business-analyst" },
+    {
+      kind: "analysis",
+      workflow: "Feature Analysis",
+      analysts: ["business-analyst", "solution-architect"],
+    },
+  );
+  assert.equal(runAnalysis(a.deps, a.target).state, "WAITING_PO");
+  assert.deepEqual(a.agents.calls, ["business-analyst:1"]);
+  assert.deepEqual(a.written, []);
 });

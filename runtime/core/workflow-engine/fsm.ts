@@ -221,6 +221,9 @@ export function transition(
     case "INCONSISTENCY_DETECTED":
       if (is(...PRE_MERGE, ...POST_MERGE)) return hold("RECOVERY_REQUIRED", ctx.state);
       break;
+    case "ANALYSIS_COMPLETED":
+      if (is("TICKET_VALIDATED")) return to("COMPLETED");
+      break;
     case "CANCEL":
     case "FAIL":
       if (is(...PRE_MERGE) || (is(...HOLD) && !POST_MERGE.includes(ctx.resumeFrom as never))) {

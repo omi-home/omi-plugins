@@ -124,3 +124,50 @@ export function fetchIssueContext(
     carriedFindings: parseCarriedFindings(issue.comments.nodes.map((c) => c.body)),
   };
 }
+
+/**
+ * Replaces the body of `<!-- omi:section=<name> -->…<!-- /omi:section=<name> -->`, or appends the
+ * section when the body has none. Pure; the markers are the only structure it relies on.
+ */
+export function upsertSection(body: string, name: string, markdown: string): string {
+  const open = `<!-- omi:section=${name} -->`;
+  const close = `<!-- /omi:section=${name} -->`;
+  const block = `${open}\n${markdown.trim()}\n${close}`;
+  const start = body.indexOf(open);
+  const end = start < 0 ? -1 : body.indexOf(close, start);
+  if (start >= 0 && end >= 0) return body.slice(0, start) + block + body.slice(end + close.length);
+  return `${body.trimEnd()}\n\n${block}\n`;
+}
+
+const BodyData = z.strictObject({
+  repository: z.strictObject({
+    issue: z.strictObject({ id: z.string(), body: z.string() }).nullable(),
+  }),
+});
+
+/** Writes one agent-proposed section into the Issue body (spec §6); the text is redacted first. */
+export function writeSection(
+  config: OmiConfig,
+  issue: number,
+  section: string,
+  markdown: string,
+  run: GhRunner = spawnGh,
+): void {
+  const { owner, repo } = config.github;
+  const found = graphql(
+    "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){id body}}}",
+    { owner, repo, number: issue },
+    BodyData,
+    "issue body",
+    run,
+  ).repository.issue;
+  if (!found) throw new OmiError("TICKET_INVALID", `issue ${owner}/${repo}#${issue} not found`);
+  graphql(
+    "mutation($id:ID!,$body:String!){updateIssue(input:{id:$id,body:$body}){issue{id}}}",
+    { id: found.id, body: upsertSection(found.body, section, redact(markdown)) },
+    z.unknown(),
+    "update issue body",
+    run,
+    true,
+  );
+}

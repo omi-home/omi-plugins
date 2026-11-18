@@ -11,6 +11,7 @@ import {
   prCreate,
   prMerge,
   prValidate,
+  taskAnalyze,
   taskFinalize,
   taskRun,
   taskStart,
@@ -42,9 +43,13 @@ Commands:
   ticket validate <n>    Check Issue #n against the ticket-first gates (no changes)
   task start <n>         Validate Issue #n, create or reuse its run and worktree, mark it In Progress
   task status <n>        Show the local run, worktree and transitions of Issue #n
-  task run <n>           Start Issue #n and drive Engineer → checks → Reviewer (→ Architect) until
-                         it needs a person (In QA, Waiting PO, Blocked). Runs agents: spends tokens.
+  task run <n>           Start Issue #n and drive its planned Engineer (label role:*) → checks → Code
+                         Reviewer (→ Security Reviewer when risk:high/security or asked) (→ Architect)
+                         until it needs a person (In QA, Waiting PO, Blocked). Runs agents: spends tokens.
                          --from-source loads the agents from this checkout instead of the installed plugin
+  task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
+                         write their sections into the Issue body, then Waiting PO. No worktree.
+                         Runs agents: spends tokens. --from-source as for task run
   task finalize <n>      After Issue #n's PR is merged: verify the merge receipt, clean the owned
                          worktree, branch and temp dirs safely (no --force), post one cleanup report,
                          then Done + parent roll-up. --dry-run shows the cleanup plan only
@@ -98,6 +103,7 @@ const NESTED = new Set([
   "task start",
   "task status",
   "task run",
+  "task analyze",
   "task finalize",
   "pr create",
   "pr validate",
@@ -191,6 +197,16 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         const r = taskRun({ cwd, fromSource: values["from-source"] }, issue);
         const human = [
           `run       ${r.run.id} (${r.state}, round ${r.round})`,
+          ...(r.status
+            ? [`status    ${r.status.issue}: ${r.status.from ?? "unset"} → ${r.status.to}`]
+            : []),
+        ];
+        return ok(r, lines(human));
+      }
+      case "task analyze": {
+        const r = taskAnalyze({ cwd, fromSource: values["from-source"] }, issue);
+        const human = [
+          `run       ${r.run.id} (${r.state})`,
           ...(r.status
             ? [`status    ${r.status.issue}: ${r.status.from ?? "unset"} → ${r.status.to}`]
             : []),

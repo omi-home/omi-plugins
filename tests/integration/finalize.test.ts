@@ -126,7 +126,7 @@ function fakeGh(f: Fake): GhRunner {
       return ok({ updateProjectV2ItemFieldValue: { projectV2Item: { id: vars.i } } });
     }
     if (query.includes('field(name:"Status")')) {
-      const options = ["In Progress", "In Review", "Done", "Blocked"].map((x) => ({
+      const options = ["In Progress", "In Review", "In QA", "Done", "Blocked"].map((x) => ({
         id: `OPT_${x}`,
         name: x,
       }));
@@ -253,6 +253,16 @@ test("Milestone goes to In Review (never Done) once every child is closed", () =
   taskFinalize({ cwd: s.repo, gh: s.gh }, 5);
   assert.equal(s.f.status[2], "In Review");
   assert.equal(s.f.open.has(2), true);
+});
+
+test("Bug parent goes to In QA (verify the fix), stays open, nothing above it rolls up", () => {
+  const s = merged();
+  s.f.labels[3] = ["type:bug"];
+  taskFinalize({ cwd: s.repo, gh: s.gh }, 5);
+  assert.equal(s.f.status[5], "Done");
+  assert.equal(s.f.status[3], "In QA");
+  assert.equal(s.f.open.has(3), true);
+  assert.equal(s.f.status[2], "In Progress");
 });
 
 test("PR not merged: refused before any change", () => {
