@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { OmiConfig } from "../../core/config.ts";
 import type { ProjectStatus } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
+import { type Child, rollUp } from "../../core/hierarchy.ts";
 import { classify, type GhRunner, graphql, spawnGh } from "./client.ts";
 
 export const OWNER_PROJECT = (body: string) =>
@@ -206,8 +207,29 @@ export function setStatus(
 const PARENT_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){ issue(number:$number){
     id state labels(first:30){nodes{name}} subIssuesSummary{total completed}
+    subIssues(first:100){ nodes{ number state stateReason repository{nameWithOwner}
+      projectItems(first:20){ nodes{ project{ number owner{... on Organization{login} ... on User{login}} }
+        fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} } } } }
   } }
 }`;
+
+const SubIssue = z.strictObject({
+  number: z.int(),
+  state: z.enum(["OPEN", "CLOSED"]),
+  stateReason: z.string().nullable(),
+  repository: z.strictObject({ nameWithOwner: z.string() }),
+  projectItems: z.strictObject({
+    nodes: z.array(
+      z.strictObject({
+        project: z.strictObject({
+          number: z.int(),
+          owner: z.strictObject({ login: z.string().optional() }),
+        }),
+        fieldValueByName: z.strictObject({ name: z.string().optional() }).nullable(),
+      }),
+    ),
+  }),
+});
 
 const ParentData = z.strictObject({
   repository: z
@@ -218,6 +240,7 @@ const ParentData = z.strictObject({
           state: z.enum(["OPEN", "CLOSED"]),
           labels: z.strictObject({ nodes: z.array(z.strictObject({ name: z.string() })) }),
           subIssuesSummary: z.strictObject({ total: z.int(), completed: z.int() }),
+          subIssues: z.strictObject({ nodes: z.array(SubIssue) }),
         })
         .nullable(),
     })
@@ -235,9 +258,10 @@ const VERIFY_TYPES = ["bug", "fr", "nfr", "change-request"];
 
 /**
  * After merge + verified cleanup (spec §8 gate 7, AGENTS.md rule 6): the task → Done, then up
- * the native parent chain while every sub-issue of a parent is closed: a Feature (or any
- * non-Milestone container) is closed and set Done; a Milestone only goes to In Review, since
- * Done needs the PO's acceptance of its gate. Stops at the first parent with open children.
+ * the native parent chain while every sub-issue of a parent is closed and accepted (`rollUp`,
+ * DevTask-0029 #60): a Feature (or any non-Milestone container) is closed and set Done; a
+ * Milestone only goes to In Review, since Done needs the PO's acceptance of its gate. Stops at the
+ * first parent that may not roll up (open, unaccepted or only cancelled children).
  * Read → diff → write: a second call changes nothing.
  */
 export function markFinished(
@@ -258,7 +282,20 @@ export function markFinished(
   ).parent;
   for (let depth = 0; at && depth < MAX_DEPTH; depth++) {
     const info = graphql(PARENT_QUERY, at, ParentData, "parent issue", run).repository?.issue;
-    if (!info || info.subIssuesSummary.completed < info.subIssuesSummary.total) break;
+    if (!info) break;
+    const { owner, projectNumber } = config.github;
+    const children: Child[] = info.subIssues.nodes.map((c) => ({
+      ref: `${c.repository.nameWithOwner}#${c.number}`,
+      state: c.state,
+      stateReason: c.stateReason,
+      status:
+        c.projectItems.nodes.find(
+          (i) =>
+            i.project.number === projectNumber &&
+            i.project.owner.login?.toLowerCase() === owner.toLowerCase(),
+        )?.fieldValueByName?.name ?? null,
+    }));
+    if (!rollUp(children, info.subIssuesSummary.total).ready) break;
     const label = (t: string) => info.labels.nodes.some((l) => l.name === `type:${t}`);
     const milestone = label("milestone");
     // Bug / requirement: children done means "verify" (#99), not done: a person accepts it.

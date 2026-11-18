@@ -49,6 +49,8 @@ interface Fake {
   comments: { id: number; body: string }[];
   failComments?: number;
   failStatus?: number;
+  /** Close reason by issue number (default COMPLETED). */
+  reason?: Record<number, string>;
   /** Legacy PR: no omi:pr-primary marker, only GitHub's closing link to these issues. */
   closing?: string[];
 }
@@ -147,6 +149,24 @@ function fakeGh(f: Fake): GhRunner {
             subIssuesSummary: {
               total: kids.length,
               completed: kids.filter((k) => !f.open.has(k)).length,
+            },
+            subIssues: {
+              nodes: kids.map((k) => ({
+                number: k,
+                state: f.open.has(k) ? "OPEN" : "CLOSED",
+                stateReason: f.open.has(k) ? null : (f.reason?.[k] ?? "COMPLETED"),
+                repository: { nameWithOwner: "o/repo" },
+                projectItems: {
+                  nodes: f.status[k]
+                    ? [
+                        {
+                          project: { number: 2, owner: { login: "o" } },
+                          fieldValueByName: { name: f.status[k] },
+                        },
+                      ]
+                    : [],
+                },
+              })),
             },
           },
         },
@@ -263,6 +283,23 @@ test("Bug parent goes to In QA (verify the fix), stays open, nothing above it ro
   assert.equal(s.f.status[3], "In QA");
   assert.equal(s.f.open.has(3), true);
   assert.equal(s.f.status[2], "In Progress");
+});
+
+test("closed but unaccepted sibling holds the Feature open; a cancelled one does not", () => {
+  const held = merged();
+  held.f.children[3] = [5, 6];
+  held.f.status[6] = "In QA"; // closed by hand before QA accepted it
+  taskFinalize({ cwd: held.repo, gh: held.gh }, 5);
+  assert.equal(held.f.status[5], "Done");
+  assert.equal(held.f.status[3], "In Progress");
+  assert.equal(held.f.open.has(3), true);
+
+  const cancelled = merged();
+  cancelled.f.children[3] = [5, 6];
+  cancelled.f.reason = { 6: "NOT_PLANNED" }; // not on the Project: judged by close reason
+  taskFinalize({ cwd: cancelled.repo, gh: cancelled.gh }, 5);
+  assert.equal(cancelled.f.status[3], "Done");
+  assert.equal(cancelled.f.open.has(3), false);
 });
 
 test("PR not merged: refused before any change", () => {

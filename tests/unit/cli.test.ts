@@ -59,6 +59,10 @@ Commands:
                          [--parent <n|owner/repo#n>]. Numbered <IssueType>-<NNNN>- per type, linked
                          as a sub-issue (hierarchy matrix checked first), added to the Project.
                          Re-running with the same type and title completes the same Issue
+  issue depend <n> --on <m|owner/repo#m>
+                         Record that Issue #n is blocked by #m (native dependency; another repo is
+                         fine). Refuses cycles; re-running is a no-op. \`ticket validate\` then holds
+                         #n until #m is closed
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
   github project init [--title <text>]

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { readSection, writeSection } from "../adapters/github/context.ts";
+import { addDependency } from "../adapters/github/dependency.ts";
 import { createIssue } from "../adapters/github/issue.ts";
 import {
   type ProjectAction,
@@ -84,6 +85,10 @@ Commands:
                          [--parent <n|owner/repo#n>]. Numbered <IssueType>-<NNNN>- per type, linked
                          as a sub-issue (hierarchy matrix checked first), added to the Project.
                          Re-running with the same type and title completes the same Issue
+  issue depend <n> --on <m|owner/repo#m>
+                         Record that Issue #n is blocked by #m (native dependency; another repo is
+                         fine). Refuses cycles; re-running is a no-op. \`ticket validate\` then holds
+                         #n until #m is closed
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
   github project init [--title <text>]
@@ -151,10 +156,10 @@ const sectionArg = (a: string | undefined) => {
 };
 
 /** `59`, `#59` or `owner/repo#59`. */
-const parentArg = (a: string, home: { owner: string; repo: string }) => {
+const parentArg = (a: string, home: { owner: string; repo: string }, flag = "--parent") => {
   const m = /^(?:([\w.-]+)\/([\w.-]+)#|#?)(\d+)$/.exec(a);
   if (!m || Number(m[3]) < 1)
-    throw new OmiError("USAGE_INVALID", "--parent expects n or owner/repo#n");
+    throw new OmiError("USAGE_INVALID", `${flag} expects n or owner/repo#n`);
   return { owner: m[1] ?? home.owner, repo: m[2] ?? home.repo, number: Number(m[3]) };
 };
 
@@ -254,6 +259,9 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
     ) {
       command = `${command} ${rest[0]}`;
       rest = rest.slice(1);
+    } else if (command === "issue" && rest[0] === "depend") {
+      command = "issue depend";
+      rest = rest.slice(1);
     } else if (command === "issue" && (rest[0] === "create" || rest[0] === "section")) {
       command = rest[0] === "create" ? "issue create" : `issue section ${rest[1] ?? ""}`;
       rest = rest.slice(rest[0] === "create" ? 1 : 2);
@@ -276,7 +284,9 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
     }
     const issue =
-      NESTED.has(command) || command.startsWith("issue section") ? issueArg(rest.shift()) : 0;
+      NESTED.has(command) || command.startsWith("issue section") || command === "issue depend"
+        ? issueArg(rest.shift())
+        : 0;
     const section = command.startsWith("issue section") ? sectionArg(rest.shift()) : "";
     const bodyFile = (): string => {
       const file = values["body-file"];
@@ -381,6 +391,16 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
           `changes   ${r.changes.join(", ") || "none"}`,
         ];
         return ok(r, lines(human));
+      }
+      case "issue depend": {
+        if (!values.on) throw new OmiError("USAGE_INVALID", "--on <m|owner/repo#m> is required");
+        const { github } = repo(cwd).config;
+        const r = addDependency(
+          { owner: github.owner, repo: github.repo, number: issue },
+          parentArg(values.on, github, "--on"),
+        );
+        const human = `depend    ${r.issue} blocked by ${r.blockedBy}${r.added ? "" : " (existing)"}\n`;
+        return ok(r, human);
       }
       case "issue section get": {
         const text = readSection(repo(cwd).config, issue, section);
@@ -548,6 +568,7 @@ const parse = (args: string[]) =>
       reason: { type: "string" },
       type: { type: "string" },
       parent: { type: "string" },
+      on: { type: "string" },
       "approved-plan": { type: "string" },
     },
   });
