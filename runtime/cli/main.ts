@@ -23,6 +23,7 @@ import { redact, redactDeep } from "../reporting/redact.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { type Check, doctor } from "./doctor.ts";
 import { projectInit } from "./init.ts";
+import { releaseCheck, releaseTag } from "./release.ts";
 import { NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "./status.ts";
 import {
   prCreate,
@@ -87,6 +88,11 @@ Commands:
                          Issue, tip, conflicts, CI, reviews, merge method, protection, risk
   pr merge <n>           Merge Issue #n's task PR when every gate passes (configured method, pinned
                          to the validated head); risk:high goes to Waiting PO and is not merged
+  release check <n>      Read-only gate for Release Issue #n: plugin.json and package.json agree on a
+                         semver, CHANGELOG.md has "## [<version>]", tag <plugin>--v<version> is free and
+                         newer on origin, develop is ahead of main, the Milestone's other work is closed
+  release tag <n>        After the PO merged #n's PR (develop → main): tag its merge commit
+                         <plugin>--v<version>, push the tag, close #n, Done + roll-up. Re-run: no-op
   issue create           Create an Issue: --type <OMI type> --title <text> --body-file <path>
                          [--parent <n|owner/repo#n>]. Numbered <IssueType>-<NNNN>- per type, linked
                          as a sub-issue (hierarchy matrix checked first), added to the Project.
@@ -191,6 +197,8 @@ const NESTED = new Set([
   "pr merge",
   "issue depend",
   "issue findings",
+  "release check",
+  "release tag",
 ]);
 const GITHUB_REPO = new Set(["plan", "apply", "validate"]);
 const GITHUB_PROJECT = new Set(["init", "plan", "apply", "validate"]);
@@ -299,7 +307,17 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       command = `github project ${rest[1]}`;
       rest = rest.slice(2);
     } else if (
-      ["ticket", "task", "pr", "cleanup", "issue", "project", "github", "handoff"].includes(command)
+      [
+        "ticket",
+        "task",
+        "pr",
+        "cleanup",
+        "issue",
+        "project",
+        "github",
+        "handoff",
+        "release",
+      ].includes(command)
     ) {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
     }
@@ -358,6 +376,21 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       case "doctor": {
         const checks = doctor(cwd);
         return ok({ checks }, humanChecks(checks), checksExit(checks));
+      }
+      case "release check": {
+        const checks = releaseCheck({ cwd }, issue);
+        return ok({ issue, checks }, humanChecks(checks), checksExit(checks));
+      }
+      case "release tag": {
+        const r = releaseTag({ cwd }, issue);
+        const human = [
+          `tag       ${r.tag} @ ${r.commit.slice(0, 12)}${r.created ? "" : " (exists)"}`,
+          `pr        ${r.pr}`,
+          ...(r.closed ? [`closed    #${issue}`] : []),
+          ...r.changes.map((c) => `status    ${c.issue}: ${c.from ?? "unset"} → ${c.to}`),
+          ...(r.held ? [`held      ${r.held}`] : []),
+        ];
+        return ok(r, lines(human));
       }
       case "ticket validate": {
         const checks = ticketValidate({ cwd }, issue);

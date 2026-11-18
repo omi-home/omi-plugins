@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { HELP } from "../../runtime/cli/main.ts";
 
 /** Skill → minimum number of `omi …` commands it must name. */
-const SCRIPT_ONLY = { "omi-resume": 6, "omi-status": 3 };
+const SCRIPT_ONLY = { "omi-resume": 6, "omi-status": 3, "omi-release": 5 };
 
 for (const [name, min] of Object.entries(SCRIPT_ONLY)) {
   test(`skills/${name} has frontmatter and only calls omi commands`, () => {
