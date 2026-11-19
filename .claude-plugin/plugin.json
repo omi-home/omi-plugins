@@ -1,6 +1,6 @@
 {
   "name": "omi-coordinator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OMI Coordinator: /omi-* skills and the omi CLI for ticket-driven, script-first engineering (GitHub Issue/Project as work source, one task workspace per task, audited review loop, post-merge cleanup). Carries the role agents in agent-pack/.",
   "author": {
     "name": "omi-home",
