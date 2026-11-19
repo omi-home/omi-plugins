@@ -13,6 +13,7 @@ const SCRIPT_ONLY = {
   "omi-resume": 6,
   "omi-status": 3,
   "omi-release": 5,
+  "omi-plan": 5,
 };
 
 test("every skill is listed here", () => {
@@ -41,3 +42,15 @@ for (const [name, min] of Object.entries(SCRIPT_ONLY)) {
     for (const c of code) assert.doesNotMatch(c, /^(git|gh|npm|node) /, `raw step: ${c}`);
   });
 }
+
+test("adapted skills name their source commit and the notices file lists it", () => {
+  const notices = readFileSync(new URL("../../THIRD_PARTY_NOTICES", import.meta.url), "utf8");
+  const text = readFileSync(new URL("../../skills/omi-plan/SKILL.md", import.meta.url), "utf8");
+  for (const [repo, sha] of [
+    ["obra/superpowers", "22f0b46"],
+    ["DietrichGebert/ponytail", "96608e0"],
+  ] as const) {
+    assert.match(text, new RegExp(`${repo} .*@ ${sha}`));
+    assert.match(notices, new RegExp(`${repo} @ ${sha}[0-9a-f]{33}\\n[\\s\\S]*?MIT License`));
+  }
+});

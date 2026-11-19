@@ -59,6 +59,7 @@ test("ADR-0003 D3: Coordinator session sees only omi-coordinator entry skills, n
   assert.ok(!out.includes("role-rules"));
   const skills = out.split("### Skills")[1] ?? "";
   assert.deepEqual(skills.match(/omi-coordinator:[\w-]+/g)?.sort(), [
+    "omi-coordinator:omi-plan",
     "omi-coordinator:omi-release",
     "omi-coordinator:omi-resume",
     "omi-coordinator:omi-start",
