@@ -1,7 +1,12 @@
 // Step report renderer (spec §12): fills `templates/reports/<category>.md` from a validated
 // StepComment. Deterministic, no LLM reformatting; output is sanitized before it leaves.
 import { readFileSync } from "node:fs";
-import { type CarriedFinding, commentMarker, type StepComment } from "../core/contracts.ts";
+import {
+  type CarriedFinding,
+  commentMarker,
+  type StepComment,
+  type TokenUsage,
+} from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
 import { redact } from "./redact.ts";
 
@@ -27,11 +32,43 @@ const effort = (c: StepComment) =>
     ? "n/a (omi-cli)"
     : `requested ${c.requestedEffort} · actual unknown (not observable)`;
 
+/** Field-wise sum; an optional field stays absent only when no part has it. */
+export function sumUsage(parts: TokenUsage[]): TokenUsage | undefined {
+  if (!parts.length) return undefined;
+  const add = (k: Exclude<keyof TokenUsage, "inputTokens" | "outputTokens">) =>
+    parts.some((p) => p[k] !== undefined) ? parts.reduce((n, p) => n + (p[k] ?? 0), 0) : undefined;
+  return {
+    inputTokens: parts.reduce((n, p) => n + p.inputTokens, 0),
+    outputTokens: parts.reduce((n, p) => n + p.outputTokens, 0),
+    cacheReadTokens: add("cacheReadTokens"),
+    cacheCreationTokens: add("cacheCreationTokens"),
+    thinkingTokens: add("thinkingTokens"),
+    costUsd: add("costUsd"),
+    numTurns: add("numTurns"),
+  };
+}
+
+/**
+ * Observed tokens, cache hit (cache read / all input) and cost. The host computes
+ * `total_cost_usd` from list prices, so it is labelled an estimate (wrong behind a gateway).
+ */
+export function formatUsage(u: TokenUsage): string {
+  const read = u.cacheReadTokens ?? 0;
+  const allIn = u.inputTokens + read + (u.cacheCreationTokens ?? 0);
+  return [
+    `${u.inputTokens} in / ${u.outputTokens} out tokens`,
+    ...(u.thinkingTokens ? [`${u.thinkingTokens} thinking`] : []),
+    ...(read ? [`${read} cache read (${Math.round((100 * read) / allIn)}% hit)`] : []),
+    ...(u.numTurns !== undefined ? [`${u.numTurns} turns`] : []),
+    ...(u.costUsd !== undefined ? [`≈ $${u.costUsd.toFixed(4)} (list-price estimate)`] : []),
+  ].join(" · ");
+}
+
 /** Observed tokens and wall time (spec §14): never estimated, `not_available` when unknown. */
 function cost(c: StepComment): string {
   const u = c.usage;
   const tokens = u
-    ? `${u.inputTokens} in / ${u.outputTokens} out tokens${u.cacheReadTokens ? ` (${u.cacheReadTokens} cache read)` : ""}`
+    ? formatUsage(u)
     : c.executor === "omi-cli"
       ? "no tokens (omi-cli)"
       : "tokens not_available";

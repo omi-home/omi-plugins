@@ -124,6 +124,9 @@ test("observeRun: cut transcript lines skipped (#19 CR-001); host usage read; no
     outputTokens: 4,
     cacheReadTokens: undefined,
     cacheCreationTokens: 9,
+    thinkingTokens: undefined,
+    costUsd: undefined,
+    numTurns: undefined,
   });
   assert.throws(() => observeRun('{"type":"assistant"}\n{"type":"res'), { code: "INTERNAL" });
 });

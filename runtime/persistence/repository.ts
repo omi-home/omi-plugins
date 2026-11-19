@@ -10,6 +10,7 @@ import {
   type Role,
   StepResult,
   StepState,
+  TokenUsage,
   WorkflowContext,
   WorkflowEventType,
   WorkflowState,
@@ -335,9 +336,15 @@ export function persistStepResult(
     const step = getStep(db, o.stepRunId);
     const a = db
       .prepare(
-        "UPDATE step_attempt SET finished_at = ?, actual_model = ? WHERE step_run_id = ? AND attempt = ? AND finished_at IS NULL",
+        "UPDATE step_attempt SET finished_at = ?, actual_model = ?, usage = ? WHERE step_run_id = ? AND attempt = ? AND finished_at IS NULL",
       )
-      .run(now, o.actualModel, o.stepRunId, o.attempt);
+      .run(
+        now,
+        o.actualModel,
+        o.result.usage ? JSON.stringify(o.result.usage) : null,
+        o.stepRunId,
+        o.attempt,
+      );
     if (!step || a.changes !== 1) {
       throw new OmiError(
         "INVALID_TRANSITION",
@@ -354,6 +361,31 @@ export function persistStepResult(
     ).run(step.runId, o.stepRunId, o.report.marker, o.report.body, now);
   });
 }
+
+export interface AttemptUsage {
+  stepId: string;
+  round: number;
+  attempt: number;
+  role: Role;
+  actualModel: string | null;
+  usage: TokenUsage;
+}
+
+/** Usage of every finished attempt of a run that recorded some, in run order. */
+export const runUsage = (db: Db, runId: string): AttemptUsage[] =>
+  db
+    .prepare(
+      "SELECT s.step_id, s.round, s.role, a.attempt, a.actual_model, a.usage FROM step_attempt a JOIN step_run s ON s.id = a.step_run_id WHERE s.run_id = ? AND a.usage IS NOT NULL ORDER BY s.id, a.attempt",
+    )
+    .all(runId)
+    .map((r) => ({
+      stepId: String(r.step_id),
+      round: Number(r.round),
+      attempt: Number(r.attempt),
+      role: r.role as Role,
+      actualModel: r.actual_model === null ? null : String(r.actual_model),
+      usage: parseContract(TokenUsage, JSON.parse(String(r.usage)), "stored usage"),
+    }));
 
 export interface PendingReport {
   marker: string;

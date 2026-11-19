@@ -134,6 +134,8 @@ export interface AgentObservation {
   permissionDenials: string[];
   /** Host-reported token usage of the run (result event `usage`), when present. */
   usage?: TokenUsage;
+  /** Host-reported `duration_ms` of the run, when present. */
+  durationMs?: number;
 }
 
 const nonNeg = (v: unknown) => (typeof v === "number" && v >= 0 ? Math.trunc(v) : undefined);
@@ -182,8 +184,15 @@ export function observeRun(streamJson: string): AgentObservation {
             outputTokens: output,
             cacheReadTokens: nonNeg(u.cache_read_input_tokens),
             cacheCreationTokens: nonNeg(u.cache_creation_input_tokens),
+            thinkingTokens: nonNeg(u.thinking_tokens),
+            costUsd:
+              typeof result.total_cost_usd === "number" && result.total_cost_usd >= 0
+                ? result.total_cost_usd
+                : undefined,
+            numTurns: nonNeg(result.num_turns),
           },
         }
       : {}),
+    ...(nonNeg(result.duration_ms) !== undefined ? { durationMs: nonNeg(result.duration_ms) } : {}),
   };
 }
