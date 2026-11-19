@@ -25,6 +25,12 @@ export interface WorkspaceInitResult {
   items: WorkspaceItem[];
 }
 
+/** The Coordinator session's settings in the workspace (relative to it). */
+export const SETTINGS = ".claude/settings.json";
+/** Absolute `autoMemoryDirectory` of the Coordinator (DevTask-0058 #180). */
+export const memoryDir = (workspace: string) =>
+  join(workspace, ".claude", "agent-memory", "coordinator");
+
 const git = (cwd: string, args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
@@ -89,7 +95,19 @@ export function workspaceInit(o: {
       continue;
     }
     mkdirSync(dirname(to), { recursive: true });
-    writeFileSync(to, readFileSync(join(TEMPLATES, f)));
+    // The Coordinator's auto memory stays in the workspace, not in ~/.claude/projects (#180).
+    const body =
+      f === SETTINGS
+        ? `${JSON.stringify(
+            {
+              autoMemoryDirectory: memoryDir(workspace),
+              ...JSON.parse(readFileSync(join(TEMPLATES, f), "utf8")),
+            },
+            null,
+            2,
+          )}\n`
+        : readFileSync(join(TEMPLATES, f));
+    writeFileSync(to, body);
     items.push({ path: f, result: "created" });
   }
   return { workspace, repo: target, items };

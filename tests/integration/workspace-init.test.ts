@@ -3,11 +3,19 @@
 // workspace root and from inside the repo.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { workspaceInit } from "../../runtime/cli/workspace.ts";
+import { memoryDirCheck } from "../../runtime/cli/doctor.ts";
+import { memoryDir, workspaceInit } from "../../runtime/cli/workspace.ts";
 import type { OmiError } from "../../runtime/core/errors/errors.ts";
 import { locate } from "../../runtime/core/workspace.ts";
 
@@ -83,5 +91,40 @@ test("--repo and --name from another directory; outside git without --repo is re
   assert.throws(
     () => workspaceInit({ cwd: elsewhere, repo: dir, name: "a b" }),
     (e: OmiError) => e.code === "USAGE_INVALID",
+  );
+});
+
+test("#180: settings point auto memory into the workspace; doctor memory-dir checks it", () => {
+  const { parent, dir } = checkout();
+  const ws = join(parent, "app-workspace");
+  assert.equal(memoryDirCheck(ws).status, "warn", "no settings yet");
+  workspaceInit({ cwd: dir });
+  const settings = join(ws, ".claude", "settings.json");
+  const s = JSON.parse(readFileSync(settings, "utf8"));
+  assert.equal(s.autoMemoryDirectory, memoryDir(ws));
+  assert.equal(s.enabledPlugins["omi-engineering@omi-plugins"], true, "template kept");
+  assert.equal(memoryDirCheck(ws).status, "pass");
+
+  // Index near Claude Code's load limit warns; at the limit passes.
+  mkdirSync(memoryDir(ws), { recursive: true });
+  const index = join(memoryDir(ws), "MEMORY.md");
+  writeFileSync(index, "- [a](a.md) — b\n".repeat(150));
+  assert.equal(memoryDirCheck(ws).status, "pass");
+  writeFileSync(index, "- [a](a.md) — b\n".repeat(151));
+  assert.match(memoryDirCheck(ws).detail, /151 lines/);
+  writeFileSync(index, `${"x".repeat(16 * 1024)}\n`);
+  assert.equal(memoryDirCheck(ws).status, "warn");
+
+  // Outside the workspace (host ~/.claude) or relative: warn with the expected value.
+  writeFileSync(settings, JSON.stringify({ autoMemoryDirectory: join(parent, "elsewhere") }));
+  assert.equal(memoryDirCheck(ws).status, "warn");
+  writeFileSync(settings, JSON.stringify({ autoMemoryDirectory: ".claude/agent-memory" }));
+  assert.match(memoryDirCheck(ws).detail, /autoMemoryDirectory/);
+
+  // Re-run never overwrites an existing settings file.
+  workspaceInit({ cwd: dir });
+  assert.equal(
+    JSON.parse(readFileSync(settings, "utf8")).autoMemoryDirectory,
+    ".claude/agent-memory",
   );
 });

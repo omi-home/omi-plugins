@@ -61,7 +61,9 @@ Dữ liệu và phiên làm việc của OMI nằm ngoài repo đích (ADR-0002 
 ```text
 <parent>/
 ├── <name>-workspace/                   # workspace của Coordinator: `omi workspace init`
-│   ├── .claude/                        # settings của phiên Coordinator
+│   ├── .claude/
+│   │   ├── settings.json               # settings của phiên Coordinator, có `autoMemoryDirectory`
+│   │   └── agent-memory/coordinator/   # auto memory của Coordinator (`MEMORY.md` + file chủ đề); `omi doctor` `memory-dir`
 │   ├── .omi-plugins/
 │   │   ├── omi.config.yaml             # config dự án: github, checks, review, agents, cleanup
 │   │   ├── omi.config.json             # profile thực thi, riêng từng máy, không commit (Feature-0021 #137)
