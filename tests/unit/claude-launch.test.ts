@@ -163,7 +163,11 @@ test("observeRun: model from assistant messages, not modelUsage; effort unknown;
       is_error: false,
       result: "BLOCKED: rule pack unreadable",
       modelUsage: { "claude-haiku-5-5": {}, "claude-sonnet-5-5": {} },
-      permission_denials: [{ tool_name: "Read", tool_input: { file_path: "E:\\p\\r.md" } }],
+      permission_denials: [
+        { tool_name: "Read", tool_input: { file_path: "E:\\p\\r.md" } },
+        { tool_name: "Bash", tool_input: { command: "cd app && npm run check" } },
+        { tool_name: "WebFetch", tool_input: {} },
+      ],
     }),
   ].join("\n");
   assert.deepEqual(observeRun(transcript), {
@@ -172,7 +176,8 @@ test("observeRun: model from assistant messages, not modelUsage; effort unknown;
     thinkingObserved: false,
     isError: false,
     result: "BLOCKED: rule pack unreadable",
-    permissionDenials: ["Read:E:\\p\\r.md"],
+    // #252: a Bash denial names its command.
+    permissionDenials: ["Read:E:\\p\\r.md", "Bash:cd app && npm run check", "WebFetch:"],
   });
   assert.equal(observeRun(line({ type: "result", result: "" })).actualModel, "unknown");
   assert.throws(() => observeRun(""), /no result event/);

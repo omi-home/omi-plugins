@@ -111,7 +111,12 @@ export function renderStepReport(c: StepComment): string {
     status: c.status,
     summary: block(c.summary),
     changes: list(c.changedFiles.map((p) => `\`${p}\``)),
-    evidence: list(c.evidencePaths.map((p) => `\`${p}\``)),
+    evidence: list([
+      ...c.evidencePaths.map((p) => `\`${p}\``),
+      ...(c.permissionDenials ?? []).map(
+        (d) => `Permission denied: \`${block(d).replace(/\r?\n/g, " ").replace(/`/g, "'")}\``,
+      ),
+    ]),
     findings: list(
       c.findings.map((f) =>
         cell(

@@ -45,6 +45,8 @@ interface Script {
   qaDirties?: boolean;
   /** Engineer leaves an uncommitted file after its first step (release validation). */
   leavesDirt?: boolean;
+  /** Commands the host refused the engineer (permission_denials of its implement step, #252). */
+  denies?: string[];
 }
 
 const git = (cwd: string, ...a: string[]) =>
@@ -254,7 +256,13 @@ function stubAgents(script: Script) {
         total_cost_usd: 0.0123,
         num_turns: 3,
         duration_ms: 4200,
-        permission_denials: [],
+        permission_denials:
+          role.endsWith("-engineer") && packet.stepId === "implement"
+            ? (script.denies ?? []).map((command) => ({
+                tool_name: "Bash",
+                tool_input: { command },
+              }))
+            : [],
       }),
     ].join("\n");
   };
@@ -727,6 +735,26 @@ test("Manual QA may run the repo's check commands; reviewers may not (PO #124)",
   assert.ok(commit("backend-engineer"), "engineers commit through git -C <repo>");
   assert.ok(!commit("manual-qa-engineer"));
   assert.ok(!args("code-reviewer").includes(check));
+  // #252: a check may take arguments (one test file); reviewers still get none of it.
+  const withArgs = `Bash(${s.deps.config.checks.test?.run} *)`;
+  assert.ok(args("backend-engineer").includes(withArgs));
+  assert.ok(args("manual-qa-engineer").includes(withArgs));
+  assert.ok(!args("code-reviewer").includes(withArgs));
+});
+
+test("refused commands are kept in evidence and listed in the step report (#252)", () => {
+  const s = setup({ denies: ["cd app && npm run check", "git `status`"] });
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const file = join(s.deps.evidenceDir, "implement-r1-a1.denials.json");
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), [
+    "Bash:cd app && npm run check",
+    "Bash:git `status`",
+  ]);
+  const dev = s.gh.comments.find((c) => c.body.includes("step=implement;")) ?? { body: "" };
+  assert.ok(dev.body.includes("- Permission denied: `Bash:cd app && npm run check`"));
+  assert.ok(dev.body.includes("- Permission denied: `Bash:git 'status'`"), "no code-span break");
+  const review = s.gh.comments.find((c) => c.body.includes("step=code-review;")) ?? { body: "" };
+  assert.ok(!review.body.includes("Permission denied"));
 });
 
 test("Manual QA that leaves the worktree dirty blocks the run, with the reason kept (#124)", () => {

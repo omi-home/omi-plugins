@@ -226,13 +226,15 @@ export function prepareAgent(o: {
   const repo = rel.startsWith("..") || isAbsolute(rel) ? o.worktree : rel.replaceAll("\\", "/");
   const git = (sub: string[]) => sub.map((c) => `Bash(git -C ${repo} ${c}*)`);
   const read = git(["status", "diff", "log", "show"]);
-  const checks = o.checks.map((c) => `Bash(${c})`);
+  // A check may take arguments (`npm test -- <file>`); the bare command alone is not enough (#252).
+  const checks = o.checks.flatMap((c) => [`Bash(${c})`, `Bash(${c} *)`]);
+  const runsChecks = o.edits || o.runsChecks === true;
   const allowedTools = o.edits
     ? [...read, ...git(["add", "commit"]), ...checks]
-    : o.runsChecks
+    : runsChecks
       ? [...read, ...checks]
       : read;
-  writeRoleFiles({ ...o, repo });
+  writeRoleFiles({ ...o, repo, checks: runsChecks ? o.checks : [] });
   return buildAgentLaunch({ ...o, allowedTools, acceptEdits: o.edits });
 }
 
@@ -348,6 +350,13 @@ function agentStep(
         );
       }
       const obs = observeRun(stdout);
+      // Kept even when the attempt errors: the refused commands explain a BLOCKED step (#252).
+      const denials = obs.permissionDenials.map((s) => cut(s, 300)).slice(0, 50);
+      if (denials.length) {
+        const file = join(d.evidenceDir, `${spec.stepId}-r${ctx.round}-a${attempt}.denials.json`);
+        writeFileSync(file, JSON.stringify(redactDeep(denials), null, 2));
+        addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "log", path: file });
+      }
       const durationMs = obs.durationMs ?? Date.now() - started;
       if (obs.isError) throw new OmiError("INTERNAL", `${spec.role} run ended in an error`);
       // Token usage is what the host observed, never what the agent claims.
@@ -381,6 +390,7 @@ function agentStep(
           changedFiles: result.changedFiles,
           evidencePaths: result.evidencePaths,
           findings: result.findings,
+          ...(denials.length ? { permissionDenials: denials } : {}),
           usage: result.usage,
           durationMs,
           nextAction: result.nextAction ?? "The OMI runtime decides the next step.",
