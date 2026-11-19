@@ -1,6 +1,6 @@
 # ADR-0002 — Workspace và profile thực thi Claude Code
 
-- **Trạng thái:** Accepted. PO duyệt phạm vi qua ChangeRequest-0001 #155 (2026-11-18); điểm kỹ thuật đã kiểm chứng ở Spike-0009 #139. Thay ADR-0001 D1 và D3; triển khai ở Feature-0024 #156 và Feature-0021 #137.
+- **Trạng thái:** Accepted. PO duyệt phạm vi qua ChangeRequest-0001 #155 (2026-11-18); điểm kỹ thuật đã kiểm chứng ở Spike-0009 #139. Thay ADR-0001 D1 và D3; triển khai ở Feature-0024 #156 và Feature-0021 #137. D4 bị thay bởi [ADR-0003](./ADR-0003-rules-skills-hooks-va-coordinator-mong.md) D4.
 - **Ngày:** 2026-11-18
 - **Người quyết định:** Product Owner (qua phiên Coordinator)
 - **Nguồn:** [ChangeRequest-0001 #155](https://github.com/omi-home/omi-plugins/issues/155) (Feature-0021 #137, Milestone-0009 #136)

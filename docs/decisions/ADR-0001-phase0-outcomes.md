@@ -1,6 +1,6 @@
 # ADR-0001 — Kết quả Phase 0 và các quyết định của PO
 
-- **Trạng thái:** Accepted. D1 và D3 bị thay bởi [ADR-0002](./ADR-0002-workspace-va-profile-thuc-thi-claude-code.md)
+- **Trạng thái:** Accepted. D1 và D3 bị thay bởi [ADR-0002](./ADR-0002-workspace-va-profile-thuc-thi-claude-code.md); phần workflow tùy chọn bị bỏ theo [ADR-0003](./ADR-0003-rules-skills-hooks-va-coordinator-mong.md) D7
 - **Ngày:** 2026-11-17
 - **Người quyết định:** Product Owner (qua phiên Coordinator)
 - **Bằng chứng:** comment bằng chứng trên Spike Issue #3–#12 (T0.1–T0.8); bảng tổng hợp trên [M0 #1](https://github.com/omi-home/omi-plugins/issues/1#issuecomment-6940598215)

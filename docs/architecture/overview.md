@@ -23,12 +23,12 @@ Ký hiệu `spec §N` (trong code, ADR, Issue) trỏ tới section `§N` trong p
 | Lớp | Trách nhiệm | Trạng thái gốc |
 |---|---|---|
 | Phiên Claude chính (Coordinator/PM/SM) | hiểu ý định, chọn workflow, giao tiếp PO | hội thoại |
-| Plugin Claude Code | agent chuyên môn, skill entry của Coordinator, workflow tuỳ chọn | mã nguồn plugin |
+| Plugin Claude Code | agent chuyên môn, skill entry của Coordinator, hooks (workflow tuỳ chọn sẽ bỏ, ADR-0003 D7) | mã nguồn plugin |
 | Runtime OMI (`runtime/`, `bin/omi`) | FSM, policy, ticket, task workspace, báo cáo GitHub, cleanup | SQLite cục bộ |
 | GitHub Project + Issues | cây công việc, trạng thái, PR, comment audit | GitHub |
 | CI / hooks | kiểm tra độc lập với agent | bằng chứng CI |
 
-Luồng chính ([ADR-0002](../decisions/ADR-0002-workspace-va-profile-thuc-thi-claude-code.md) D2/D4/D5): Coordinator → `omi` CLI → `claude -p --agent omi-engineering:<role>` với cwd = task workspace, `--plugin-dir <plugin>`, `CLAUDE_CONFIG_DIR` riêng mỗi lần chạy và env dựng từ allowlist → kết quả có cấu trúc → CLI lưu SQLite và đăng comment. Rule pack của role đến qua `AGENTS.md` mà CLI sinh trong task workspace, không qua lệnh Read. Profile thực thi (auth/model/effort theo profile) thuộc Feature-0021 #137; tới khi có, agent xác thực bằng `CLAUDE_CODE_OAUTH_TOKEN` của host.
+Luồng chính ([ADR-0002](../decisions/ADR-0002-workspace-va-profile-thuc-thi-claude-code.md) D2/D4/D5): Coordinator → `omi` CLI → `claude -p --agent omi-engineering:<role>` với cwd = task workspace, `--plugin-dir <plugin>`, `CLAUDE_CONFIG_DIR` riêng mỗi lần chạy và env dựng từ allowlist → kết quả có cấu trúc → CLI lưu SQLite và đăng comment. Rule pack của role đến qua `AGENTS.md` mà CLI sinh trong task workspace, không qua lệnh Read. Kiến trúc đích ([ADR-0003](../decisions/ADR-0003-rules-skills-hooks-va-coordinator-mong.md), Milestone-0010 #182): Coordinator mỏng chỉ điều phối; một plugin `omi-coordinator` chứa `agent-pack/` chạy bằng `--plugin-dir <plugin root>/agent-pack`; CLI chỉ chép skill Coordinator chọn từ `agent-pack/skill-library/` vào `.claude/skills/` của task workspace; hooks chặn cứng; bỏ workflows. Profile thực thi (auth/model/effort theo profile) thuộc Feature-0021 #137; tới khi có, agent xác thực bằng `CLAUDE_CODE_OAUTH_TOKEN` của host.
 
 ## Hợp đồng thư mục gốc
 
@@ -37,11 +37,12 @@ Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc 
 | Thư mục | Chủ sở hữu | Nội dung |
 |---|---|---|
 | `.claude-plugin/` | Claude Code | `plugin.json`, `marketplace.json` |
-| `agents/` | Claude Code | 11 agent chuyên môn (`disallowedTools: Skill`) |
+| `agents/` | Claude Code | 11 agent chuyên môn (`disallowedTools: Skill`); chuyển vào `agent-pack/agents/` (ADR-0003 D3, Feature-0026 #187) |
+| `agent-pack/` | Claude Code | (dự kiến, ADR-0003 D3) plugin `omi-engineering` lồng trong plugin: `agents/`, `skill-library/`, `hooks/`; không cài riêng |
 | `skills/` | Claude Code | **chỉ** entry skill của Coordinator (D3) |
-| `workflows/` | Claude Code | adapter chỉ-đọc tuỳ chọn; cấm `isolation: worktree` |
-| `hooks/` | Claude Code | `hooks.json` |
-| `resources/` | OMI | `role-rules/<role>/`, `shared/` — CLI chép vào `AGENTS.md` của task workspace theo danh sách `omi:rule-pack` trong `agents/<role>.md` |
+| `workflows/` | Claude Code | sẽ bỏ (ADR-0003 D7); không tạo mới |
+| `hooks/` | Claude Code | `hooks.json`: `PreToolUse` chặn cứng, `SessionStart` chèn tóm tắt (ADR-0003 D6) |
+| `resources/` | OMI | `role-rules/<role>/`, `shared/` — CLI chép vào `AGENTS.md` của task workspace theo danh sách `omi:rule-pack` trong `agents/<role>.md`; sẽ bỏ, thay bằng `agent-pack/skill-library/` (ADR-0003 D4, Feature-0027 #188) |
 | `runtime/` | OMI | CLI, core (FSM/policy/routing/handoff/errors), adapters, reporting, persistence |
 | `config/` | OMI | policy YAML, cấu hình GitHub Project |
 | `schemas/` | OMI | JSON Schema cho state/step/handoff/comment/cleanup |
@@ -112,7 +113,7 @@ omi-plugins/
 │   ├── omi-resume/SKILL.md             # new session: doctor → handoff show → cleanup scan → next step
 │   ├── omi-status/SKILL.md             # Milestone overview (omi status) for the PO
 │   └── omi-release/SKILL.md            # release check → PR develop → main (PO merge) → release tag
-├── workflows/                          # OPTIONAL read-only adapters (ADR-0001 D1); no isolation: worktree
+├── workflows/                          # to be removed (ADR-0003 D7); do not add new workflows
 │   └── review-gate.js                  # e.g. parallel multi-lens review; CLI publishes results
 ├── hooks/
 │   └── hooks.json
@@ -204,7 +205,7 @@ omi-plugins/
 
 - `.claude-plugin/`, `agents/`, `skills/`, `workflows/`, `hooks/` follow Claude Code plugin contracts (Phase 0 verified: agents register as `<plugin>:<name>`, skills as `<plugin>:<name>`, plugin workflows load from `workflows/` and run as `/<plugin>:<meta.name>`).
 - `resources/`, `config/`, `schemas/`, `templates/`, `runtime/`, `tests/` are OMI-owned, not magic Claude directories.
-- `workflows/*.js` **must not** duplicate state-machine logic or perform writes. Verified script API: `agent(prompt, {label, phase, schema, model, effort, isolation, agentType})`, `parallel`, `pipeline`, `phase`, `log`, `args`; no `cwd` option; no filesystem/shell/`import()`; `Date.now()`/`Math.random()` throw. Workflows are available only when the user enabled them (`"enableWorkflows": true`); `omi doctor` disables the adapter otherwise. Direct orchestration through CLI/Coordinator is the primary path.
+- Until removed (ADR-0003 D7): `workflows/*.js` **must not** duplicate state-machine logic or perform writes. Verified script API: `agent(prompt, {label, phase, schema, model, effort, isolation, agentType})`, `parallel`, `pipeline`, `phase`, `log`, `args`; no `cwd` option; no filesystem/shell/`import()`; `Date.now()`/`Math.random()` throw. Workflows are available only when the user enabled them (`"enableWorkflows": true`); `omi doctor` disables the adapter otherwise. Direct orchestration through CLI/Coordinator is the primary path.
 - `bin/omi` must resolve plugin paths and environment reliably, including Windows. Never embed developer-specific absolute paths.
 - No generated files are placed in arbitrary repository locations; update this directory contract through ADR before introducing new root folders.
 
