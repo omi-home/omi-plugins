@@ -37,7 +37,7 @@ Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc 
 | Thư mục | Chủ sở hữu | Nội dung |
 |---|---|---|
 | `.claude-plugin/` | Claude Code | `plugin.json`, `marketplace.json` |
-| `agent-pack/` | Claude Code | plugin `omi-engineering` lồng trong plugin `omi-coordinator` (ADR-0003 D3, DevTask-0059 #192): `agents/` (11 agent chuyên môn), sau này `skill-library/`, `hooks/`; CLI nạp bằng `--plugin-dir <plugin root>/agent-pack`, không cài riêng |
+| `agent-pack/` | Claude Code | plugin `omi-engineering` lồng trong plugin `omi-coordinator` (ADR-0003 D3, DevTask-0059 #192): `agents/` (11 agent chuyên môn, mỗi agent khai báo tập skill `omi:skills`), `skill-library/` (33 skill theo Spike-0011 #196, DevTask-0063 #197; nguồn ngoài ghi trong `THIRD_PARTY_NOTICES`), sau này `hooks/`; CLI nạp bằng `--plugin-dir <plugin root>/agent-pack`, không cài riêng |
 | `skills/` | Claude Code | **chỉ** entry skill của Coordinator (D3) |
 | `hooks/` | Claude Code | `hooks.json`: `PreToolUse` chặn cứng, `SessionStart` chèn tóm tắt (ADR-0003 D6) |
 | `resources/` | OMI | `role-rules/<role>/`, `shared/` — CLI chép vào `AGENTS.md` của task workspace theo danh sách `omi:rule-pack` trong `agent-pack/agents/<role>.md`; sẽ bỏ, thay bằng `agent-pack/skill-library/` (ADR-0003 D4, Feature-0027 #188) |
@@ -95,18 +95,19 @@ omi-plugins/
 │   └── marketplace.json                # single-plugin marketplace (validate local source)
 ├── agent-pack/                         # omi-engineering, loaded only by the CLI (--plugin-dir)
 │   ├── .claude-plugin/plugin.json
-│   └── agents/
-│       ├── business-analyst.md
-│       ├── solution-architect.md
-│       ├── ui-ux-designer.md
-│       ├── frontend-engineer.md
-│       ├── backend-engineer.md
-│       ├── database-engineer.md
-│       ├── code-reviewer.md
-│       ├── security-reviewer.md
-│       ├── manual-qa-engineer.md
-│       ├── automation-qa-engineer.md
-│       └── devops-engineer.md
+│   ├── agents/                         # one agent per role; <!-- omi:skills --> = default + allowed skills
+│   │   ├── business-analyst.md
+│   │   ├── solution-architect.md
+│   │   ├── ui-ux-designer.md
+│   │   ├── frontend-engineer.md
+│   │   ├── backend-engineer.md
+│   │   ├── database-engineer.md
+│   │   ├── code-reviewer.md
+│   │   ├── security-reviewer.md
+│   │   ├── manual-qa-engineer.md
+│   │   ├── automation-qa-engineer.md
+│   │   └── devops-engineer.md
+│   └── skill-library/<skill>/SKILL.md  # 33 role skills (Spike-0011 #196); not discovered, CLI copies the chosen ones
 ├── skills/                             # Coordinator entry points ONLY (ADR-0001 D3)
 │   ├── omi-start/SKILL.md              # bootstrap a repo (github project init → repo/project apply)
 │   ├── omi-plan/SKILL.md               # clarify a request with the PO → task Issues (omi issue create/depend)

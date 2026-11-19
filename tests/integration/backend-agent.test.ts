@@ -75,6 +75,10 @@ test("agent run (--plugin-dir agent-pack): every role agent by name, no Coordina
   for (const a of AGENTS) assert.ok(out.includes(`omi-engineering:${a} | Plugin`), a);
   assert.ok(!out.includes("omi-coordinator:"));
   for (const id of ALL_PACK_IDS) assert.ok(!out.includes(id), `${id} leaked into agent context`);
+  // DevTask-0063 #197: skill-library/ is not discovered; only skills the CLI copies are seen.
+  for (const s of ["test-driven-development", "semantic-code-review", "minimal-change"]) {
+    assert.ok(!out.includes(s), `skill-library/${s} discovered`);
+  }
 });
 
 /** Backend Engineer in a fresh task workspace; `roleFiles: false` leaves AGENTS.md out. */

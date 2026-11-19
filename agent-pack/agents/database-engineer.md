@@ -13,3 +13,8 @@ resources/shared/engineering-core.md
 resources/role-rules/database/schema-design.md
 resources/role-rules/database/database-migration.md
 -->
+
+<!-- omi:skills: the skill-library skills this role may use (Spike-0011 #196).
+default: schema-design, database-migration, verification-before-completion
+allowed: test-driven-development, minimal-change, systematic-debugging, receiving-review-findings
+-->

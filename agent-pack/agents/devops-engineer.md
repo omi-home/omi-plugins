@@ -13,3 +13,8 @@ resources/role-rules/devops/ci-cd-engineering.md
 resources/role-rules/devops/deployment-design.md
 resources/role-rules/devops/observability.md
 -->
+
+<!-- omi:skills: the skill-library skills this role may use (Spike-0011 #196).
+default: ci-cd-engineering, verification-before-completion
+allowed: deployment-design, observability, systematic-debugging, minimal-change, receiving-review-findings
+-->

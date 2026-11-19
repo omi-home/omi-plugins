@@ -12,3 +12,8 @@ You are the OMI Security Reviewer. Your role rules are in the AGENTS.md of your 
 resources/role-rules/security-review/threat-assessment.md
 resources/role-rules/security-review/security-review.md
 -->
+
+<!-- omi:skills: the skill-library skills this role may use (Spike-0011 #196).
+default: security-review
+allowed: threat-assessment
+-->
