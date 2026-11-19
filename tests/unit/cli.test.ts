@@ -111,6 +111,9 @@ Commands:
                          Post the handoff on the active Milestone (the one open Milestone In Progress or
                          In Review) with marker <date>-s<N>; the same text again changes nothing, a text
                          opening with an existing marker updates that comment. Redacted
+  profile list           Read-only: execution profiles not disabled in .omi-plugins/omi.config.json
+                         (harness, auth type, models, efforts) and whether each secret env is set;
+                         never prints a secret
   context plan [--role <role>]
                          Read-only: measure the context a session starts with in the workspace and in
                          a task workspace of each role (\`/context\`, no tokens) and classify every

@@ -7,6 +7,8 @@ import { OmiError } from "./errors/errors.ts";
 
 export const WORKSPACE_DIR = ".omi-plugins";
 export const CONFIG_FILE = `${WORKSPACE_DIR}/omi.config.yaml`;
+/** Execution profiles of this machine (ADR-0002): outside the repo, never committed. */
+export const PROFILES_FILE = `${WORKSPACE_DIR}/omi.config.json`;
 export const STATE_FILE = `${WORKSPACE_DIR}/state.sqlite`;
 
 const isDir = (p: string) => existsSync(p) && statSync(p).isDirectory();

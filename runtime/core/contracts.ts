@@ -242,6 +242,65 @@ export interface Check {
   code?: ErrorCode;
 }
 
+// ---- Execution profiles: <workspace>/.omi-plugins/omi.config.json (ADR-0002, Feature-0021 #137) ----
+
+/** Harnesses an execution profile can run on (v1: Claude Code only). */
+export const Harness = z.enum(["claudecode"]);
+export type Harness = z.infer<typeof Harness>;
+
+/** `claude --effort` levels a profile may offer. */
+export const ProfileEffort = z.enum(["low", "medium", "high", "xhigh", "max"]);
+export type ProfileEffort = z.infer<typeof ProfileEffort>;
+
+/** Name of an environment variable holding a secret: profiles never hold the value itself. */
+const envName = z
+  .string()
+  .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "expected an environment variable name");
+
+/** A gateway sees code and prompts: https only, plain http only to this machine. */
+const gatewayUrl = z.url({ protocol: /^https?$/ }).refine((u) => {
+  const { protocol, hostname } = new URL(u);
+  return protocol === "https:" || ["localhost", "127.0.0.1", "[::1]"].includes(hostname);
+}, "expected https (http only for localhost)");
+
+export const ProfileAuth = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("subscription"), tokenEnv: envName }),
+  z.strictObject({
+    type: z.literal("gateway"),
+    baseUrl: gatewayUrl,
+    scheme: z.enum(["x-api-key", "bearer"]),
+    keyEnv: envName,
+  }),
+]);
+export type ProfileAuth = z.infer<typeof ProfileAuth>;
+
+const unique = <T>(a: T[]) => new Set(a).size === a.length;
+
+export const Profile = z.discriminatedUnion("harness", [
+  z.strictObject({
+    name: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "expected lowercase letters, digits, -"),
+    harness: z.literal(Harness.enum.claudecode),
+    disabled: z.boolean().default(false),
+    auth: ProfileAuth,
+    models: z
+      .array(z.string().regex(/^[\w.:[\]-]{1,100}$/, "expected a model id"))
+      .min(1)
+      .max(20)
+      .refine(unique, "duplicate model"),
+    efforts: z.array(ProfileEffort).min(1).refine(unique, "duplicate effort"),
+  }),
+]);
+export type Profile = z.infer<typeof Profile>;
+
+export const ProfilesFile = z.strictObject({
+  profiles: z
+    .array(Profile)
+    .max(20)
+    .default([])
+    .refine((ps) => unique(ps.map((p) => p.name)), "duplicate profile name"),
+});
+export type ProfilesFile = z.infer<typeof ProfilesFile>;
+
 export const Severity = z.enum(["critical", "high", "medium", "low", "info"]);
 
 // ---- Shared primitives ----
