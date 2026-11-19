@@ -24,13 +24,11 @@ Ký hiệu `spec §N` (trong code, ADR, Issue) trỏ tới section `§N` trong p
 |---|---|---|
 | Phiên Claude chính (Coordinator/PM/SM) | hiểu ý định, chọn workflow, giao tiếp PO | hội thoại |
 | Plugin Claude Code | agent chuyên môn, skill entry của Coordinator, workflow tuỳ chọn | mã nguồn plugin |
-| Runtime OMI (`runtime/`, `bin/omi`) | FSM, policy, ticket, worktree, báo cáo GitHub, cleanup | SQLite cục bộ |
+| Runtime OMI (`runtime/`, `bin/omi`) | FSM, policy, ticket, task workspace, báo cáo GitHub, cleanup | SQLite cục bộ |
 | GitHub Project + Issues | cây công việc, trạng thái, PR, comment audit | GitHub |
 | CI / hooks | kiểm tra độc lập với agent | bằng chứng CI |
 
-Luồng chính (D1): Coordinator → `omi` CLI → `claude -p --agent omi-engineering:<role>` (cwd = clone trong task workspace, ADR-0002 D2) → kết quả có cấu trúc → CLI lưu SQLite và đăng comment.
-
-> [ADR-0002](../decisions/ADR-0002-workspace-va-profile-thuc-thi-claude-code.md) thay luồng này: workspace đồng cấp với repo, task workspace (clone) và profile thực thi Claude Code. Sơ đồ trên là as-built cho tới khi Feature-0024 #156 và Feature-0021 #137 hoàn thành.
+Luồng chính ([ADR-0002](../decisions/ADR-0002-workspace-va-profile-thuc-thi-claude-code.md) D2/D4/D5): Coordinator → `omi` CLI → `claude -p --agent omi-engineering:<role>` với cwd = task workspace, `--plugin-dir <plugin>`, `CLAUDE_CONFIG_DIR` riêng mỗi lần chạy và env dựng từ allowlist → kết quả có cấu trúc → CLI lưu SQLite và đăng comment. Rule pack của role đến qua `AGENTS.md` mà CLI sinh trong task workspace, không qua lệnh Read. Profile thực thi (auth/model/effort theo profile) thuộc Feature-0021 #137; tới khi có, agent xác thực bằng `CLAUDE_CODE_OAUTH_TOKEN` của host.
 
 ## Hợp đồng thư mục gốc
 
@@ -43,7 +41,7 @@ Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc 
 | `skills/` | Claude Code | **chỉ** entry skill của Coordinator (D3) |
 | `workflows/` | Claude Code | adapter chỉ-đọc tuỳ chọn; cấm `isolation: worktree` |
 | `hooks/` | Claude Code | `hooks.json` |
-| `resources/` | OMI | `role-rules/<role>/`, `shared/` — đọc bằng đường dẫn tường minh |
+| `resources/` | OMI | `role-rules/<role>/`, `shared/` — CLI chép vào `AGENTS.md` của task workspace theo danh sách `omi:rule-pack` trong `agents/<role>.md` |
 | `runtime/` | OMI | CLI, core (FSM/policy/routing/handoff/errors), adapters, reporting, persistence |
 | `config/` | OMI | policy YAML, cấu hình GitHub Project |
 | `schemas/` | OMI | JSON Schema cho state/step/handoff/comment/cleanup |
@@ -55,6 +53,33 @@ Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc 
 | `.github/` | GitHub | workflow CI/release |
 
 Thư mục chỉ được tạo khi task đầu tiên cần nó — không tạo thư mục rỗng hay placeholder.
+
+## Workspace và task workspace
+
+Dữ liệu và phiên làm việc của OMI nằm ngoài repo đích (ADR-0002 D1, D2). Repo đích không chứa `.omi/`, `AGENTS.md` của OMI hay `.claude/`; `omi doctor` (`layout`) cảnh báo khi còn. Repo đang ở layout cũ: [runbook chuyển đổi](../runbooks/workspace-migration.md).
+
+```text
+<parent>/
+├── <name>-workspace/                   # workspace của Coordinator: `omi workspace init`
+│   ├── .claude/                        # settings của phiên Coordinator
+│   ├── .omi-plugins/
+│   │   ├── omi.config.yaml             # config dự án: github, checks, review, agents, cleanup
+│   │   ├── omi.config.json             # profile thực thi, riêng từng máy, không commit (Feature-0021 #137)
+│   │   ├── state.sqlite                # state SQLite, dùng chung cho mọi task workspace
+│   │   └── evidence/<run>/             # task packet, log check; analysis: evidence/<run>/workspace/
+│   ├── AGENTS.md                       # chỉ dẫn của Coordinator
+│   └── <repo>/                         # checkout chính: chạy `omi` ở đây
+└── <name>-workspace-task-<run>/        # task workspace: `omi task start`, dọn bằng `omi task finalize`
+    ├── .claude/settings.json           # sinh lại trước mỗi lần chạy agent
+    ├── .omi-home/claude/               # CLAUDE_CONFIG_DIR, tạo mới mỗi lần chạy
+    ├── AGENTS.md                       # rule pack của role đang chạy
+    ├── REPORT.md                       # template báo cáo của bước
+    └── <repo>/                         # clone (không shallow), branch `<loại>/<issue>-<slug>`
+```
+
+- Task workspace: `git fetch origin` trong checkout chính, clone local, `remote set-url origin <github>`, rồi tạo branch từ `origin/<base>`. Push và PR do CLI làm từ clone.
+- Agent có cwd = task workspace. Git chạy dạng `git -C <repo> …`, check chạy dạng `cd <repo> && <lệnh>`. Chỉ những dạng này được cấp quyền.
+- Dọn chỉ khi receipt merge của GitHub khớp tip của clone và task workspace chỉ chứa repo cùng các file OMI sinh ra. Không `--force`, không xoá branch remote.
 
 ## Layout đầy đủ (spec §5)
 
@@ -90,7 +115,7 @@ omi-plugins/
 │   └── review-gate.js                  # e.g. parallel multi-lens review; CLI publishes results
 ├── hooks/
 │   └── hooks.json
-├── resources/                          # not discovered by Claude Code; read by explicit path only
+├── resources/                          # not discovered by Claude Code; copied into the task workspace AGENTS.md
 │   ├── shared/                         # knowledge reused by several roles (e.g. api-contracts.md)
 │   └── role-rules/
 │       ├── analysis/                   # requirement-analysis.md, acceptance-criteria.md, rules

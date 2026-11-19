@@ -57,7 +57,8 @@ Thử plugin từ source cục bộ không cần cài: `claude --plugin-dir .`. 
 - Spec và lộ trình: body các Issue trên [GitHub Project #2](https://github.com/orgs/omi-home/projects/2), bắt đầu từ [Epic-0001 #96](https://github.com/omi-home/omi-plugins/issues/96); chỉ mục trong [overview](./docs/architecture/overview.md)
 - [Tổng quan kiến trúc & hợp đồng thư mục](./docs/architecture/overview.md)
 - [ADR](./docs/decisions/)
-- [Runbook vận hành](./docs/runbooks/operations.md): cấu hình, quyền GitHub, giới hạn Free, escalation, recovery, rate limit, xoá an toàn, release
+- [Runbook vận hành](./docs/runbooks/operations.md): cấu hình, quyền GitHub, xác thực agent, giới hạn Free, escalation, recovery, rate limit, xoá an toàn, release
+- [Runbook chuyển sang layout workspace](./docs/runbooks/workspace-migration.md): từ `.omi/` + worktree sang workspace
 - Hướng dẫn đóng góp cho agent và người: [AGENTS.md](./AGENTS.md)
 - Quản lý task: [GitHub Project #2](https://github.com/orgs/omi-home/projects/2)
 
