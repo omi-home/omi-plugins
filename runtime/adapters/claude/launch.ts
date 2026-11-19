@@ -3,7 +3,7 @@
 // a fresh CLAUDE_CONFIG_DIR per run and an env built from an allowlist, never the host's env.
 import { isAbsolute, join, relative } from "node:path";
 import { type Selection, secretEnv } from "../../core/config.ts";
-import type { Role, TokenUsage } from "../../core/contracts.ts";
+import type { QuotaSignal, Role, TokenUsage } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 
 export const PLUGIN_NAME = "omi-engineering";
@@ -176,12 +176,9 @@ export interface AgentObservation {
 
 const nonNeg = (v: unknown) => (typeof v === "number" && v >= 0 ? Math.trunc(v) : undefined);
 
-/**
- * Reads a stream-json transcript. `modelUsage` is not used: it includes host-internal models.
- * Broken lines (a transcript cut by timeout or crash) are skipped; no result event is an error.
- */
-export function observeRun(streamJson: string): AgentObservation {
-  const events = streamJson
+/** Parsed events of a stream-json transcript; broken lines (a cut transcript) are skipped. */
+const streamEvents = (streamJson: string) =>
+  streamJson
     .split("\n")
     .filter((l) => l.startsWith("{"))
     .flatMap((l) => {
@@ -191,6 +188,31 @@ export function observeRun(streamJson: string): AgentObservation {
         return [];
       }
     });
+
+/**
+ * The quota signal of a run, if its profile ran out (#218): a `rate_limit_event` with
+ * `status=rejected`, or an error result with `api_error_status` 429 or 402. `event` is the raw
+ * host event, kept so the first real signal is recorded (Spike-0009 Q4 never saw a rejection).
+ */
+export function detectQuota(streamJson: string): { signal: QuotaSignal; event: unknown } | null {
+  const events = streamEvents(streamJson);
+  const rejected = events.find(
+    (e) => e.type === "rate_limit_event" && e.rate_limit_info?.status === "rejected",
+  );
+  if (rejected) return { signal: "rate_limit_rejected", event: rejected };
+  const failed = events.findLast((e) => e.type === "result" && e.is_error);
+  const status = Number(failed?.api_error_status);
+  if (status === 429) return { signal: "http_429", event: failed };
+  if (status === 402) return { signal: "http_402", event: failed };
+  return null;
+}
+
+/**
+ * Reads a stream-json transcript. `modelUsage` is not used: it includes host-internal models.
+ * Broken lines (a transcript cut by timeout or crash) are skipped; no result event is an error.
+ */
+export function observeRun(streamJson: string): AgentObservation {
+  const events = streamEvents(streamJson);
   const models = [
     ...new Set(
       events

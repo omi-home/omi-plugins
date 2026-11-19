@@ -4,7 +4,12 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { agentEnv, buildAgentLaunch, observeRun } from "../../runtime/adapters/claude/launch.ts";
+import {
+  agentEnv,
+  buildAgentLaunch,
+  detectQuota,
+  observeRun,
+} from "../../runtime/adapters/claude/launch.ts";
 import type { Selection } from "../../runtime/core/config.ts";
 import { spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
 
@@ -258,4 +263,17 @@ test("observeRun: a thinking block is the observable trace of effort", () => {
   assert.equal(think("thinking"), true);
   assert.equal(think("redacted_thinking"), true);
   assert.equal(think("text"), false);
+});
+
+test("detectQuota (#218): rejected / 429 / 402 are quota; a warning or an auth error is not", () => {
+  const t = (...e: unknown[]) =>
+    e.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join("\n");
+  const warn = { type: "rate_limit_event", rate_limit_info: { status: "allowed_warning" } };
+  const rejected = { type: "rate_limit_event", rate_limit_info: { status: "rejected" } };
+  const fail = (s: number) => ({ type: "result", is_error: true, api_error_status: s });
+  assert.equal(detectQuota(t(warn, { type: "result", is_error: false })), null);
+  assert.equal(detectQuota(t(fail(401))), null);
+  assert.equal(detectQuota(t(warn, rejected, "{cut"))?.signal, "rate_limit_rejected");
+  assert.equal(detectQuota(t(fail(429)))?.signal, "http_429");
+  assert.deepEqual(detectQuota(t(fail(402))), { signal: "http_402", event: fail(402) });
 });
