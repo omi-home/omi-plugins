@@ -90,6 +90,41 @@ export function preToolUse(input: HookInput): string | null {
   return null;
 }
 
+const WRITE_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
+
+/**
+ * Why an agent may not run this tool call, or null (ADR-0003 D6, DevTask-0064 #198): `git push`,
+ * any `gh` command, and a file tool writing outside the task workspace. The workspace is
+ * `CLAUDE_PROJECT_DIR` (Claude Code sets it to the agent's cwd, verified on 2.1.325), else `cwd`.
+ * ponytail: shell segments split on ; & | and newlines; a write through a shell redirect or an
+ * interpreter is not seen (the agent env has no GitHub token, so a push cannot authenticate).
+ */
+export function agentPreToolUse(
+  input: HookInput,
+  workspace = process.env.CLAUDE_PROJECT_DIR ?? input.cwd,
+): string | null {
+  if (!workspace) return null;
+  const tool = input.tool_name ?? "";
+  if (WRITE_TOOLS.includes(tool)) {
+    const file = input.tool_input?.file_path ?? input.tool_input?.notebook_path;
+    if (file && !inside(resolve(input.cwd ?? workspace, file), resolve(workspace))) {
+      return `OMI: an agent writes only inside its task workspace (${workspace}).`;
+    }
+    return null;
+  }
+  if (tool !== "Bash" && tool !== "PowerShell") return null;
+  for (const seg of (input.tool_input?.command ?? "").split(/[;&|\n]+/)) {
+    const s = seg.trim().replace(/^(?:\w+=\S*\s+)+/, ""); // drop `VAR=x` prefixes
+    if (/^gh(?:\.exe)?(?:\s|$)/.test(s)) {
+      return "OMI: agents do not call GitHub (gh). Report the result; the OMI CLI posts it.";
+    }
+    if (/^git(?:\.exe)?(?:\s+-[Cc]\s+(?:"[^"]*"|'[^']*'|\S+))*\s+push\b/.test(s)) {
+      return "OMI: agents never push. Commit in the clone; the OMI CLI pushes (omi pr create).";
+    }
+  }
+  return null;
+}
+
 /** Short context for a new, resumed or compacted Coordinator session; never throws. */
 export function sessionStart(input: HookInput, gh?: GhRunner): string {
   const cwd = input.cwd ?? process.cwd();
