@@ -19,6 +19,7 @@ import {
   type AgentLaunch,
   AUTH_ENV,
   buildAgentLaunch,
+  detectQuota,
   observeRun,
 } from "../../adapters/claude/launch.ts";
 import type { GhRunner } from "../../adapters/github/client.ts";
@@ -233,6 +234,34 @@ export function prepareAgent(o: {
 
 const cut = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
+/** Invisible characters a gateway was seen inserting into model output (Spike-0009 Q2). */
+const ZERO_WIDTH = /[\u200B-\u200D\u2060]/;
+
+/**
+ * Where a gateway step left zero-width characters: its diff over the base (committed or not),
+ * untracked files, commit messages (editing steps), and the report it is about to post.
+ */
+export function zeroWidthIn(t: SliceTarget, edits: boolean, texts: string[]): string[] {
+  const out = (args: string[]) =>
+    spawnSync("git", args, {
+      cwd: t.worktree,
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+      windowsHide: true,
+    }).stdout ?? "";
+  const where: string[] = [];
+  if (edits) {
+    if (ZERO_WIDTH.test(out(["diff", t.baseSha]))) where.push("diff");
+    for (const f of out(["ls-files", "--others", "--exclude-standard", "-z"]).split("\0")) {
+      if (f && ZERO_WIDTH.test(readFileSync(join(t.worktree, f), "utf8"))) where.push(f);
+    }
+    if (ZERO_WIDTH.test(out(["log", "--format=%B", `${t.baseSha}..HEAD`])))
+      where.push("commit message");
+  }
+  if (texts.some((s) => ZERO_WIDTH.test(s))) where.push("report");
+  return where;
+}
+
 /**
  * One agent step of the current round. Technical failures close the attempt and go through the
  * FSM (retry or BLOCKED); a step already reported (resume after a crash) is replayed, not re-run.
@@ -284,6 +313,8 @@ function agentStep(
         openFindings,
         readOnlyArtifacts: [],
         checkResults,
+        // Attempts that finish are never re-run: an earlier one was cut and may have left edits.
+        ...(attempt > 1 ? { priorAttemptCut: true as const } : {}),
       });
       const file = join(d.evidenceDir, `${spec.stepId}-r${ctx.round}-a${attempt}.packet.json`);
       writeFileSync(file, JSON.stringify(packet, null, 2));
@@ -304,6 +335,16 @@ function agentStep(
           selection: sel,
         }),
       );
+      const quota = detectQuota(stdout);
+      if (quota) {
+        const name = sel?.profile.name ?? "default";
+        const n = t.run.issue;
+        throw new OmiError(
+          "QUOTA_EXHAUSTED",
+          `profile ${name} is out of quota (${quota.signal}): PO sets "disabled": true for it in .omi-plugins/omi.config.json; Coordinator runs \`omi task unblock ${n}\` then \`omi task run ${n} --profile <another>\``,
+          { profile: name, signal: quota.signal, event: quota.event },
+        );
+      }
       const obs = observeRun(stdout);
       const durationMs = obs.durationMs ?? Date.now() - started;
       if (obs.isError) throw new OmiError("INTERNAL", `${spec.role} run ended in an error`);
@@ -350,6 +391,17 @@ function agentStep(
         marker: commentMarker(comment),
         body: renderStepReport(comment),
       };
+      // A gateway may watermark model output: nothing it touched is posted or carried on.
+      if (sel?.profile.auth.type === "gateway") {
+        const texts = [report.body, ...result.sectionUpdates.map((u) => u.markdown)];
+        const where = zeroWidthIn(t, spec.edits, texts);
+        if (where.length) {
+          throw new OmiError(
+            "POLICY_VIOLATION",
+            `gateway profile ${sel.profile.name} left zero-width characters (U+200B/C/D, U+2060) in: ${where.join(", ")}. Nothing was posted; strip them or re-run the step on another profile.`,
+          );
+        }
+      }
     } catch (e) {
       const err = e instanceof OmiError ? e : new OmiError("INTERNAL", (e as Error).message);
       // The reason survives the attempt (G6-002, #121): the DB keeps only the code.
@@ -358,6 +410,46 @@ function agentStep(
       const failure = { code: err.code, message: err.message, details: err.details ?? null };
       writeFileSync(file, JSON.stringify(redactDeep(failure), null, 2));
       addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "log", path: file });
+      if (err.code === "QUOTA_EXHAUSTED") {
+        // The Issue shows why the step stopped, with the host's own signal (#218).
+        const route = config.agents.routing[spec.role];
+        const comment = parseContract(
+          StepComment,
+          {
+            schemaVersion: 1,
+            issue,
+            workflowRunId: t.run.id,
+            category: spec.category,
+            workflow: workflowOf(t),
+            stepId: spec.stepId,
+            stepTitle: spec.title,
+            round: ctx.round,
+            attempt,
+            executor: spec.role,
+            requestedModel: sel?.model ?? route.model,
+            actualModel: "unknown",
+            requestedEffort: sel?.effort ?? route.effort,
+            actualEffort: "unknown",
+            ...(sel ? { profile: sel.profile.name, selectionReason: sel.reason } : {}),
+            status: "BLOCKED",
+            summary: cut(
+              `Quota: ${err.message}\nSignal: ${JSON.stringify((err.details as { event?: unknown }).event)}`,
+              2000,
+            ),
+            nextAction:
+              "Coordinator: a new attempt of this step on another profile, in the same task workspace.",
+            executionId: `${t.run.id}.${spec.stepId}.r${ctx.round}.a${attempt}`,
+            createdAt: (d.now?.() ?? new Date()).toISOString(),
+          },
+          "quota comment",
+        );
+        enqueueReport(db, {
+          runId: t.run.id,
+          marker: commentMarker(comment),
+          body: renderStepReport(comment),
+        });
+        publishPending(db, t.run.id, { gh: d.gh }); // a failure leaves it for the next run
+      }
       failAttempt(db, { stepRunId: step.id, attempt, errorCode: err.code });
       const next = advanceRun(
         db,

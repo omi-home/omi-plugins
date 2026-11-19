@@ -13,7 +13,12 @@ import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { parseConfig } from "../../runtime/core/config.ts";
 import type { TaskPacket } from "../../runtime/core/contracts.ts";
 import type { DeliveryPlan, WorkflowPlan } from "../../runtime/core/workflow-engine/plan.ts";
-import { lastStepError, runAnalysis, runSlice } from "../../runtime/core/workflow-engine/slice.ts";
+import {
+  lastStepError,
+  runAnalysis,
+  runSlice,
+  zeroWidthIn,
+} from "../../runtime/core/workflow-engine/slice.ts";
 import { openState } from "../../runtime/persistence/db.ts";
 import * as repo from "../../runtime/persistence/repository.ts";
 
@@ -717,6 +722,148 @@ test("Manual QA that leaves the worktree dirty blocks the run, with the reason k
   const err = lastStepError(s.deps.evidenceDir);
   assert.equal(err?.code, "POLICY_VIOLATION");
   assert.match(err?.message ?? "", /qa-scratch\.txt/);
+});
+
+const gatewaySelection = () => ({
+  profile: {
+    name: "cc-gw",
+    harness: "claudecode" as const,
+    disabled: false,
+    auth: {
+      type: "gateway" as const,
+      baseUrl: "https://gw.example.com",
+      scheme: "x-api-key" as const,
+      keyEnv: "OMI_GW",
+    },
+    models: ["claude-opus-5-5"],
+    efforts: ["high" as const],
+  },
+  model: "claude-opus-5-5",
+  effort: "high" as const,
+  reason: "spread evenly",
+});
+const subSelection = () => ({
+  profile: {
+    name: "cc-sub",
+    harness: "claudecode" as const,
+    disabled: false,
+    auth: { type: "subscription" as const, tokenEnv: "OMI_SUB" },
+    models: ["claude-sonnet-5-5"],
+    efforts: ["medium" as const],
+  },
+  model: "claude-sonnet-5-5",
+  effort: "medium" as const,
+  reason: "spread evenly",
+});
+const hostEnv = { PATH: "/bin", OMI_GW: "k", OMI_SUB: "t" };
+
+for (const [name, transcript] of [
+  [
+    "rate_limit_event rejected",
+    [
+      {
+        type: "rate_limit_event",
+        rate_limit_info: { status: "rejected", rateLimitType: "five_hour" },
+      },
+      { type: "result", is_error: true, api_error_status: 429, result: "limit" },
+    ],
+  ],
+  ["429", [{ type: "result", is_error: true, api_error_status: 429, result: "limit" }]],
+  ["402 (gateway)", [{ type: "result", is_error: true, api_error_status: 402, result: "credit" }]],
+] as const) {
+  test(`quota mid-step (${name}) → BLOCKED with a report; another profile runs a new attempt (#218)`, () => {
+    const s = setup();
+    const real = s.deps.runAgent;
+    let quotaOnce = true;
+    const runAgent = (l: AgentLaunch) => {
+      if (quotaOnce) {
+        // The engineer is cut after a first edit: the next attempt must find it.
+        quotaOnce = false;
+        s.agents.packets.push(JSON.parse(l.stdin.split("\n\n")[1] as string));
+        s.agents.launches.push(l);
+        writeFileSync(join(s.target.worktree, "half-done.txt"), "wip\n");
+        return transcript.map((e) => JSON.stringify(e)).join("\n");
+      }
+      return real(l);
+    };
+    const first = { ...s.deps, runAgent, hostEnv, selection: subSelection() };
+    assert.equal(runSlice(first, s.target).state, "BLOCKED");
+    const err = lastStepError(s.deps.evidenceDir);
+    assert.equal(err?.code, "QUOTA_EXHAUSTED");
+    assert.match(err?.message ?? "", /profile cc-sub is out of quota .*"disabled": true/);
+    assert.equal(s.gh.comments.length, 1);
+    assert.match(s.gh.comments[0]?.body ?? "", /step=implement;round=1;attempt=1/);
+    assert.match(s.gh.comments[0]?.body ?? "", /api_error_status|rate_limit_info/);
+    assert.equal(repo.runContext(s.db, "run").resumeFrom, "RUNNING");
+
+    repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+    const second = { ...s.deps, runAgent, hostEnv, selection: gatewaySelection() };
+    assert.equal(runSlice(second, s.target).state, "PR_PENDING");
+    const dev = s.agents.packets.filter((p) => p.role === "backend-engineer");
+    assert.deepEqual(
+      dev.map((p) => [p.stepId, p.attempt, p.priorAttemptCut]),
+      [
+        ["implement", 1, undefined],
+        ["implement", 2, true],
+      ],
+    );
+    assert.doesNotMatch(s.agents.launches[0]?.stdin ?? "", /git diff/);
+    assert.match(s.agents.launches[1]?.stdin ?? "", /read `git status` and `git diff`/i);
+    assert.equal(s.agents.launches[1]?.env.ANTHROPIC_API_KEY, "k");
+    assert.deepEqual(
+      s.db
+        .prepare("SELECT attempt, profile, error_code FROM step_attempt WHERE step_run_id = 1")
+        .all()
+        .map((r) => ({ ...r })),
+      [
+        { attempt: 1, profile: "cc-sub", error_code: "QUOTA_EXHAUSTED" },
+        { attempt: 2, profile: "cc-gw", error_code: null },
+      ],
+    );
+  });
+}
+
+test("gateway profile: zero-width characters in the diff block the run before any report (#218)", () => {
+  const s = setup();
+  const real = s.deps.runAgent;
+  const runAgent = (l: AgentLaunch) => {
+    const out = real(l);
+    writeFileSync(join(s.target.worktree, "src", "wm.txt"), "ok\u200B\n");
+    git(s.target.worktree, "add", "-A");
+    git(s.target.worktree, "commit", "-qm", "wm");
+    return out;
+  };
+  const deps = { ...s.deps, runAgent, hostEnv, selection: gatewaySelection() };
+  assert.equal(runSlice(deps, s.target).state, "BLOCKED");
+  const err = lastStepError(s.deps.evidenceDir);
+  assert.equal(err?.code, "POLICY_VIOLATION");
+  assert.match(err?.message ?? "", /zero-width .* in: diff/);
+  assert.equal(s.gh.comments.length, 0);
+});
+
+test("gateway profile: zero-width characters in the report block it; a subscription is not checked", () => {
+  for (const [selection, blocked] of [
+    [gatewaySelection(), true],
+    [subSelection(), false],
+  ] as const) {
+    const s = setup();
+    const real = s.deps.runAgent;
+    const runAgent = (l: AgentLaunch) => real(l).replace("implemented", "implemented\u2060");
+    const ctx = runSlice({ ...s.deps, runAgent, hostEnv, selection }, s.target);
+    assert.equal(ctx.state, blocked ? "BLOCKED" : "PR_PENDING");
+    if (blocked) assert.match(lastStepError(s.deps.evidenceDir)?.message ?? "", /in: report\./);
+  }
+});
+
+test("zeroWidthIn: untracked files and commit messages of an editing step", () => {
+  const s = setup();
+  const wt = s.target.worktree;
+  writeFileSync(join(wt, "a.txt"), "x");
+  git(wt, "add", "-A");
+  git(wt, "commit", "-qm", "msg\u200C");
+  writeFileSync(join(wt, "new.txt"), "\u200D");
+  assert.deepEqual(zeroWidthIn(s.target, true, ["clean"]), ["new.txt", "commit message"]);
+  assert.deepEqual(zeroWidthIn(s.target, false, ["clean"]), []);
 });
 
 test("profile chosen (#217): every agent runs on it; state and report record the choice", () => {

@@ -25,6 +25,8 @@ export const ERROR_CODES = {
   REPORT_NOT_POSTED: { transient: true },
   // An attempt left open by a crashed process, closed by startup reconciliation: retry it.
   CRASH_RECOVERED: { transient: true },
+  // The profile ran out of quota mid-step (#218): retrying it is pointless, another profile runs.
+  QUOTA_EXHAUSTED: { transient: false },
   INTERNAL: { transient: false },
 } as const satisfies Record<string, { transient: boolean }>;
 

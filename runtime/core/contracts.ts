@@ -301,6 +301,13 @@ export const ProfilesFile = z.strictObject({
 });
 export type ProfilesFile = z.infer<typeof ProfilesFile>;
 
+/**
+ * How a harness run said its profile is out of quota (#218, Spike-0009 Q4): a subscription sends
+ * `rate_limit_event` with `status=rejected` and/or fails with 429; a gateway only fails with 402.
+ */
+export const QuotaSignal = z.enum(["rate_limit_rejected", "http_429", "http_402"]);
+export type QuotaSignal = z.infer<typeof QuotaSignal>;
+
 export const Severity = z.enum(["critical", "high", "medium", "low", "info"]);
 
 // ---- Shared primitives ----
@@ -394,6 +401,8 @@ export const TaskPacket = z.strictObject({
   readOnlyArtifacts: z.array(relPath).max(50),
   /** Deterministic checks the runtime already ran on this worktree this round (review steps). */
   checkResults: z.array(CheckRun).max(10).optional(),
+  /** An earlier attempt of this step was cut (quota, crash): its edits may be in the worktree. */
+  priorAttemptCut: z.literal(true).optional(),
   outputSchema: z.literal(STEP_RESULT_SCHEMA),
 });
 export type TaskPacket = z.infer<typeof TaskPacket>;
