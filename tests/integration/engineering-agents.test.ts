@@ -103,14 +103,7 @@ function step(
     taskRoot: dirname(dir),
     worktree: dir,
     prompt: packetPrompt(packet),
-    allowedTools: [
-      "Bash(git status*)",
-      "Bash(git diff*)",
-      "Bash(git log*)",
-      "Bash(git add*)",
-      "Bash(git commit*)",
-      "Bash(npm test)",
-    ],
+    checks: ["npm test"],
   });
   const result = acceptStepResult(packet, observeRun(spawnAgent(l)).result); // throws on out-of-scope claims
   assert.equal(result.status, "PASSED", result.blockerReason ?? result.summary);

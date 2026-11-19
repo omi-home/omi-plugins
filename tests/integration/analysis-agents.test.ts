@@ -42,6 +42,7 @@ function run(role: Role, prompt: string, cwd: string) {
     role,
     category: "analysis",
     edits: false,
+    checks: [],
     taskRoot: dirname(cwd),
     worktree: cwd,
     prompt,

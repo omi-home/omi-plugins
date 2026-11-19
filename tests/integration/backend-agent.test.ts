@@ -74,7 +74,7 @@ const runAgent = (roleFiles: boolean) => {
     prompt: "Which rule pack did you load? Reply with its Pack-ID only.",
   };
   const l = roleFiles
-    ? prepareAgent({ ...o, category: "implementation", edits: false })
+    ? prepareAgent({ ...o, category: "implementation", edits: false, checks: [] })
     : buildAgentLaunch(o);
   return observeRun(spawnAgent(l));
 };

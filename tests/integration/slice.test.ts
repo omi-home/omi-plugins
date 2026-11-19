@@ -683,7 +683,9 @@ test("Manual QA may run the repo's check commands; reviewers may not (PO #124)",
   const args = (role: string) =>
     s.agents.launches.find((l) => l.stdin.includes(`"role": "${role}"`))?.args ?? [];
   assert.ok(args("manual-qa-engineer").includes(check));
-  assert.ok(!args("manual-qa-engineer").includes("Bash(git commit*)"));
+  const commit = (role: string) => args(role).some((t) => /^Bash\(git -C .+ commit\*\)$/.test(t));
+  assert.ok(commit("backend-engineer"), "engineers commit through git -C <repo>");
+  assert.ok(!commit("manual-qa-engineer"));
   assert.ok(!args("code-reviewer").includes(check));
 });
 

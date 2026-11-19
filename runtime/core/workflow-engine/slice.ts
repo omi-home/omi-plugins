@@ -14,7 +14,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import {
   type AgentLaunch,
   AUTH_ENV,
@@ -191,30 +191,40 @@ export const spawnAgent = (l: AgentLaunch): string => {
   return r.stdout ?? ""; // a cut or failed run has no result event: observeRun reports it
 };
 
-/** Writes the role files of the task workspace, then the launch of its agent (ADR-0002 D2/D4). */
+/**
+ * Writes the role files of the task workspace, then the launch of its agent (ADR-0002 D2/D4).
+ * Every Bash call starts in the task workspace: git is granted as `git -C <repo> …` (a `cd` before
+ * git is refused by Claude Code) and check commands run as `cd <repo> && <check>`.
+ * Read-only git for everyone; implementers may also commit and run the repo's checks.
+ */
 export function prepareAgent(o: {
   pluginRoot: string;
   role: Role;
   category: ReportCategory;
   /** Implementing roles may edit files in the clone. */
   edits: boolean;
+  /** May run the check commands without editing (Manual QA, PO #124). */
+  runsChecks?: boolean;
+  /** The repo's configured check commands. */
+  checks: string[];
   taskRoot: string;
   worktree: string;
   prompt: string;
-  allowedTools?: string[];
   hostEnv?: NodeJS.ProcessEnv;
 }): AgentLaunch {
-  const { category, edits, ...launch } = o;
-  writeRoleFiles({ taskRoot: o.taskRoot, pluginRoot: o.pluginRoot, role: o.role, category, edits });
-  return buildAgentLaunch({ ...launch, acceptEdits: edits });
-}
-
-/** Read-only git for everyone; implementers may also commit and run the repo's own checks. */
-function tools(config: OmiConfig, spec: StepSpec): string[] {
-  const read = ["Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)"];
-  const checks = Object.values(config.checks).flatMap((c) => (c ? [`Bash(${c.run})`] : []));
-  if (!spec.edits) return spec.runsChecks ? [...read, ...checks] : read;
-  return [...read, "Bash(git add*)", "Bash(git commit*)", ...checks];
+  const rel = relative(o.taskRoot, o.worktree);
+  // ponytail: outside the task workspace (analysis) the absolute path must be typed verbatim.
+  const repo = rel.startsWith("..") || isAbsolute(rel) ? o.worktree : rel.replaceAll("\\", "/");
+  const git = (sub: string[]) => sub.map((c) => `Bash(git -C ${repo} ${c}*)`);
+  const read = git(["status", "diff", "log", "show"]);
+  const checks = o.checks.map((c) => `Bash(${c})`);
+  const allowedTools = o.edits
+    ? [...read, ...git(["add", "commit"]), ...checks]
+    : o.runsChecks
+      ? [...read, ...checks]
+      : read;
+  writeRoleFiles({ ...o, repo });
+  return buildAgentLaunch({ ...o, allowedTools, acceptEdits: o.edits });
 }
 
 const cut = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
@@ -273,8 +283,9 @@ function agentStep(
           edits: spec.edits,
           taskRoot: t.taskRoot,
           worktree: t.worktree,
+          runsChecks: spec.runsChecks,
+          checks: Object.values(config.checks).flatMap((c) => (c ? [c.run] : [])),
           prompt: packetPrompt(packet),
-          allowedTools: tools(config, spec),
           hostEnv: d.hostEnv,
         }),
       );

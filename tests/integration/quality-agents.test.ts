@@ -35,9 +35,6 @@ const idsOf = (role: Role) =>
     packId(m[1] as string),
   );
 
-const READ = ["Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)"];
-const EDIT = [...READ, "Bash(git add*)", "Bash(git commit*)", "Bash(npm test)"];
-
 function launch(role: Role, prompt: string, cwd: string, edits: boolean) {
   // The allowlisted env also drops NODE_TEST_CONTEXT: `npm test` inside the agent is not nested.
   const l = prepareAgent({
@@ -48,7 +45,7 @@ function launch(role: Role, prompt: string, cwd: string, edits: boolean) {
     taskRoot: dirname(cwd),
     worktree: cwd,
     prompt,
-    allowedTools: edits ? EDIT : READ,
+    checks: edits ? ["npm test"] : [],
   });
   return observeRun(spawnAgent(l));
 }
