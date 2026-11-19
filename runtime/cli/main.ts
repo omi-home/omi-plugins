@@ -1,5 +1,6 @@
 // OMI CLI entry. Pure function of argv/cwd → {code, stdout, stderr}; bin/omi does the I/O.
 // Everything leaving the process goes through redact.
+
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -23,6 +24,7 @@ import { CONFIG_FILE } from "../core/workspace.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { type Check, doctor } from "./doctor.ts";
+import { type HookInput, preToolUse, sessionStart } from "./hook.ts";
 import { projectInit } from "./init.ts";
 import { releaseCheck, releaseTag } from "./release.ts";
 import { NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "./status.ts";
@@ -146,6 +148,10 @@ Commands:
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
                          prune missing worktrees; orphans are reported, never removed
+  hook pre-tool-use      Coordinator plugin hook (hook input JSON on stdin): exit 2 with the reason when
+                         the call edits the main repo, commits on or pushes to develop/main, or uses
+                         --force; anything else (or no OMI workspace, bad input) passes
+  hook session-start     Coordinator plugin hook: short summary (latest handoff, Milestone status)
   version                Print the OMI version
   help                   Show this help
 
@@ -223,6 +229,8 @@ const REPO_WIDE = new Set([
   "handoff post",
   "workspace init",
   "workspace migrate",
+  "hook pre-tool-use",
+  "hook session-start",
 ]);
 
 const describe = (a: ProjectAction) =>
@@ -331,6 +339,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         "handoff",
         "release",
         "workspace",
+        "hook",
       ].includes(command)
     ) {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
@@ -561,6 +570,31 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
             ])
           : "handoff   none found\n";
         return ok(h, human);
+      }
+      case "hook pre-tool-use":
+      case "hook session-start": {
+        // Fail-open: a broken hook input or a failing lookup never blocks the session.
+        let input: HookInput = {};
+        try {
+          input = JSON.parse(readFileSync(0, "utf8"));
+        } catch {
+          // no or bad stdin: empty input
+        }
+        if (command === "hook session-start") return ok(null, sessionStart(input));
+        let why: string | null = null;
+        try {
+          why = preToolUse(input);
+        } catch {
+          why = null;
+        }
+        return why
+          ? {
+              code: 2,
+              stdout: "",
+              stderr: `${why}
+`,
+            }
+          : ok(null, "");
       }
       case "handoff post": {
         const text = bodyFile();

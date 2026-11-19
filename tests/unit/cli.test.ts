@@ -115,6 +115,10 @@ Commands:
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
                          prune missing worktrees; orphans are reported, never removed
+  hook pre-tool-use      Coordinator plugin hook (hook input JSON on stdin): exit 2 with the reason when
+                         the call edits the main repo, commits on or pushes to develop/main, or uses
+                         --force; anything else (or no OMI workspace, bad input) passes
+  hook session-start     Coordinator plugin hook: short summary (latest handoff, Milestone status)
   version                Print the OMI version
   help                   Show this help
 
