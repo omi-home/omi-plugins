@@ -17,10 +17,11 @@ import {
   type StatusDrift,
 } from "../adapters/github/project-fields.ts";
 import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/github/repo.ts";
+import { listProfiles } from "../core/config.ts";
 import { IssueType, ProjectStatus, type TokenUsage } from "../core/contracts.ts";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import type { RepoAction } from "../core/repo-config.ts";
-import { CONFIG_FILE } from "../core/workspace.ts";
+import { CONFIG_FILE, locate } from "../core/workspace.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { formatUsage, sumUsage } from "../reporting/render.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
@@ -146,6 +147,9 @@ Commands:
                          Post the handoff on the active Milestone (the one open Milestone In Progress or
                          In Review) with marker <date>-s<N>; the same text again changes nothing, a text
                          opening with an existing marker updates that comment. Redacted
+  profile list           Read-only: execution profiles not disabled in .omi-plugins/omi.config.json
+                         (harness, auth type, models, efforts) and whether each secret env is set;
+                         never prints a secret
   context plan [--role <role>]
                          Read-only: measure the context a session starts with in the workspace and in
                          a task workspace of each role (\`/context\`, no tokens) and classify every
@@ -243,6 +247,7 @@ const REPO_WIDE = new Set([
   "workspace migrate",
   "context plan",
   "context apply",
+  "profile list",
   "hook pre-tool-use",
   "hook session-start",
 ]);
@@ -431,6 +436,20 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         return ok(
           r,
           lines([`settings  ${r.settingsPath} (${verb})`, ...r.diff.map((d) => `  ${d}`)]),
+        );
+      }
+      case "profile list": {
+        const profiles = listProfiles(locate(cwd).workspace);
+        return ok(
+          { profiles },
+          lines(
+            profiles.length
+              ? profiles.map(
+                  (p) =>
+                    `${p.name.padEnd(16)} ${p.harness} ${p.auth} ${p.secretEnv}=${p.secretSet ? "set" : "UNSET"}  models ${p.models.join(",")}  efforts ${p.efforts.join(",")}`,
+                )
+              : ["profiles  none active: steps use agents.routing"],
+          ),
         );
       }
       case "doctor": {

@@ -5,11 +5,17 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
-import { loadConfig, type OmiConfig } from "../core/config.ts";
+import { loadConfig, loadProfiles, type OmiConfig, secretEnv } from "../core/config.ts";
 import { parseContext } from "../core/context-usage.ts";
 import type { Check } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
-import { CONFIG_FILE, locate, STATE_FILE, WORKSPACE_DIR } from "../core/workspace.ts";
+import {
+  CONFIG_FILE,
+  locate,
+  PROFILES_FILE,
+  STATE_FILE,
+  WORKSPACE_DIR,
+} from "../core/workspace.ts";
 import { openState } from "../persistence/db.ts";
 import { openRuns, ownedRefs } from "../persistence/repository.ts";
 import { same } from "../resources/worktree.ts";
@@ -169,7 +175,7 @@ export function layout(workspace: string, repoRoot: string): Check[] {
     ["ls-files", "--", "*omi.config.json", ":(exclude)templates/workspace/.omi-plugins/"],
     repoRoot,
   );
-  const profiles = join(workspace, WORKSPACE_DIR, "omi.config.json");
+  const profiles = join(workspace, PROFILES_FILE);
   checks.push(
     tracked.ok && tracked.out
       ? { name: "profiles-file", status: "fail", detail: `tracked in the repo: ${tracked.out}` }
@@ -418,6 +424,46 @@ export function github(config: OmiConfig | undefined, run: GhRunner = spawnGh): 
   return checks;
 }
 
+/**
+ * Static checks of the machine's execution profiles (DevTask-0073 #216): the file parses and every
+ * profile not `disabled` has its secret env set. A real probe is `omi doctor --probe` (#219).
+ */
+export function profilesCheck(workspace: string, env: NodeJS.ProcessEnv = process.env): Check[] {
+  let profiles: ReturnType<typeof loadProfiles>;
+  try {
+    profiles = loadProfiles(workspace);
+  } catch (e) {
+    const err = e instanceof OmiError ? e : new OmiError("INTERNAL", "profiles check crashed");
+    const issues = (err.details as { issues?: { path: string; message: string }[] })?.issues;
+    return [
+      {
+        name: "profiles",
+        status: "fail",
+        detail: [err.message, ...(issues ?? []).map((i) => `${i.path}: ${i.message}`)].join("; "),
+      },
+    ];
+  }
+  const active = profiles.filter((p) => !p.disabled);
+  if (!active.length) {
+    return [
+      {
+        name: "profiles",
+        status: "pass",
+        detail: `no active profile in ${PROFILES_FILE}: steps use agents.routing`,
+      },
+    ];
+  }
+  return active.map((p) =>
+    env[secretEnv(p)]
+      ? { name: `profile ${p.name}`, status: "pass", detail: `${p.auth.type}, ${secretEnv(p)} set` }
+      : {
+          name: `profile ${p.name}`,
+          status: "fail",
+          detail: `${secretEnv(p)} is not set (or mark the profile disabled)`,
+        },
+  );
+}
+
 export function doctor(cwd: string): Check[] {
   const checks: Check[] = [
     atLeast(process.versions.node, MIN_NODE)
@@ -464,6 +510,7 @@ export function doctor(cwd: string): Check[] {
   if (loc)
     checks.push(
       ...layout(loc.workspace, repoRoot),
+      ...profilesCheck(loc.workspace),
       memoryDirCheck(loc.workspace),
       coordinatorPluginCheck(loc.workspace),
     );

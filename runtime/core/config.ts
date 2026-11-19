@@ -5,9 +5,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-import { GateCheck, parseContract, Role } from "./contracts.ts";
+import { GateCheck, type Profile, ProfilesFile, parseContract, Role } from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
-import { CONFIG_FILE } from "./workspace.ts";
+import { CONFIG_FILE, PROFILES_FILE } from "./workspace.ts";
 
 const ModelAlias = z.enum(["sonnet", "opus", "haiku"]);
 const Effort = z.enum(["low", "medium", "high"]);
@@ -120,3 +120,56 @@ export function loadConfig(workspace: string): OmiConfig {
   }
   return parseConfig(data);
 }
+
+/**
+ * Execution profiles of this machine (`<workspace>/.omi-plugins/omi.config.json`, never committed).
+ * A missing file means no profile: steps keep the `agents.routing` defaults. Errors never echo values.
+ */
+export function loadProfiles(workspace: string): Profile[] {
+  let text: string;
+  try {
+    text = readFileSync(join(workspace, PROFILES_FILE), "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new OmiError("CONFIG_INVALID", `${PROFILES_FILE}: unreadable`);
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(text.replace(/^﻿/, "")); // editors on Windows may write a BOM
+  } catch {
+    throw new OmiError("CONFIG_INVALID", `${PROFILES_FILE}: invalid JSON`);
+  }
+  return parseContract(ProfilesFile, data, PROFILES_FILE, "CONFIG_INVALID").profiles;
+}
+
+/** The env variable a profile's secret is read from. */
+export const secretEnv = (p: Profile) =>
+  p.auth.type === "subscription" ? p.auth.tokenEnv : p.auth.keyEnv;
+
+export interface ProfileListing {
+  name: string;
+  harness: Profile["harness"];
+  auth: Profile["auth"]["type"];
+  /** Variable name only; its value is never read out, just whether it is set. */
+  secretEnv: string;
+  secretSet: boolean;
+  models: string[];
+  efforts: Profile["efforts"];
+}
+
+/** Profiles the Coordinator may pick from: every profile not `disabled`. */
+export const listProfiles = (
+  workspace: string,
+  env: NodeJS.ProcessEnv = process.env,
+): ProfileListing[] =>
+  loadProfiles(workspace)
+    .filter((p) => !p.disabled)
+    .map((p) => ({
+      name: p.name,
+      harness: p.harness,
+      auth: p.auth.type,
+      secretEnv: secretEnv(p),
+      secretSet: Boolean(env[secretEnv(p)]),
+      models: p.models,
+      efforts: p.efforts,
+    }));
