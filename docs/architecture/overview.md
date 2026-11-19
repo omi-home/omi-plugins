@@ -109,6 +109,7 @@ omi-plugins/
 │       └── devops-engineer.md
 ├── skills/                             # Coordinator entry points ONLY (ADR-0001 D3)
 │   ├── omi-start/SKILL.md              # bootstrap a repo (github project init → repo/project apply)
+│   ├── omi-plan/SKILL.md               # clarify a request with the PO → task Issues (omi issue create/depend)
 │   ├── omi-task/SKILL.md               # one ticket-driven task
 │   ├── omi-resume/SKILL.md             # new session: doctor → handoff show → cleanup scan → next step
 │   ├── omi-status/SKILL.md             # Milestone overview (omi status) for the PO

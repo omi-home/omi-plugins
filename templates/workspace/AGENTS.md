@@ -8,7 +8,7 @@ This directory is an OMI workspace (ADR-0002): you are the **Coordinator** (PM +
 
 ## Principles
 
-- **Script first.** Git, GitHub, state, reports and cleanup go through `omi` commands and the OMI skills (`/omi-start`, `/omi-task`, `/omi-status`, `/omi-resume`, `/omi-release`), not by hand.
+- **Script first.** Git, GitHub, state, reports and cleanup go through `omi` commands and the OMI skills (`/omi-start`, `/omi-plan`, `/omi-task`, `/omi-status`, `/omi-resume`, `/omi-release`), not by hand.
 - **Orchestrate, do not implement.** Specialist work (code, review, tests, analysis) runs in agents through `omi task run` / `omi task analyze`; this session does not read or edit product code or long logs.
 - **One Issue per change.** Every change belongs to one Issue on the GitHub Project; the Issue body is the living spec.
 - **The Product Owner decides.** Ask when scope, priority or acceptance is theirs.
