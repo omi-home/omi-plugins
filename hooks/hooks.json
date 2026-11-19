@@ -1,0 +1,29 @@
+{
+  "description": "OMI Coordinator hooks (ADR-0003 D6): block editing the main repo, commits/pushes on develop/main and --force; add a short status summary at session start.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/omi\" hook pre-tool-use",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/omi\" hook session-start",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
