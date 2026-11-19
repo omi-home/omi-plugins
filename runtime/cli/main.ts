@@ -26,7 +26,7 @@ import { redact, redactDeep } from "../reporting/redact.ts";
 import { formatUsage, sumUsage } from "../reporting/render.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { contextApply, contextPlan, humanContextPlan } from "./context.ts";
-import { type Check, doctor } from "./doctor.ts";
+import { type Check, doctor, probeProfiles } from "./doctor.ts";
 import { type HookInput, preToolUse, sessionStart } from "./hook.ts";
 import { projectInit } from "./init.ts";
 import { releaseCheck, releaseTag } from "./release.ts";
@@ -66,7 +66,8 @@ const humanScan = (s: ScanResult) => [
 export const HELP = `Usage: omi <command> [--output human|json]
 
 Commands:
-  doctor                 Check tools, repository, AGENTS.md, workspace config and GitHub access
+  doctor [--probe]       Check tools, repository, AGENTS.md, workspace config and GitHub access;
+                         --probe runs one short claude call per active profile (spends tokens)
   status [--milestone <n>]
                          Read-only overview of a Milestone (default: the active one): its Issues by
                          Project Status with open PRs, local runs and leftovers, Status drift and
@@ -467,6 +468,8 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       }
       case "doctor": {
         const checks = doctor(cwd);
+        // Spends tokens: only on request (#219).
+        if (values.probe) checks.push(...probeProfiles(locate(cwd).workspace));
         return ok({ checks }, humanChecks(checks), checksExit(checks));
       }
       case "release check": {
@@ -836,5 +839,6 @@ const parse = (args: string[]) =>
       role: { type: "string" },
       remove: { type: "boolean" },
       bundled: { type: "boolean" },
+      probe: { type: "boolean" },
     },
   });

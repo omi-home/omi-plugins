@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { harnessVersion, versionRefusal } from "../adapters/claude/launch.ts";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import { writeSection } from "../adapters/github/context.ts";
 import {
@@ -33,7 +34,13 @@ import {
   setStatus,
 } from "../adapters/github/project.ts";
 import { fetchTicket, type Ticket, validateTicket } from "../adapters/github/ticket.ts";
-import { loadConfig, loadProfiles, type OmiConfig, selectProfile } from "../core/config.ts";
+import {
+  loadConfig,
+  loadProfiles,
+  type OmiConfig,
+  type Selection,
+  selectProfile,
+} from "../core/config.ts";
 import {
   type Check,
   type CleanupResult,
@@ -411,7 +418,11 @@ export interface PickFlags {
  * Spawns agent processes: this command spends tokens.
  */
 export function taskRun(
-  deps: TaskDeps & Pick<SliceDeps, "runAgent" | "hostEnv"> & { pick?: PickFlags },
+  deps: TaskDeps &
+    Pick<SliceDeps, "runAgent" | "hostEnv"> & {
+      pick?: PickFlags;
+      harnessVersion?: () => string | undefined;
+    },
   issue: number,
 ): RunResult {
   const gh = deps.gh ?? spawnGh;
@@ -423,6 +434,7 @@ export function taskRun(
   if (plan.kind !== "delivery") {
     throw new OmiError("POLICY_VIOLATION", `${plan.workflow}: use \`omi task analyze ${issue}\``);
   }
+  harnessGate(deps, selection);
   const start = taskStart(deps, issue);
   const file = statePath(deps.cwd);
   const db = openState(file);
@@ -468,6 +480,20 @@ export function taskRun(
   }
 }
 
+/**
+ * The harness must be in the verified range before any agent runs (#219). An injected runner
+ * (tests) or a harness passed in `deps` decides without spawning the real CLI.
+ */
+export function harnessGate(
+  deps: Pick<SliceDeps, "runAgent"> & { harnessVersion?: () => string | undefined },
+  selection: Selection | undefined,
+): void {
+  if (deps.runAgent && !deps.harnessVersion) return;
+  const h = selection?.profile.harness ?? "claudecode";
+  const why = versionRefusal((deps.harnessVersion ?? (() => harnessVersion(h)))(), h);
+  if (why) throw new OmiError("CONFIG_INVALID", `${why}: see \`omi doctor\``);
+}
+
 const blockedBy = (state: WorkflowContext["state"], evidenceDir: string) => {
   const error = state === "BLOCKED" ? lastStepError(evidenceDir) : undefined;
   return error ? { error } : {};
@@ -493,7 +519,11 @@ function planFor(config: OmiConfig, ticket: Ticket, gh: GhRunner): WorkflowPlan 
  * superseded (cancelled) by the new run. Spends tokens.
  */
 export function taskAnalyze(
-  deps: TaskDeps & Pick<SliceDeps, "runAgent" | "hostEnv"> & { pick?: PickFlags },
+  deps: TaskDeps &
+    Pick<SliceDeps, "runAgent" | "hostEnv"> & {
+      pick?: PickFlags;
+      harnessVersion?: () => string | undefined;
+    },
   issue: number,
 ): RunResult {
   const gh = deps.gh ?? spawnGh;
@@ -507,6 +537,7 @@ export function taskAnalyze(
   if (plan.kind !== "analysis") {
     throw new OmiError("POLICY_VIOLATION", `${plan.workflow}: use \`omi task run ${issue}\``);
   }
+  harnessGate(deps, selection);
   const file = statePath(deps.cwd);
   const db = openState(file);
   const lease = `task:${ref.repository}#${issue}`;
