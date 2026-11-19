@@ -15,4 +15,4 @@ Script first: every step below is an `omi` command run through Bash. Do not repr
 5. `omi github repo validate` and `omi github project validate` — report the checks. Warnings (extra labels/fields/views, Insights) are informational.
 6. The `.github/` files from step 2 are uncommitted. Tell the PO they go in through a normal task (Issue → branch → PR → `develop`), since `main`/`develop` are protected; do not commit them yourself. Remind them to add the repo's lint/build/test commands under `checks` in `.omi-plugins/omi.config.yaml` (workspace, never committed).
 
-Never read anything under the plugin's `resources/role-rules/`. If a step needs a decision (which Project, whether to approve a plan), ask the Product Owner instead of guessing.
+Never read anything under the plugin's `agent-pack/`; its rules and skills belong to the specialist agents. If a step needs a decision (which Project, whether to approve a plan), ask the Product Owner instead of guessing.

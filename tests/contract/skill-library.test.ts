@@ -3,8 +3,12 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import type { Role } from "../../runtime/core/contracts.ts";
+import { roleSkills } from "../../runtime/resources/role-files.ts";
 
 const root = new URL("../../agent-pack/", import.meta.url);
+const pluginRoot = fileURLToPath(new URL("../../", import.meta.url));
 const read = (path: string) => readFileSync(new URL(path, root), "utf8");
 const library = readdirSync(new URL("skill-library/", root)).sort();
 const roles = readdirSync(new URL("agents/", root)).map((f) => f.replace(/\.md$/, ""));
@@ -22,21 +26,6 @@ const ADAPTED: Record<string, string[]> = {
   "anti-slop-review": ["Nutlope/hallmark", "Leonxlnx/taste-skill"],
   "ux-guidelines-check": ["nextlevelbuilder/ui-ux-pro-max-skill"],
 };
-
-/** `<!-- omi:skills … default: a, b … allowed: c -->` of a role agent. */
-function roleSkills(agent: string): { default: string[]; allowed: string[] } {
-  const block = /<!-- omi:skills:[^\n]*\n([\s\S]*?)-->/.exec(agent)?.[1];
-  assert.ok(block, "omi:skills block");
-  const list = (key: string) => {
-    const line = new RegExp(`^${key}:(.*)$`, "m").exec(block)?.[1];
-    assert.notEqual(line, undefined, `${key}: line`);
-    return (line ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-  };
-  return { default: list("default"), allowed: list("allowed") };
-}
 
 test("the library holds the 33 approved skills", () => {
   assert.equal(library.length, 33);
@@ -76,7 +65,7 @@ test("every role declares default and allowed skills that exist; each skill has 
   const used = new Set<string>();
   assert.equal(roles.length, 11);
   for (const role of roles) {
-    const s = roleSkills(read(`agents/${role}.md`));
+    const s = roleSkills(pluginRoot, role as Role);
     assert.ok(s.default.length >= 1 && s.default.length <= 3, `${role}: default ≤ 3`);
     for (const k of [...s.default, ...s.allowed]) {
       assert.ok(library.includes(k), `${role}: unknown skill ${k}`);
@@ -85,9 +74,4 @@ test("every role declares default and allowed skills that exist; each skill has 
     assert.equal(new Set([...s.default, ...s.allowed]).size, s.default.length + s.allowed.length);
   }
   assert.deepEqual([...used].sort(), library);
-});
-
-test("roleSkills: an empty allowed list is valid", () => {
-  const s = roleSkills("<!-- omi:skills: x\ndefault: a, b\nallowed:\n-->");
-  assert.deepEqual(s, { default: ["a", "b"], allowed: [] });
 });

@@ -17,10 +17,12 @@ Script first. Classify every piece of work before acting:
 - A gateway profile costs about 28k input tokens of Claude Code system prompt on every run, however small the step: prefer a subscription profile for short steps.
 - Say the choice and its reason in `--reason`; the CLI records it in the step report.
 
+**Skills:** each step gets its role's default skills (and `receiving-review-findings` on rework). Add more only when the task needs them: pick from `omi skill list` and pass `--skills <role>=<skill>,<skill>` (repeatable) with `--reason`; the CLI refuses a skill outside that role's set.
+
 **Context per step:** each run starts clean; pass it only what that step needs (the Issue, its section, open findings), never this session's history. Finish a task's review before starting the next dependent task; tasks with no dependency between them may run in parallel on different profiles.
 
 **Quota mid-step:** a run that stops BLOCKED with `QUOTA_EXHAUSTED` was cut by its profile's quota (the step report on the Issue shows the signal). Do not retry that profile. Tell the PO to set `"disabled": true` for it in `.omi-plugins/omi.config.json` (the CLI never edits that file), then `omi task unblock <n> --reason "quota on <profile>: new attempt on <other>"` and `omi task run <n> --profile <other> …`: a new attempt of the same step in the same task workspace, whose agent is told to read what the cut attempt left first. A BLOCKED run with `POLICY_VIOLATION` about zero-width characters means a gateway watermarked the output: nothing was posted; ask the PO before re-running on another profile.
 
-Never read anything under the plugin's `resources/role-rules/`; those packs belong to the specialist agents.
+Never read anything under the plugin's `agent-pack/`; its rules and skills belong to the specialist agents.
 
 If the request is ambiguous or needs a scope decision, ask the Product Owner instead of guessing.

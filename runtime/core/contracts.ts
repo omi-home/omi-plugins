@@ -486,6 +486,11 @@ export const StepComment = z
     /** Execution profile the Coordinator chose and why (Feature-0021 #137); absent = routing. */
     profile: z.string().max(40).optional(),
     selectionReason: text(500).optional(),
+    /** Skills installed for the step (DevTask-0065 #199): role defaults + chosen + rework. */
+    skills: z
+      .array(z.string().regex(/^[a-z0-9-]{1,60}$/))
+      .max(30)
+      .optional(),
     /** A thinking block was seen in the transcript: the observable trace of effort. */
     thinkingObserved: z.boolean().optional(),
     commitSha: sha.optional(),

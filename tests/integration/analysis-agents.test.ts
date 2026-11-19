@@ -1,4 +1,4 @@
-// T5.1 BA / Solution Architect / UI/UX: live canary (each agent loads exactly its own packs) and a
+// T5.1 BA / Solution Architect / UI/UX: live canary (each agent sees exactly its default skills) and a
 // narrow evaluation task (a real task packet → an accepted step result proposing only the role's
 // Issue section, no file changes). Costs tokens: opt in with OMI_LIVE=1.
 import assert from "node:assert/strict";
@@ -16,21 +16,15 @@ import {
   packetPrompt,
 } from "../../runtime/core/handoff/packet.ts";
 import { prepareAgent, spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
-import { RULE } from "../../runtime/resources/role-files.ts";
+import { roleSkills } from "../../runtime/resources/role-files.ts";
 
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 const live = process.env.OMI_LIVE === "1" && spawnSync("claude", ["--version"]).status === 0;
 const skip = !live && "set OMI_LIVE=1 (costs tokens)";
 
-const packId = (rel: string) =>
-  /^Pack-ID: (\S+)$/m.exec(readFileSync(join(pluginRoot, rel), "utf8"))?.[1] as string;
-const allIds = (readdirSync(join(pluginRoot, "resources"), { recursive: true }) as string[])
-  .filter((f) => f.endsWith(".md"))
-  .map((f) => packId(join("resources", f)));
-const idsOf = (role: Role) =>
-  [
-    ...readFileSync(join(pluginRoot, "agent-pack", "agents", `${role}.md`), "utf8").matchAll(RULE),
-  ].map((m) => packId(m[1] as string));
+/** Skill canary (#199): an agent sees exactly the skills OMI installed for its step. */
+const allIds = readdirSync(join(pluginRoot, "agent-pack", "skill-library"));
+const idsOf = (role: Role) => roleSkills(pluginRoot, role).default;
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -89,17 +83,17 @@ function fixture() {
 }
 
 for (const r of ROLES) {
-  test(`live ${r.role}: loads exactly its own packs; model observed, effort unknown`, {
+  test(`live ${r.role}: sees exactly its default skills; model observed, effort unknown`, {
     skip,
   }, () => {
     const o = run(
       r.role,
-      "Which rule packs did you load? Reply with their Pack-IDs only.",
+      "Which skills are available to you? Reply with their names only.",
       fixture().dir,
     );
     for (const id of idsOf(r.role)) assert.ok(o.result.includes(id), `${id} missing: ${o.result}`);
     for (const id of allIds.filter((x) => !idsOf(r.role).includes(x))) {
-      assert.ok(!o.result.includes(id), `foreign pack ${id}`);
+      assert.ok(!o.result.includes(id), `foreign skill ${id}`);
     }
     assert.match(o.actualModel, r.model);
     assert.equal(o.actualEffort, "unknown");

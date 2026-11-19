@@ -1,5 +1,5 @@
 // T1.5 routing smoke: /omi-coordinator:omi-task runs deterministic work through CLI tools and
-// hands implementation off without touching files or role-rules. Costs tokens: OMI_LIVE=1.
+// hands implementation off without touching files or agent-pack. Costs tokens: OMI_LIVE=1.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -63,8 +63,8 @@ function runTask(request: string) {
     .flatMap((e) => e.message?.content ?? [])
     .filter((c: { type: string }) => c.type === "tool_use");
   const result = String(events.findLast((e) => e.type === "result")?.result ?? "");
-  // Main never touches the specialist packs, by any tool.
-  assert.ok(!JSON.stringify(tools).includes("role-rules"), JSON.stringify(tools));
+  // Main never touches the specialist rules and skills, by any tool.
+  assert.ok(!JSON.stringify(tools).includes("agent-pack"), JSON.stringify(tools));
   return { tools, result };
 }
 

@@ -16,4 +16,4 @@ Script first: run the command below through Bash and report from its output only
    - Sections the command marks "unavailable": say so with the error, do not guess their content.
 3. Stop there. Starting work goes through `/omi-coordinator:omi-task <n>` or `omi task start <n>` once the PO decides.
 
-Never read anything under the plugin's `resources/role-rules/`.
+Never read anything under the plugin's `agent-pack/`; its rules and skills belong to the specialist agents.

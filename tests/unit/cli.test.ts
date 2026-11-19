@@ -48,7 +48,9 @@ Commands:
                          Runs agents: spends tokens.
                          task run / task analyze: --profile <name> [--model <id>] [--effort <level>]
                          --reason <text> runs every agent step on that profile (\`profile list\`);
-                         model/effort default to the profile's first; none: agents.routing
+                         model/effort default to the profile's first; none: agents.routing.
+                         --skills <role>=<skill>,<skill> (repeatable, needs --reason) adds skills
+                         from that role's set (\`skill list\`) to its steps; defaults always install
   task unblock <n>       Clear a BLOCKED run of Issue #n (a person decided): resume it through the FSM,
                          post one report (who, --reason <text>); the next \`task run\` re-runs the step
                          that reported BLOCKED
@@ -118,6 +120,9 @@ Commands:
   profile list           Read-only: execution profiles not disabled in .omi-plugins/omi.config.json
                          (harness, auth type, models, efforts) and whether each secret env is set;
                          never prints a secret
+  skill list [--role <role>]
+                         Read-only: each role's default and allowed skills (agent-pack) and what each
+                         skill is for; the input for \`task run --skills\`
   context plan [--role <role>]
                          Read-only: measure the context a session starts with in the workspace and in
                          a task workspace of each role (\`/context\`, no tokens) and classify every

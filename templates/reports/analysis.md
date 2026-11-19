@@ -9,6 +9,7 @@
 | Executor | {{executor}} |
 | Model | {{model}} |
 | Effort | {{effort}} |
+| Skills | {{skills}} |
 | Cost | {{cost}} |
 | Commit | {{commit}} |
 | Status | {{status}} |

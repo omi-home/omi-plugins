@@ -16,4 +16,4 @@ Script first: every step below is an `omi` command run through Bash. Do not repr
 
 At the end of a session, write the handoff with `omi handoff post --body-file <file>` (done, blocked, decisions needed, next); it lands on the active Milestone.
 
-Never read anything under the plugin's `resources/role-rules/`. If the state is ambiguous (several active Milestones, conflicting handoff), ask the Product Owner instead of guessing.
+Never read anything under the plugin's `agent-pack/`; its rules and skills belong to the specialist agents. If the state is ambiguous (several active Milestones, conflicting handoff), ask the Product Owner instead of guessing.

@@ -1,5 +1,5 @@
 // T5.3 Code/Security Reviewer, Manual/Automation QA, DevOps, live (costs tokens: OMI_LIVE=1):
-// each loads exactly its own packs; on a diff with an injection + hard-coded secret the Security
+// each sees exactly its default skills; on a diff with an injection + hard-coded secret the Security
 // Reviewer owns the finding and the Code Reviewer only routes it; Automation QA authors tests (not
 // just runs them); Manual QA reports through its section; DevOps stays in its scope.
 import assert from "node:assert/strict";
@@ -17,7 +17,7 @@ import {
   packetPrompt,
 } from "../../runtime/core/handoff/packet.ts";
 import { prepareAgent, spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
-import { RULE } from "../../runtime/resources/role-files.ts";
+import { roleSkills } from "../../runtime/resources/role-files.ts";
 
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 const live = process.env.OMI_LIVE === "1" && spawnSync("claude", ["--version"]).status === 0;
@@ -25,15 +25,9 @@ const skip = !live && "set OMI_LIVE=1 (costs tokens)";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
-const packId = (rel: string) =>
-  /^Pack-ID: (\S+)$/m.exec(readFileSync(join(pluginRoot, rel), "utf8"))?.[1] as string;
-const allIds = (readdirSync(join(pluginRoot, "resources"), { recursive: true }) as string[])
-  .filter((f) => f.endsWith(".md"))
-  .map((f) => packId(join("resources", f)));
-const idsOf = (role: Role) =>
-  [
-    ...readFileSync(join(pluginRoot, "agent-pack", "agents", `${role}.md`), "utf8").matchAll(RULE),
-  ].map((m) => packId(m[1] as string));
+/** Skill canary (#199): an agent sees exactly the skills OMI installed for its step. */
+const allIds = readdirSync(join(pluginRoot, "agent-pack", "skill-library"));
+const idsOf = (role: Role) => roleSkills(pluginRoot, role).default;
 
 function launch(role: Role, prompt: string, cwd: string, edits: boolean) {
   // The allowlisted env also drops NODE_TEST_CONTEXT: `npm test` inside the agent is not nested.
@@ -127,18 +121,18 @@ const ROLES: Role[] = [
   "devops-engineer",
 ];
 for (const role of ROLES) {
-  test(`live ${role}: loads exactly its own packs; model observed, effort unknown`, {
+  test(`live ${role}: sees exactly its default skills; model observed, effort unknown`, {
     skip,
   }, () => {
     const o = launch(
       role,
-      "Which rule packs did you load? Reply with their Pack-IDs only.",
+      "Which skills are available to you? Reply with their names only.",
       fixture().dir,
       false,
     );
     for (const id of idsOf(role)) assert.ok(o.result.includes(id), `${id} missing: ${o.result}`);
     for (const id of allIds.filter((x) => !idsOf(role).includes(x))) {
-      assert.ok(!o.result.includes(id), `foreign pack ${id}`);
+      assert.ok(!o.result.includes(id), `foreign skill ${id}`);
     }
     assert.match(o.actualModel, role.endsWith("reviewer") ? /^claude-opus-/ : /^claude-sonnet-/);
     assert.equal(o.actualEffort, "unknown");
