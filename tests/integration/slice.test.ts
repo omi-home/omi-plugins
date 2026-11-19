@@ -304,7 +304,7 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
   const launch = s.agents.launches.at(-1) as AgentLaunch;
   assert.equal(launch.cwd, s.target.taskRoot);
   assert.equal(launch.env.CLAUDE_CONFIG_DIR, join(s.target.taskRoot, ".omi-home", "claude"));
-  assert.match(readFileSync(join(s.target.taskRoot, "AGENTS.md"), "utf8"), /role code-reviewer/);
+  assert.match(readFileSync(join(s.target.taskRoot, "AGENTS.md"), "utf8"), /^## Code Reviewer$/m);
   // Checks already passed on this HEAD: release validation reuses them, no Manual QA planned.
   assert.deepEqual(titles(s.gh.comments.map((c) => c.body)), [
     "implement:1",

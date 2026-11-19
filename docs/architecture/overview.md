@@ -37,7 +37,7 @@ Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc 
 | Thư mục | Chủ sở hữu | Nội dung |
 |---|---|---|
 | `.claude-plugin/` | Claude Code | `plugin.json`, `marketplace.json` |
-| `agent-pack/` | Claude Code | plugin `omi-engineering` lồng trong plugin `omi-coordinator` (ADR-0003 D3, DevTask-0059 #192): `agents/` (11 agent chuyên môn, mỗi agent khai báo tập skill `omi:skills`), `skill-library/` (33 skill theo Spike-0011 #196, DevTask-0063 #197; nguồn ngoài ghi trong `THIRD_PARTY_NOTICES`), sau này `hooks/`; CLI nạp bằng `--plugin-dir <plugin root>/agent-pack`, không cài riêng |
+| `agent-pack/` | Claude Code | plugin `omi-engineering` lồng trong plugin `omi-coordinator` (ADR-0003 D3, DevTask-0059 #192): `agents/` (11 agent chuyên môn, mỗi agent khai báo tập skill `omi:skills`), `skill-library/` (33 skill theo Spike-0011 #196, DevTask-0063 #197; nguồn ngoài ghi trong `THIRD_PARTY_NOTICES`), `agents-md/` (phần của `AGENTS.md` theo role: DoD, ranh giới, format REPORT; DevTask-0064 #198), `hooks/` (chặn `git push`, `gh`, ghi ra ngoài task workspace); CLI nạp bằng `--plugin-dir <plugin root>/agent-pack`, không cài riêng |
 | `skills/` | Claude Code | **chỉ** entry skill của Coordinator (D3) |
 | `hooks/` | Claude Code | `hooks.json`: `PreToolUse` chặn cứng, `SessionStart` chèn tóm tắt (ADR-0003 D6) |
 | `resources/` | OMI | `role-rules/<role>/`, `shared/` — CLI chép vào `AGENTS.md` của task workspace theo danh sách `omi:rule-pack` trong `agent-pack/agents/<role>.md`; sẽ bỏ, thay bằng `agent-pack/skill-library/` (ADR-0003 D4, Feature-0027 #188) |
@@ -95,6 +95,8 @@ omi-plugins/
 │   └── marketplace.json                # single-plugin marketplace (validate local source)
 ├── agent-pack/                         # omi-engineering, loaded only by the CLI (--plugin-dir)
 │   ├── .claude-plugin/plugin.json
+│   ├── agents-md/                      # AGENTS.md parts: core, editing | read-only, <role> (DoD, REPORT)
+│   ├── hooks/hooks.json                # PreToolUse → omi hook agent-pre-tool-use (git push, gh, writes outside)
 │   ├── agents/                         # one agent per role; <!-- omi:skills --> = default + allowed skills
 │   │   ├── business-analyst.md
 │   │   ├── solution-architect.md

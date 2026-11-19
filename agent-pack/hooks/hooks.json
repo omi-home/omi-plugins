@@ -1,0 +1,17 @@
+{
+  "description": "OMI agent hooks (ADR-0003 D6, DevTask-0064 #198): block git push, gh and writing outside the task workspace.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/../bin/omi\" hook agent-pre-tool-use",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

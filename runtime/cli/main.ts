@@ -27,7 +27,7 @@ import { formatUsage, sumUsage } from "../reporting/render.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { contextApply, contextPlan, humanContextPlan } from "./context.ts";
 import { type Check, doctor, probeProfiles } from "./doctor.ts";
-import { type HookInput, preToolUse, sessionStart } from "./hook.ts";
+import { agentPreToolUse, type HookInput, preToolUse, sessionStart } from "./hook.ts";
 import { projectInit } from "./init.ts";
 import { releaseCheck, releaseTag } from "./release.ts";
 import { NO_PROFILE, NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "./status.ts";
@@ -172,6 +172,9 @@ Commands:
                          the call edits the main repo, commits on or pushes to develop/main, or uses
                          --force; anything else (or no OMI workspace, bad input) passes
   hook session-start     Coordinator plugin hook: short summary (latest handoff, Milestone status)
+  hook agent-pre-tool-use
+                         Agent-pack hook (hook input JSON on stdin): exit 2 when an agent runs git
+                         push or gh, or writes a file outside its task workspace (CLAUDE_PROJECT_DIR)
   version                Print the OMI version
   help                   Show this help
 
@@ -254,6 +257,7 @@ const REPO_WIDE = new Set([
   "profile list",
   "hook pre-tool-use",
   "hook session-start",
+  "hook agent-pre-tool-use",
 ]);
 
 const describe = (a: ProjectAction) =>
@@ -653,6 +657,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         return ok(h, human);
       }
       case "hook pre-tool-use":
+      case "hook agent-pre-tool-use":
       case "hook session-start": {
         // Fail-open: a broken hook input or a failing lookup never blocks the session.
         let input: HookInput = {};
@@ -664,7 +669,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         if (command === "hook session-start") return ok(null, sessionStart(input));
         let why: string | null = null;
         try {
-          why = preToolUse(input);
+          why = command === "hook agent-pre-tool-use" ? agentPreToolUse(input) : preToolUse(input);
         } catch {
           why = null;
         }

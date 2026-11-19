@@ -136,6 +136,9 @@ Commands:
                          the call edits the main repo, commits on or pushes to develop/main, or uses
                          --force; anything else (or no OMI workspace, bad input) passes
   hook session-start     Coordinator plugin hook: short summary (latest handoff, Milestone status)
+  hook agent-pre-tool-use
+                         Agent-pack hook (hook input JSON on stdin): exit 2 when an agent runs git
+                         push or gh, or writes a file outside its task workspace (CLAUDE_PROJECT_DIR)
   version                Print the OMI version
   help                   Show this help
 
