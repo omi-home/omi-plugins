@@ -28,9 +28,9 @@ const allIds = (readdirSync(join(pluginRoot, "resources"), { recursive: true }) 
   .filter((f) => f.endsWith(".md"))
   .map((f) => packId(join("resources", f)));
 const idsOf = (role: Role) =>
-  [...readFileSync(join(pluginRoot, "agents", `${role}.md`), "utf8").matchAll(RULE)].map((m) =>
-    packId(m[1] as string),
-  );
+  [
+    ...readFileSync(join(pluginRoot, "agent-pack", "agents", `${role}.md`), "utf8").matchAll(RULE),
+  ].map((m) => packId(m[1] as string));
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8" }).trim();

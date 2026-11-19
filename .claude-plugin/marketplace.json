@@ -1,15 +1,15 @@
 {
   "name": "omi-plugins",
-  "description": "Single-plugin marketplace for the OMI Engineering Plugin.",
+  "description": "Single-plugin marketplace for the OMI Coordinator plugin.",
   "owner": {
     "name": "omi-home",
     "url": "https://github.com/omi-home"
   },
   "plugins": [
     {
-      "name": "omi-engineering",
+      "name": "omi-coordinator",
       "source": "./",
-      "description": "Ticket-driven, script-first Agile engineering framework for Claude Code."
+      "description": "OMI Coordinator for Claude Code: ticket-driven, script-first engineering; role agents run through the omi CLI."
     }
   ]
 }

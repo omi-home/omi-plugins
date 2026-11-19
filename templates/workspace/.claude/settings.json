@@ -5,6 +5,6 @@
     }
   },
   "enabledPlugins": {
-    "omi-engineering@omi-plugins": true
+    "omi-coordinator@omi-plugins": true
   }
 }

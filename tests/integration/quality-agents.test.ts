@@ -31,9 +31,9 @@ const allIds = (readdirSync(join(pluginRoot, "resources"), { recursive: true }) 
   .filter((f) => f.endsWith(".md"))
   .map((f) => packId(join("resources", f)));
 const idsOf = (role: Role) =>
-  [...readFileSync(join(pluginRoot, "agents", `${role}.md`), "utf8").matchAll(RULE)].map((m) =>
-    packId(m[1] as string),
-  );
+  [
+    ...readFileSync(join(pluginRoot, "agent-pack", "agents", `${role}.md`), "utf8").matchAll(RULE),
+  ].map((m) => packId(m[1] as string));
 
 function launch(role: Role, prompt: string, cwd: string, edits: boolean) {
   // The allowlisted env also drops NODE_TEST_CONTEXT: `npm test` inside the agent is not nested.

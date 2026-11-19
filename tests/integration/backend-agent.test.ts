@@ -21,7 +21,9 @@ const ALL_PACK_IDS = (readdirSync(join(pluginRoot, "resources"), { recursive: tr
   .filter((f) => f.endsWith(".md"))
   .map((f) => /^Pack-ID: (.+)$/m.exec(readFileSync(join(pluginRoot, "resources", f), "utf8"))?.[1])
   .filter((id): id is string => Boolean(id));
-const AGENTS = readdirSync(join(pluginRoot, "agents")).map((f) => f.replace(/\.md$/, ""));
+const AGENTS = readdirSync(join(pluginRoot, "agent-pack", "agents")).map((f) =>
+  f.replace(/\.md$/, ""),
+);
 const hasClaude = spawnSync("claude", ["--version"]).status === 0;
 const live = hasClaude && process.env.OMI_LIVE === "1";
 const worktree = () => mkdtempSync(join(tmpdir(), "omi-t14-"));
@@ -29,16 +31,15 @@ const worktree = () => mkdtempSync(join(tmpdir(), "omi-t14-"));
 test("rule pack declares a Pack-ID canary", () =>
   assert.match(PACK_ID, /^omi-backend-rules\/v\d+$/));
 
-test("main /context: agent listed by name/description only, no rule pack, only entry skills", {
-  skip: !hasClaude && "claude CLI not on PATH",
-}, () => {
+/** `/context` of a fresh session with `--plugin-dir <dir>` (no tokens spent). */
+const context = (dir: string) => {
   const r = spawnSync(
     "claude",
     [
       "-p",
       "/context",
       "--plugin-dir",
-      pluginRoot,
+      dir,
       "--setting-sources",
       "project,local",
       "--no-session-persistence",
@@ -46,19 +47,33 @@ test("main /context: agent listed by name/description only, no rule pack, only e
     { cwd: worktree(), encoding: "utf8", timeout: 120_000 },
   );
   assert.equal(r.status, 0, r.stderr);
-  for (const a of AGENTS) assert.ok(r.stdout.includes(`omi-engineering:${a} | Plugin`), a);
-  for (const id of ALL_PACK_IDS)
-    assert.ok(!r.stdout.includes(id), `${id} leaked into main context`);
-  assert.ok(!r.stdout.includes("role-rules"));
-  // D3: the only plugin skills are Coordinator entry points.
-  const skills = r.stdout.split("### Skills")[1] ?? "";
-  assert.deepEqual(skills.match(/omi-engineering:[\w-]+/g)?.sort(), [
-    "omi-engineering:omi-release",
-    "omi-engineering:omi-resume",
-    "omi-engineering:omi-start",
-    "omi-engineering:omi-status",
-    "omi-engineering:omi-task",
+  return r.stdout;
+};
+
+test("ADR-0003 D3: Coordinator session sees only omi-coordinator entry skills, no agents or rule pack", {
+  skip: !hasClaude && "claude CLI not on PATH",
+}, () => {
+  const out = context(pluginRoot);
+  for (const a of AGENTS) assert.ok(!out.includes(`omi-engineering:${a}`), `${a} leaked into main`);
+  for (const id of ALL_PACK_IDS) assert.ok(!out.includes(id), `${id} leaked into main context`);
+  assert.ok(!out.includes("role-rules"));
+  const skills = out.split("### Skills")[1] ?? "";
+  assert.deepEqual(skills.match(/omi-coordinator:[\w-]+/g)?.sort(), [
+    "omi-coordinator:omi-release",
+    "omi-coordinator:omi-resume",
+    "omi-coordinator:omi-start",
+    "omi-coordinator:omi-status",
+    "omi-coordinator:omi-task",
   ]);
+});
+
+test("agent run (--plugin-dir agent-pack): every role agent by name, no Coordinator skill", {
+  skip: !hasClaude && "claude CLI not on PATH",
+}, () => {
+  const out = context(join(pluginRoot, "agent-pack"));
+  for (const a of AGENTS) assert.ok(out.includes(`omi-engineering:${a} | Plugin`), a);
+  assert.ok(!out.includes("omi-coordinator:"));
+  for (const id of ALL_PACK_IDS) assert.ok(!out.includes(id), `${id} leaked into agent context`);
 });
 
 /** Backend Engineer in a fresh task workspace; `roleFiles: false` leaves AGENTS.md out. */

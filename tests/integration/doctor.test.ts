@@ -117,16 +117,6 @@ test("live: plugin bin/ puts omi on PATH inside the agent's Bash", {
   assert.match(r.stdout, /"ok":true,"command":"version"/);
 });
 
-test("workflow adapter off: doctor warns, direct dispatch stays the path (#56 fallback)", () => {
-  const repo = fixture({ "AGENTS.md": "# x\n", ".omi-plugins/omi.config.yaml": CONFIG });
-  const conf = mkdtempSync(join(tmpdir(), "omi-claude-conf-"));
-  const env = { ...process.env, CLAUDE_CONFIG_DIR: conf };
-  assert.equal(doctor(repo, env).check("workflows")?.status, "warn"); // no settings.json
-  assert.match(String(doctor(repo, env).check("workflows")?.detail), /direct dispatch unaffected/);
-  writeFileSync(join(conf, "settings.json"), JSON.stringify({ enableWorkflows: true }));
-  assert.equal(doctor(repo, env).check("workflows")?.status, "pass");
-});
-
 test("version table lists node, git, gh and claude (#68)", () => {
   const d = doctor(fixture({ "AGENTS.md": "x" }));
   for (const n of ["node", "git", "gh", "claude"]) {

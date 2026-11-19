@@ -12,10 +12,10 @@ import { RULE } from "../../runtime/resources/role-files.ts";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const read = (p: string) => readFileSync(join(root, p), "utf8");
 
-const agents = readdirSync(join(root, "agents"))
+const agents = readdirSync(join(root, "agent-pack", "agents"))
   .filter((f) => f.endsWith(".md"))
   .map((file) => {
-    const src = read(`agents/${file}`);
+    const src = read(`agent-pack/agents/${file}`);
     const front = /^---\n([\s\S]*?)\n---\n/.exec(src.replaceAll("\r\n", "\n"))?.[1] ?? "";
     const field = (k: string) => new RegExp(`^${k}: (.*)$`, "m").exec(front)?.[1]?.trim();
     const list = (k: string) =>
@@ -46,7 +46,11 @@ test("every agent is a Role named after its file, blocks Skill, has no skills:/i
     assert.ok(a.disallowed.includes("Skill"), `${a.file} must disallow Skill`);
     assert.doesNotMatch(a.front, /^(skills|isolation):/m, a.file);
     assert.ok(a.packs.length > 0, `${a.file} loads no rule pack`);
-    assert.doesNotMatch(read(`agents/${a.file}`), /CLAUDE_PLUGIN_ROOT|Read tool/, a.file);
+    assert.doesNotMatch(
+      read(`agent-pack/agents/${a.file}`),
+      /CLAUDE_PLUGIN_ROOT|Read tool/,
+      a.file,
+    );
   }
 });
 

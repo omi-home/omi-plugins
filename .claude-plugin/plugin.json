@@ -1,7 +1,7 @@
 {
-  "name": "omi-engineering",
+  "name": "omi-coordinator",
   "version": "0.1.0",
-  "description": "Ticket-driven, script-first Agile engineering framework: GitHub Issue/Project as work source, one worktree per task, audited review loop and post-merge cleanup.",
+  "description": "OMI Coordinator: /omi-* skills and the omi CLI for ticket-driven, script-first engineering (GitHub Issue/Project as work source, one task workspace per task, audited review loop, post-merge cleanup). Carries the role agents in agent-pack/.",
   "author": {
     "name": "omi-home",
     "url": "https://github.com/omi-home"

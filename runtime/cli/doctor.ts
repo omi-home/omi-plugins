@@ -11,6 +11,7 @@ import { OmiError } from "../core/errors/errors.ts";
 import { CONFIG_FILE, locate, STATE_FILE, WORKSPACE_DIR } from "../core/workspace.ts";
 import { openState } from "../persistence/db.ts";
 import { openRuns, ownedRefs } from "../persistence/repository.ts";
+import { same } from "../resources/worktree.ts";
 import { memoryDir, OLD_LAYOUT, SETTINGS } from "./workspace.ts";
 
 export type { Check };
@@ -230,24 +231,44 @@ export function memoryDirCheck(workspace: string): Check {
     : { name: "memory-dir", status: "pass", detail: dir };
 }
 
-function workflows(): Check {
-  const settings = join(
-    process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"),
-    "settings.json",
-  );
-  let enabled = false;
-  try {
-    enabled = JSON.parse(readFileSync(settings, "utf8")).enableWorkflows === true;
-  } catch {
-    // Missing or unreadable settings: workflows are off.
+export const COORDINATOR = "omi-coordinator";
+const OLD_PLUGIN = "omi-engineering";
+
+/**
+ * `coordinator-plugin` (Feature-0026 #187): the workspace enables `omi-coordinator@<marketplace>`
+ * and Claude Code has it installed for this workspace (user scope, or project scope here); the old
+ * single plugin `omi-engineering` is no longer enabled. Reads `installed_plugins.json` (version 2:
+ * `{plugins: {"<name>@<marketplace>": [{scope, projectPath?}]}}`) under the Claude config dir.
+ */
+export function coordinatorPluginCheck(
+  workspace: string,
+  configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"),
+): Check {
+  const json = (file: string) => {
+    try {
+      return JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      return undefined; // missing or unreadable: nothing enabled / installed
+    }
+  };
+  const warn = (detail: string): Check => ({ name: "coordinator-plugin", status: "warn", detail });
+  const enabled = Object.entries(json(join(workspace, SETTINGS))?.enabledPlugins ?? {})
+    .filter(([, on]) => on === true)
+    .map(([id]) => id);
+  const old = enabled.filter((id) => id.startsWith(`${OLD_PLUGIN}@`));
+  if (old.length) {
+    return warn(`${old.join(", ")} is the old plugin: enable ${COORDINATOR}@omi-plugins instead`);
   }
-  return enabled
-    ? { name: "workflows", status: "pass", detail: "workflow adapter enabled" }
-    : {
-        name: "workflows",
-        status: "warn",
-        detail: "enableWorkflows is off: workflow adapter disabled, direct dispatch unaffected",
-      };
+  const id = enabled.find((x) => x.startsWith(`${COORDINATOR}@`));
+  if (!id) return warn(`enable "${COORDINATOR}@omi-plugins" in ${join(workspace, SETTINGS)}`);
+  const installs: { scope?: string; projectPath?: string }[] =
+    json(join(configDir, "plugins", "installed_plugins.json"))?.plugins?.[id] ?? [];
+  const here = installs.some(
+    (i) => i.scope === "user" || (i.projectPath !== undefined && same(i.projectPath, workspace)),
+  );
+  return here
+    ? { name: "coordinator-plugin", status: "pass", detail: id }
+    : warn(`${id} is enabled but not installed: claude plugin install ${id} --scope project`);
 }
 
 const ENV_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
@@ -385,7 +406,6 @@ export function doctor(cwd: string): Check[] {
     toolVersion("git", "git", undefined, cwd),
     toolVersion("gh", "gh", undefined, cwd),
     toolVersion("claude", "claude", MIN_CLAUDE, cwd),
-    workflows(),
   ];
 
   let loc: { workspace: string; root: string } | undefined;
@@ -421,7 +441,12 @@ export function doctor(cwd: string): Check[] {
       detail: [err.message, ...(issues ?? []).map((i) => `${i.path}: ${i.message}`)].join("; "),
     });
   }
-  if (loc) checks.push(...layout(loc.workspace, repoRoot), memoryDirCheck(loc.workspace));
+  if (loc)
+    checks.push(
+      ...layout(loc.workspace, repoRoot),
+      memoryDirCheck(loc.workspace),
+      coordinatorPluginCheck(loc.workspace),
+    );
 
   checks.push(...github(config));
   return checks;

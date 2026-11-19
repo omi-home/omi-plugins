@@ -12,9 +12,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { memoryDirCheck } from "../../runtime/cli/doctor.ts";
+import { coordinatorPluginCheck, memoryDirCheck } from "../../runtime/cli/doctor.ts";
 import { memoryDir, workspaceInit } from "../../runtime/cli/workspace.ts";
 import type { OmiError } from "../../runtime/core/errors/errors.ts";
 import { locate } from "../../runtime/core/workspace.ts";
@@ -102,7 +102,7 @@ test("#180: settings point auto memory into the workspace; doctor memory-dir che
   const settings = join(ws, ".claude", "settings.json");
   const s = JSON.parse(readFileSync(settings, "utf8"));
   assert.equal(s.autoMemoryDirectory, memoryDir(ws));
-  assert.equal(s.enabledPlugins["omi-engineering@omi-plugins"], true, "template kept");
+  assert.equal(s.enabledPlugins["omi-coordinator@omi-plugins"], true, "template kept");
   assert.equal(memoryDirCheck(ws).status, "pass");
 
   // Index near Claude Code's load limit warns; at the limit passes.
@@ -127,4 +127,33 @@ test("#180: settings point auto memory into the workspace; doctor memory-dir che
     JSON.parse(readFileSync(settings, "utf8")).autoMemoryDirectory,
     ".claude/agent-memory",
   );
+});
+
+test("#192: workspace enables omi-coordinator; doctor checks it is installed here, old plugin warns", () => {
+  const { parent, dir } = checkout();
+  const ws = join(parent, "app-workspace");
+  workspaceInit({ cwd: dir });
+  const conf = mkdtempSync(join(tmpdir(), "omi-claude-conf-"));
+  assert.match(coordinatorPluginCheck(ws, conf).detail, /enabled but not installed/);
+
+  const registry = join(conf, "plugins", "installed_plugins.json");
+  mkdirSync(dirname(registry), { recursive: true });
+  const write = (installs: unknown[]) =>
+    writeFileSync(
+      registry,
+      JSON.stringify({ version: 2, plugins: { "omi-coordinator@omi-plugins": installs } }),
+    );
+  write([{ scope: "project", projectPath: join(parent, "other-workspace") }]);
+  assert.equal(coordinatorPluginCheck(ws, conf).status, "warn", "installed for another project");
+  write([{ scope: "project", projectPath: ws }]);
+  assert.equal(coordinatorPluginCheck(ws, conf).status, "pass");
+
+  const settings = join(ws, ".claude", "settings.json");
+  writeFileSync(
+    settings,
+    JSON.stringify({ enabledPlugins: { "omi-engineering@omi-plugins": true } }),
+  );
+  assert.match(coordinatorPluginCheck(ws, conf).detail, /old plugin/);
+  writeFileSync(settings, "{}");
+  assert.match(coordinatorPluginCheck(ws, conf).detail, /enable "omi-coordinator@omi-plugins"/);
 });

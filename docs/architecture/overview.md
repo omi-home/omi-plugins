@@ -37,12 +37,10 @@ Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc 
 | Thư mục | Chủ sở hữu | Nội dung |
 |---|---|---|
 | `.claude-plugin/` | Claude Code | `plugin.json`, `marketplace.json` |
-| `agents/` | Claude Code | 11 agent chuyên môn (`disallowedTools: Skill`); chuyển vào `agent-pack/agents/` (ADR-0003 D3, Feature-0026 #187) |
-| `agent-pack/` | Claude Code | (dự kiến, ADR-0003 D3) plugin `omi-engineering` lồng trong plugin: `agents/`, `skill-library/`, `hooks/`; không cài riêng |
+| `agent-pack/` | Claude Code | plugin `omi-engineering` lồng trong plugin `omi-coordinator` (ADR-0003 D3, DevTask-0059 #192): `agents/` (11 agent chuyên môn), sau này `skill-library/`, `hooks/`; CLI nạp bằng `--plugin-dir <plugin root>/agent-pack`, không cài riêng |
 | `skills/` | Claude Code | **chỉ** entry skill của Coordinator (D3) |
-| `workflows/` | Claude Code | sẽ bỏ (ADR-0003 D7); không tạo mới |
 | `hooks/` | Claude Code | `hooks.json`: `PreToolUse` chặn cứng, `SessionStart` chèn tóm tắt (ADR-0003 D6) |
-| `resources/` | OMI | `role-rules/<role>/`, `shared/` — CLI chép vào `AGENTS.md` của task workspace theo danh sách `omi:rule-pack` trong `agents/<role>.md`; sẽ bỏ, thay bằng `agent-pack/skill-library/` (ADR-0003 D4, Feature-0027 #188) |
+| `resources/` | OMI | `role-rules/<role>/`, `shared/` — CLI chép vào `AGENTS.md` của task workspace theo danh sách `omi:rule-pack` trong `agent-pack/agents/<role>.md`; sẽ bỏ, thay bằng `agent-pack/skill-library/` (ADR-0003 D4, Feature-0027 #188) |
 | `runtime/` | OMI | CLI, core (FSM/policy/routing/handoff/errors), adapters, reporting, persistence |
 | `config/` | OMI | policy YAML, cấu hình GitHub Project |
 | `schemas/` | OMI | JSON Schema cho state/step/handoff/comment/cleanup |
@@ -93,28 +91,28 @@ omi-plugins/
 ├── tsconfig.json
 ├── .gitignore
 ├── .claude-plugin/
-│   ├── plugin.json
+│   ├── plugin.json                     # omi-coordinator: the one plugin installed in a workspace
 │   └── marketplace.json                # single-plugin marketplace (validate local source)
-├── agents/
-│   ├── business-analyst.md
-│   ├── solution-architect.md
-│   ├── ui-ux-designer.md
-│   ├── frontend-engineer.md
-│   ├── backend-engineer.md
-│   ├── database-engineer.md
-│   ├── code-reviewer.md
-│   ├── security-reviewer.md
-│   ├── manual-qa-engineer.md
-│   ├── automation-qa-engineer.md
-│   └── devops-engineer.md
+├── agent-pack/                         # omi-engineering, loaded only by the CLI (--plugin-dir)
+│   ├── .claude-plugin/plugin.json
+│   └── agents/
+│       ├── business-analyst.md
+│       ├── solution-architect.md
+│       ├── ui-ux-designer.md
+│       ├── frontend-engineer.md
+│       ├── backend-engineer.md
+│       ├── database-engineer.md
+│       ├── code-reviewer.md
+│       ├── security-reviewer.md
+│       ├── manual-qa-engineer.md
+│       ├── automation-qa-engineer.md
+│       └── devops-engineer.md
 ├── skills/                             # Coordinator entry points ONLY (ADR-0001 D3)
 │   ├── omi-start/SKILL.md              # bootstrap a repo (github project init → repo/project apply)
 │   ├── omi-task/SKILL.md               # one ticket-driven task
 │   ├── omi-resume/SKILL.md             # new session: doctor → handoff show → cleanup scan → next step
 │   ├── omi-status/SKILL.md             # Milestone overview (omi status) for the PO
 │   └── omi-release/SKILL.md            # release check → PR develop → main (PO merge) → release tag
-├── workflows/                          # to be removed (ADR-0003 D7); do not add new workflows
-│   └── review-gate.js                  # e.g. parallel multi-lens review; CLI publishes results
 ├── hooks/
 │   └── hooks.json
 ├── resources/                          # not discovered by Claude Code; copied into the task workspace AGENTS.md
@@ -203,9 +201,9 @@ omi-plugins/
 
 ### Directory ownership
 
-- `.claude-plugin/`, `agents/`, `skills/`, `workflows/`, `hooks/` follow Claude Code plugin contracts (Phase 0 verified: agents register as `<plugin>:<name>`, skills as `<plugin>:<name>`, plugin workflows load from `workflows/` and run as `/<plugin>:<meta.name>`).
+- `.claude-plugin/`, `skills/`, `hooks/` and `agent-pack/` (its own `.claude-plugin/`, `agents/`) follow Claude Code plugin contracts (Phase 0 verified: agents register as `<plugin>:<name>`, skills as `<plugin>:<name>`; Spike-0010 #185: a session with the plugin does not scan `agent-pack/`).
 - `resources/`, `config/`, `schemas/`, `templates/`, `runtime/`, `tests/` are OMI-owned, not magic Claude directories.
-- Until removed (ADR-0003 D7): `workflows/*.js` **must not** duplicate state-machine logic or perform writes. Verified script API: `agent(prompt, {label, phase, schema, model, effort, isolation, agentType})`, `parallel`, `pipeline`, `phase`, `log`, `args`; no `cwd` option; no filesystem/shell/`import()`; `Date.now()`/`Math.random()` throw. Workflows are available only when the user enabled them (`"enableWorkflows": true`); `omi doctor` disables the adapter otherwise. Direct orchestration through CLI/Coordinator is the primary path.
+- No `workflows/` (ADR-0003 D7): orchestration goes through `omi task run`.
 - `bin/omi` must resolve plugin paths and environment reliably, including Windows. Never embed developer-specific absolute paths.
 - No generated files are placed in arbitrary repository locations; update this directory contract through ADR before introducing new root folders.
 
