@@ -497,6 +497,36 @@ export const CleanupResult = z
   });
 export type CleanupResult = z.infer<typeof CleanupResult>;
 
+// ---- Context at session start (`omi context plan`, DevTask-0066 #201) ----
+
+/** What a `/context` row belongs to; `apply` (#202) has a setting per kind except agent. */
+export const ContextItemKind = z.enum(["plugin", "skill", "mcp", "memory", "agent"]);
+export type ContextItemKind = z.infer<typeof ContextItemKind>;
+
+/** OMI needs it, does not need it, or the PO decides. */
+export const ContextClass = z.enum(["needed", "unneeded", "unknown"]);
+export type ContextClass = z.infer<typeof ContextClass>;
+
+const tokens = z.int().min(0);
+
+/** Parsed `/context` output of `claude -p` (markdown tables, no model call). */
+export const ContextUsage = z.strictObject({
+  total: tokens,
+  /** Category rows ("System tools", "Skills", ...): reported, not switchable as such. */
+  categories: z.array(z.strictObject({ name: text(100), tokens })).max(50),
+  items: z
+    .array(
+      z.strictObject({
+        kind: ContextItemKind,
+        id: text(500),
+        source: z.string().max(200),
+        tokens,
+      }),
+    )
+    .max(1000),
+});
+export type ContextUsage = z.infer<typeof ContextUsage>;
+
 // ---- Validation entry point ----
 
 /** Parses untrusted input; throws OmiError with path-level issues (input values never echoed). */

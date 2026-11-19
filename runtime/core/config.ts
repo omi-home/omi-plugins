@@ -71,6 +71,12 @@ export const OmiConfig = z.strictObject({
     .prefault({}),
   /** Unset checks are skipped; a repo with none configured has no deterministic gate. */
   checks: GateChecks.prefault({}),
+  context: z
+    .strictObject({
+      /** Context items the PO keeps (`omi context plan`): plugin/skill/MCP server names, paths. */
+      keep: z.array(z.string().min(1).max(500)).max(200).default([]),
+    })
+    .prefault({}),
   cleanup: z
     .strictObject({
       // Remote branch deletion is never assumed safe (spec §14).
