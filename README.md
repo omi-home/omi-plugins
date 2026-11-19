@@ -43,7 +43,7 @@ Kẹt ở đâu: [runbook — escalation và khôi phục](./docs/runbooks/opera
 Repo này đồng thời là marketplace một-plugin (`.claude-plugin/marketplace.json`, `source: "./"`). Mỗi release là tag `<plugin>--v<version>` (từ bản sau 0.1.0: `omi-coordinator--v<version>`) trên `main` (xem [CHANGELOG](./CHANGELOG.md)); ghim marketplace vào tag để có bản cố định:
 
 ```bash
-claude plugin marketplace add omi-home/omi-plugins#omi-engineering--v0.1.0
+claude plugin marketplace add omi-home/omi-plugins#omi-coordinator--v0.2.0
 claude plugin install omi-coordinator@omi-plugins --scope project   # cài trong workspace; agent-pack đi kèm, không cài riêng
 ```
 
