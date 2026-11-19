@@ -34,6 +34,11 @@ export interface CleanupOptions {
   runId: string;
   /** GitHub merge receipt of the task PR; without it nothing destructive happens. */
   receipt: MergeReceipt | undefined;
+  /**
+   * Task without code (no PR): the caller verified the Issue is closed and no remote branch or
+   * PR exists; cleanup still requires the branch to hold no commit beyond `origin/<base>`.
+   */
+  noCode?: { base: string };
   /** Directory owned temp dirs must live under (OMI state dir); anything else is refused. */
   tempRoot: string;
   /** Report what would happen; touch nothing. */
@@ -126,7 +131,16 @@ function steps(db: Db, o: CleanupOptions, issue: IssueRef): CleanupResult {
   try {
     // verify-merge: GitHub receipt for this branch and this tip, never `git branch --merged`.
     const r = o.receipt;
-    if (!r) failed("verify-merge", "no merge receipt: the PR is not verified as merged");
+    if (!r && o.noCode) {
+      const ahead =
+        tip && clone
+          ? tryGit(["rev-list", "--count", `refs/remotes/origin/${o.noCode.base}..${tip}`], clone)
+          : "0";
+      if (ahead !== "0") {
+        failed("verify-merge", `no PR, but ${branch} holds ${ahead ?? "unknown"} commit(s)`);
+      }
+      done("verify-merge", `no code: no PR, no remote branch, 0 commits beyond ${o.noCode.base}`);
+    } else if (!r) failed("verify-merge", "no merge receipt: the PR is not verified as merged");
     else if (branch && r.headRef !== branch) {
       failed("verify-merge", `receipt is for ${r.headRef}, run owns ${branch}`);
     } else if (tip && tip !== r.headSha) {
@@ -264,6 +278,7 @@ function steps(db: Db, o: CleanupOptions, issue: IssueRef): CleanupResult {
             headSha: o.receipt.headSha,
           }
         : null,
+      ...(o.noCode && !o.receipt ? { noCode: true } : {}),
       steps: out,
       state: out.some((s) => s.status === "failed") ? "CLEANUP_FAILED" : "COMPLETED",
     },

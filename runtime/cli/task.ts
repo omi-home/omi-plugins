@@ -778,7 +778,36 @@ export interface FinalizeResult {
   held?: string;
 }
 
-function cleanupComment(run: RunRow, round: number, receipt: MergeReceipt, r: CleanupResult) {
+/**
+ * Proof that a task without a PR left nothing behind on GitHub: the Issue is closed and the branch
+ * was never pushed. Local commits are checked by cleanup (`noCode`), which owns the clone.
+ */
+function noCodeProof(cwd: string, config: OmiConfig, issue: number, branch: string, gh: GhRunner) {
+  const { owner, repo: name } = config.github;
+  const state = graphql(
+    "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){state}}}",
+    { owner, repo: name, number: issue },
+    z.strictObject({
+      repository: z.strictObject({ issue: z.strictObject({ state: z.string() }).nullable() }),
+    }),
+    "issue state",
+    gh,
+  ).repository.issue?.state;
+  if (state !== "CLOSED") {
+    throw new OmiError("POLICY_VIOLATION", `no PR for ${branch} and #${issue} is still open`);
+  }
+  if (git(["ls-remote", "--heads", "origin", branch], repo(cwd).root)) {
+    throw new OmiError("POLICY_VIOLATION", `no PR, but ${branch} exists on origin`);
+  }
+  return true;
+}
+
+function cleanupComment(
+  run: RunRow,
+  round: number,
+  receipt: MergeReceipt | undefined,
+  r: CleanupResult,
+) {
   const failed = r.steps.filter((s) => s.status === "failed");
   const comment: StepComment = {
     schemaVersion: SCHEMA_VERSION,
@@ -797,7 +826,9 @@ function cleanupComment(run: RunRow, round: number, receipt: MergeReceipt, r: Cl
     actualEffort: null,
     status: r.state === "COMPLETED" ? "PASSED" : "FAILED",
     summary: [
-      `PR #${receipt.number} merged ${receipt.mergedAt} (head ${receipt.headSha.slice(0, 12)}).`,
+      receipt
+        ? `PR #${receipt.number} merged ${receipt.mergedAt} (head ${receipt.headSha.slice(0, 12)}).`
+        : "No PR: task without code.",
       ...r.steps.map(
         (s) => `- ${s.name}: ${s.status}${s.detail ? ` — ${s.detail.slice(0, 120)}` : ""}`,
       ),
@@ -816,7 +847,7 @@ function cleanupComment(run: RunRow, round: number, receipt: MergeReceipt, r: Cl
         : "Fix the failed step, then rerun `omi task finalize`; resources were kept.",
     executionId: `${run.id}-cleanup`,
     createdAt: new Date().toISOString(),
-    ...(receipt.mergeCommit ? { commitSha: receipt.mergeCommit } : {}),
+    ...(receipt?.mergeCommit ? { commitSha: receipt.mergeCommit } : {}),
   };
   return renderStepReport(parseContract(StepComment, comment, "cleanup comment"));
 }
@@ -861,32 +892,41 @@ export function taskFinalize(
       const branch = claimedRefs(db, runId, "branch")[0];
       if (!branch) throw new OmiError("OWNERSHIP_MISMATCH", `${primary} never owned a branch`);
       const base = config.git.baseBranch;
-      const facts = prFacts(config, { head: branch, base, states: ["MERGED"] }, gh);
+      const facts = prFacts(config, { head: branch, base, states: ["OPEN", "MERGED"] }, gh);
       const receipt = receiptOf(facts.pr);
-      if (!receipt || receipt.baseRef !== base) {
+      // No PR at all: a task without code (Spike, Issue-only) may still be finalized.
+      const noCode = facts.count === 0 ? noCodeProof(deps.cwd, config, issue, branch, gh) : null;
+      if (!noCode && (!receipt || receipt.baseRef !== base)) {
         throw new OmiError("POLICY_VIOLATION", `${branch} has no PR merged into ${base}`);
       }
-      const marked = markedPrimaries(facts.pr?.body ?? "");
-      // PRs opened before `omi pr create` carry no marker: GitHub's closing link is the proof.
-      const named = marked.length
-        ? marked.includes(primary)
-        : closingIssues(facts.pr?.id ?? "", { run: gh, sleep: deps.sleep }).join() === primary;
-      if (!named) {
-        throw new OmiError(
-          "POLICY_VIOLATION",
-          `merged PR #${receipt.number} does not name ${primary}`,
-        );
+      if (receipt) {
+        const marked = markedPrimaries(facts.pr?.body ?? "");
+        // PRs opened before `omi pr create` carry no marker: GitHub's closing link is the proof.
+        const named = marked.length
+          ? marked.includes(primary)
+          : closingIssues(facts.pr?.id ?? "", { run: gh, sleep: deps.sleep }).join() === primary;
+        if (!named) {
+          throw new OmiError(
+            "POLICY_VIOLATION",
+            `merged PR #${receipt.number} does not name ${primary}`,
+          );
+        }
       }
-      const cleanOpts = { runId, receipt, tempRoot: dirname(file) };
+      const cleanOpts = {
+        runId,
+        receipt,
+        tempRoot: dirname(file),
+        ...(noCode ? { noCode: { base } } : {}),
+      };
       if (deps.dryRun) {
         const cleanup = cleanupRun(db, { ...cleanOpts, dryRun: true });
-        return { run, receipt, cleanup, report: null, status: [] };
+        return { run, receipt: receipt ?? null, cleanup, report: null, status: [] };
       }
 
       publishPending(db, runId, { gh }); // earlier reports first: progress waits for them
       const state = () => runContext(db, runId).state;
       if ([...PRE_MERGE, "BLOCKED", "WAITING_PO"].includes(state())) {
-        advanceRun(db, runId, { type: "MERGE_VERIFIED" });
+        advanceRun(db, runId, { type: noCode ? "NO_CODE_VERIFIED" : "MERGE_VERIFIED" });
       }
       if (["PR_MERGED", "CLEANUP_FAILED"].includes(state())) {
         advanceRun(db, runId, { type: "CLEANUP_STARTED" });
@@ -898,7 +938,7 @@ export function taskFinalize(
       const evidence = join(dirname(file), "evidence", runId);
       mkdirSync(evidence, { recursive: true });
       const receiptFile = join(evidence, "merge-receipt.json");
-      if (!existsSync(receiptFile)) {
+      if (receipt && !existsSync(receiptFile)) {
         writeFileSync(receiptFile, `${JSON.stringify(receipt, null, 2)}\n`);
         addArtifact(db, { runId, kind: "evidence", path: receiptFile });
       }
@@ -916,12 +956,19 @@ export function taskFinalize(
       if (cleanup.state === "CLEANUP_FAILED") {
         run = advanceRun(db, runId, { type: "CLEANUP_ERROR" }).run;
         const blocked = setStatus(config, issue, PROJECT_STATUS.CLEANUP_FAILED, gh);
-        return { run, receipt, cleanup, report, status: blocked ? [blocked] : [] };
+        return { run, receipt: receipt ?? null, cleanup, report, status: blocked ? [blocked] : [] };
       }
       run = advanceRun(db, runId, { type: "CLEANUP_SUCCEEDED" }).run;
       // COMPLETED is recorded first; a failure below is repaired by rerunning finalize.
       const fin = markFinished(config, issue, gh);
-      return { run, receipt, cleanup, report, status: fin.changes, held: fin.held };
+      return {
+        run,
+        receipt: receipt ?? null,
+        cleanup,
+        report,
+        status: fin.changes,
+        held: fin.held,
+      };
     } finally {
       releaseLease(db, { key: lease, holder: session });
     }

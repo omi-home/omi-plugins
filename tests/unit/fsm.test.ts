@@ -55,6 +55,8 @@ const TABLE: [WorkflowState, WorkflowEventType, WorkflowState][] = [
   ["IN_QA", "QA_FAILED", "REWORK"],
   ["BLOCKED", "MERGE_VERIFIED", "PR_MERGED"],
   ["WAITING_PO", "MERGE_VERIFIED", "PR_MERGED"],
+  ["BLOCKED", "NO_CODE_VERIFIED", "PR_MERGED"],
+  ["WAITING_PO", "NO_CODE_VERIFIED", "PR_MERGED"],
   ["PR_MERGED", "CLEANUP_STARTED", "CLEANUP_PENDING"],
   ["CLEANUP_FAILED", "CLEANUP_STARTED", "CLEANUP_PENDING"],
   ["CLEANUP_PENDING", "CLEANUP_SUCCEEDED", "COMPLETED"],
@@ -71,6 +73,7 @@ const TABLE: [WorkflowState, WorkflowEventType, WorkflowState][] = [
     [s, "FAIL", "FAILED"],
     [s, "INCONSISTENCY_DETECTED", "RECOVERY_REQUIRED"],
     [s, "MERGE_VERIFIED", "PR_MERGED"],
+    [s, "NO_CODE_VERIFIED", "PR_MERGED"],
   ]),
   ...(["BLOCKED", "WAITING_PO", "RECOVERY_REQUIRED"] as const).flatMap(
     (s): [WorkflowState, WorkflowEventType, WorkflowState][] => [
