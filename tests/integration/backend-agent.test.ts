@@ -1,14 +1,16 @@
-// T1.4 canary: the backend rule pack reaches the named agent and never the main session.
+// T1.4 canary, task workspace since #168: the backend rule pack reaches the named agent through
+// the generated AGENTS.md and never the main session.
 // /context check runs whenever `claude` is on PATH (no model call). Live agent runs cost tokens:
 // opt in with OMI_LIVE=1.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildAgentLaunch, observeRun } from "../../runtime/adapters/claude/launch.ts";
+import { prepareAgent, spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
 
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 const PACK_ID = /^Pack-ID: (.+)$/m.exec(
@@ -59,32 +61,25 @@ test("main /context: agent listed by name/description only, no rule pack, only e
   ]);
 });
 
-const runAgent = (grant: boolean) => {
-  const l = buildAgentLaunch({
+/** Backend Engineer in a fresh task workspace; `roleFiles: false` leaves AGENTS.md out. */
+const runAgent = (roleFiles: boolean) => {
+  const taskRoot = worktree();
+  const repo = join(taskRoot, "repo");
+  mkdirSync(repo);
+  const o = {
     pluginRoot,
-    role: "backend-engineer",
-    worktree: worktree(),
+    role: "backend-engineer" as const,
+    taskRoot,
+    worktree: repo,
     prompt: "Which rule pack did you load? Reply with its Pack-ID only.",
-    fromSource: true,
-  });
-  const args = grant
-    ? l.args
-    : l.args.filter((_, i, a) => a[i] !== "--allowedTools" && a[i - 1] !== "--allowedTools");
-  const r = spawnSync(
-    l.command,
-    [...args, "--setting-sources", "project,local", "--no-session-persistence"],
-    {
-      cwd: l.cwd,
-      input: l.stdin,
-      encoding: "utf8",
-      timeout: 300_000,
-    },
-  );
-  assert.equal(r.status, 0, r.stderr);
-  return observeRun(r.stdout);
+  };
+  const l = roleFiles
+    ? prepareAgent({ ...o, category: "implementation", edits: false, checks: [] })
+    : buildAgentLaunch(o);
+  return observeRun(spawnAgent(l));
 };
 
-test("live: agent with resources grant loads the pack; model observed, effort unknown", {
+test("live: the pack arrives through the task workspace AGENTS.md; model observed, effort unknown", {
   skip: !live && "set OMI_LIVE=1 (costs tokens)",
 }, () => {
   const o = runAgent(true);
@@ -94,13 +89,10 @@ test("live: agent with resources grant loads the pack; model observed, effort un
   assert.deepEqual(o.permissionDenials, []);
 });
 
-test("live: without the grant the Read is denied and the agent blocks", {
+test("live: without the role files the agent has no rules and blocks", {
   skip: !live && "set OMI_LIVE=1 (costs tokens)",
 }, () => {
   const o = runAgent(false);
-  assert.ok(
-    o.permissionDenials.some((d) => d.startsWith("Read:") && /[\\/]resources[\\/]/.test(d)),
-  );
   assert.ok(!o.result.includes(PACK_ID), o.result);
   assert.match(o.result, /BLOCKED/);
 });

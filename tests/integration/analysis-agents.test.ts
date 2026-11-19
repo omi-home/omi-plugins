@@ -3,18 +3,20 @@
 // Issue section, no file changes). Costs tokens: opt in with OMI_LIVE=1.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildAgentLaunch, observeRun } from "../../runtime/adapters/claude/launch.ts";
+import { observeRun } from "../../runtime/adapters/claude/launch.ts";
 import { ROLE_SECTION, type Role } from "../../runtime/core/contracts.ts";
 import {
   acceptStepResult,
   buildTaskPacket,
   packetPrompt,
 } from "../../runtime/core/handoff/packet.ts";
+import { prepareAgent, spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
+import { RULE } from "../../runtime/resources/role-files.ts";
 
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 const live = process.env.OMI_LIVE === "1" && spawnSync("claude", ["--version"]).status === 0;
@@ -26,29 +28,26 @@ const allIds = (readdirSync(join(pluginRoot, "resources"), { recursive: true }) 
   .filter((f) => f.endsWith(".md"))
   .map((f) => packId(join("resources", f)));
 const idsOf = (role: Role) =>
-  [
-    ...readFileSync(join(pluginRoot, "agents", `${role}.md`), "utf8").matchAll(
-      /\$\{CLAUDE_PLUGIN_ROOT\}\/(resources\/\S+\.md)/g,
-    ),
-  ].map((m) => packId(m[1] as string));
+  [...readFileSync(join(pluginRoot, "agents", `${role}.md`), "utf8").matchAll(RULE)].map((m) =>
+    packId(m[1] as string),
+  );
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
+/** The agent runs in the task workspace around the clone `cwd` (#168). */
 function run(role: Role, prompt: string, cwd: string) {
-  const l = buildAgentLaunch({ pluginRoot, role, worktree: cwd, prompt, fromSource: true });
-  const r = spawnSync(
-    l.command,
-    [...l.args, "--setting-sources", "project,local", "--no-session-persistence"],
-    {
-      cwd: l.cwd,
-      input: l.stdin,
-      encoding: "utf8",
-      timeout: 600_000,
-    },
-  );
-  assert.equal(r.status, 0, r.stderr);
-  return observeRun(r.stdout);
+  const l = prepareAgent({
+    pluginRoot,
+    role,
+    category: "analysis",
+    edits: false,
+    checks: [],
+    taskRoot: dirname(cwd),
+    worktree: cwd,
+    prompt,
+  });
+  return observeRun(spawnAgent(l));
 }
 
 const ROLES: { role: Role; model: RegExp; stepId: string; heading: string }[] = [
@@ -74,7 +73,8 @@ const ROLES: { role: Role; model: RegExp; stepId: string; heading: string }[] = 
 
 /** A tiny web app repo and a UI feature Issue every role has something to say about. */
 function fixture() {
-  const dir = mkdtempSync(join(tmpdir(), "omi-t51-"));
+  const dir = join(mkdtempSync(join(tmpdir(), "omi-t51-")), "notes");
+  mkdirSync(dir);
   git(dir, "init", "-q", "-b", "main");
   git(dir, "config", "user.email", "t@example.invalid");
   git(dir, "config", "user.name", "t");

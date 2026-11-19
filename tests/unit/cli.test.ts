@@ -42,10 +42,9 @@ Commands:
                          Reviewer (→ Security Reviewer when risk:high/security or asked) (→ Architect)
                          → release validation (→ Manual QA for bugs, ui, qa:manual) until In Review
                          or it needs a person (Waiting PO, Blocked). Runs agents: spends tokens.
-                         --from-source loads the agents from this checkout instead of the installed plugin
   task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
                          write their sections into the Issue body, then Waiting PO. No worktree.
-                         Runs agents: spends tokens. --from-source as for task run
+                         Runs agents: spends tokens.
   task unblock <n>       Clear a BLOCKED run of Issue #n (a person decided): resume it through the FSM,
                          post one report (who, --reason <text>); the next \`task run\` re-runs the step
                          that reported BLOCKED

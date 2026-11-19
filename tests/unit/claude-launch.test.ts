@@ -1,54 +1,110 @@
+// DevTask-0055 #168: the agent runs as a full Claude Code session in its task workspace.
 import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import {
-  buildAgentLaunch,
-  observeRun,
-  permissionPath,
-} from "../../runtime/adapters/claude/launch.ts";
+import { agentEnv, buildAgentLaunch, observeRun } from "../../runtime/adapters/claude/launch.ts";
+import { spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
 
 const win = process.platform === "win32";
+const root = win ? "E:/plug" : "/plug";
+const task = win ? "E:/ws-task-19" : "/ws-task-19";
+const repo = join(task, "omi-plugins");
+const host = {
+  PATH: "/bin",
+  HOME: "/home/u",
+  CLAUDE_CODE_OAUTH_TOKEN: "tok",
+  ANTHROPIC_API_KEY: "sk-host",
+  GH_TOKEN: "ghp_host",
+  CLAUDECODE: "1",
+  NODE_TEST_CONTEXT: "child",
+};
 
-test("permissionPath uses the //drive/... rule form", () => {
-  if (win) assert.equal(permissionPath("E:\\Repo\\x\\resources"), "//e/Repo/x/resources");
-  else assert.equal(permissionPath("/home/u/p/resources"), "//home/u/p/resources");
-});
-
-test("launch: named agent, resources-only Read grant, prompt via stdin, cwd = worktree", () => {
-  const root = win ? "E:\\plug" : "/plug";
-  const wt = win ? "E:\\wt\\19" : "/wt/19";
+test("launch: named agent, cwd = task workspace, plugin dir, project settings, prompt via stdin", () => {
   const l = buildAgentLaunch({
     pluginRoot: root,
     role: "backend-engineer",
-    worktree: wt,
+    taskRoot: task,
+    worktree: repo,
     prompt: "do x",
+    hostEnv: host,
   });
-  assert.equal(l.cwd, wt);
+  assert.equal(l.cwd, task);
   assert.equal(l.stdin, "do x");
   assert.ok(!l.args.includes("do x"));
   const at = (flag: string) => l.args[l.args.indexOf(flag) + 1];
   assert.equal(at("--agent"), "omi-engineering:backend-engineer");
-  assert.equal(at("--allowedTools"), `Read(${win ? "//e/plug" : "//plug"}/resources/**)`);
-  assert.ok(!l.args.includes("--add-dir"), "--add-dir would grant more than Read");
-  assert.ok(!l.args.includes("--plugin-dir"));
-  const src = buildAgentLaunch({
-    pluginRoot: root,
-    role: "backend-engineer",
-    worktree: wt,
-    prompt: "",
-    fromSource: true,
-  });
-  assert.equal(src.args[src.args.indexOf("--plugin-dir") + 1], root);
+  assert.equal(at("--plugin-dir"), root);
+  assert.equal(at("--setting-sources"), "project,local");
+  assert.ok(!l.args.includes("--add-dir"), "the clone is inside the task workspace");
+  assert.ok(!l.args.includes("--allowedTools"), "no grant on plugin resources any more");
   assert.ok(!l.args.includes("--permission-mode"), "read-only by default");
+  assert.equal(l.configDir, join(task, ".omi-home", "claude"));
   const dev = buildAgentLaunch({
     pluginRoot: root,
     role: "backend-engineer",
-    worktree: wt,
+    taskRoot: task,
+    worktree: repo,
     prompt: "",
     allowedTools: ["Bash(npm test)"],
     acceptEdits: true,
+    hostEnv: host,
   });
-  assert.ok(dev.args.includes("Bash(npm test)"));
+  assert.equal(dev.args[dev.args.indexOf("--allowedTools") + 1], "Bash(npm test)");
   assert.equal(dev.args[dev.args.indexOf("--permission-mode") + 1], "acceptEdits");
+  const analysis = buildAgentLaunch({
+    pluginRoot: root,
+    role: "business-analyst",
+    taskRoot: task,
+    worktree: root,
+    prompt: "",
+    hostEnv: host,
+  });
+  assert.equal(analysis.args[analysis.args.indexOf("--add-dir") + 1], root);
+});
+
+test("env: built from the allowlist with its own CLAUDE_CONFIG_DIR; host secrets stay out", () => {
+  const l = buildAgentLaunch({
+    pluginRoot: root,
+    role: "code-reviewer",
+    taskRoot: task,
+    worktree: repo,
+    prompt: "",
+    hostEnv: host,
+  });
+  assert.deepEqual(l.env, {
+    PATH: "/bin",
+    HOME: "/home/u",
+    CLAUDE_CODE_OAUTH_TOKEN: "tok",
+    CLAUDE_CONFIG_DIR: join(task, ".omi-home", "claude"),
+  });
+  assert.deepEqual(agentEnv({ Path: "C:/bin", SystemRoot: "C:/Windows" }), {
+    Path: "C:/bin",
+    SystemRoot: "C:/Windows",
+  });
+});
+
+test("spawnAgent: no token → CONFIG_INVALID before anything runs; config dir fresh per run", () => {
+  const taskRoot = mkdtempSync(join(tmpdir(), "omi-launch-"));
+  const base = { pluginRoot: root, role: "code-reviewer" as const, taskRoot, prompt: "" };
+  const noToken = buildAgentLaunch({ ...base, worktree: taskRoot, hostEnv: { PATH: "/bin" } });
+  assert.throws(() => spawnAgent(noToken), { code: "CONFIG_INVALID", message: /setup-token/ });
+  assert.ok(!existsSync(noToken.configDir));
+  const l = buildAgentLaunch({
+    ...base,
+    worktree: taskRoot,
+    hostEnv: { CLAUDE_CODE_OAUTH_TOKEN: "t" },
+  });
+  const stale = join(l.configDir, "stale.json");
+  mkdirSync(l.configDir, { recursive: true });
+  writeFileSync(stale, "{}");
+  // A command that does not exist: the config dir is prepared, then the spawn fails.
+  assert.throws(() => spawnAgent({ ...l, command: "omi-no-such-cli" as "claude" }), {
+    code: "INTERNAL",
+  });
+  assert.ok(existsSync(l.configDir));
+  assert.ok(!existsSync(stale));
 });
 
 test("observeRun: cut transcript lines skipped (#19 CR-001); host usage read; no result → OmiError", () => {
@@ -78,6 +134,7 @@ test("launch: relative paths rejected", () => {
       buildAgentLaunch({
         pluginRoot: "plug",
         role: "backend-engineer",
+        taskRoot: "/t",
         worktree: "/wt",
         prompt: "",
       }),

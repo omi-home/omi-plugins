@@ -3,7 +3,6 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import { loadConfig, type OmiConfig } from "../core/config.ts";
@@ -56,20 +55,6 @@ function toolVersion(name: string, cmd: string, min: string | undefined, cwd: st
   }
   if (min && !atLeast(v, min)) return { name, status: "fail", detail: `${v} < required ${min}` };
   return { name, status: "pass", detail: v };
-}
-
-/**
- * The launcher grants `Read(<plugin root>/resources/**)`; a space or glob character in that path is
- * not verified to match literally in a Claude permission rule (carried CR-002 of #19).
- */
-export function pluginRootCheck(root: string): Check {
-  return /[\s*?[\]{}]/.test(root)
-    ? {
-        name: "plugin-root",
-        status: "warn",
-        detail: `${root} has a space or glob character: agents may be denied their rule pack`,
-      }
-    : { name: "plugin-root", status: "pass", detail: root };
 }
 
 /** CLAUDE.md files at or above the repo root silently disable AGENTS.md (T0.4). */
@@ -361,7 +346,6 @@ export function doctor(cwd: string): Check[] {
     toolVersion("git", "git", undefined, cwd),
     toolVersion("gh", "gh", undefined, cwd),
     toolVersion("claude", "claude", MIN_CLAUDE, cwd),
-    pluginRootCheck(fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "")),
     workflows(),
   ];
 
