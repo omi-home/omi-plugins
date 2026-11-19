@@ -28,7 +28,7 @@ Ký hiệu `spec §N` (trong code, ADR, Issue) trỏ tới section `§N` trong p
 | GitHub Project + Issues | cây công việc, trạng thái, PR, comment audit | GitHub |
 | CI / hooks | kiểm tra độc lập với agent | bằng chứng CI |
 
-Luồng chính ([ADR-0002](../decisions/ADR-0002-workspace-va-profile-thuc-thi-claude-code.md) D2/D4/D5): Coordinator → `omi` CLI → `claude -p --agent omi-engineering:<role>` với cwd = task workspace, `--plugin-dir <plugin>`, `CLAUDE_CONFIG_DIR` riêng mỗi lần chạy và env dựng từ allowlist → kết quả có cấu trúc → CLI lưu SQLite và đăng comment. Rule pack của role đến qua `AGENTS.md` mà CLI sinh trong task workspace, không qua lệnh Read. Kiến trúc đích ([ADR-0003](../decisions/ADR-0003-rules-skills-hooks-va-coordinator-mong.md), Milestone-0010 #182): Coordinator mỏng chỉ điều phối; một plugin `omi-coordinator` chứa `agent-pack/` chạy bằng `--plugin-dir <plugin root>/agent-pack`; CLI chỉ chép skill Coordinator chọn từ `agent-pack/skill-library/` vào `.claude/skills/` của task workspace; hooks chặn cứng; bỏ workflows. Profile thực thi (auth/model/effort theo profile) thuộc Feature-0021 #137; tới khi có, agent xác thực bằng `CLAUDE_CODE_OAUTH_TOKEN` của host.
+Luồng chính ([ADR-0002](../decisions/ADR-0002-workspace-va-profile-thuc-thi-claude-code.md) D2/D4/D5): Coordinator → `omi` CLI → `claude -p --agent omi-engineering:<role>` với cwd = task workspace, `--plugin-dir <plugin>`, `CLAUDE_CONFIG_DIR` riêng mỗi lần chạy và env dựng từ allowlist → kết quả có cấu trúc → CLI lưu SQLite và đăng comment. Rules của role đến qua `AGENTS.md`, skill của step qua `.claude/skills/` mà CLI sinh trong task workspace (DevTask-0065 #199). Kiến trúc đích ([ADR-0003](../decisions/ADR-0003-rules-skills-hooks-va-coordinator-mong.md), Milestone-0010 #182): Coordinator mỏng chỉ điều phối; một plugin `omi-coordinator` chứa `agent-pack/` chạy bằng `--plugin-dir <plugin root>/agent-pack`; CLI chỉ chép skill Coordinator chọn từ `agent-pack/skill-library/` vào `.claude/skills/` của task workspace; hooks chặn cứng; bỏ workflows. Profile thực thi (auth/model/effort theo profile) thuộc Feature-0021 #137; tới khi có, agent xác thực bằng `CLAUDE_CODE_OAUTH_TOKEN` của host.
 
 ## Hợp đồng thư mục gốc
 
@@ -37,10 +37,9 @@ Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc 
 | Thư mục | Chủ sở hữu | Nội dung |
 |---|---|---|
 | `.claude-plugin/` | Claude Code | `plugin.json`, `marketplace.json` |
-| `agent-pack/` | Claude Code | plugin `omi-engineering` lồng trong plugin `omi-coordinator` (ADR-0003 D3, DevTask-0059 #192): `agents/` (11 agent chuyên môn, mỗi agent khai báo tập skill `omi:skills`), `skill-library/` (33 skill theo Spike-0011 #196, DevTask-0063 #197; nguồn ngoài ghi trong `THIRD_PARTY_NOTICES`), `agents-md/` (phần của `AGENTS.md` theo role: DoD, ranh giới, format REPORT; DevTask-0064 #198), `hooks/` (chặn `git push`, `gh`, ghi ra ngoài task workspace); CLI nạp bằng `--plugin-dir <plugin root>/agent-pack`, không cài riêng |
+| `agent-pack/` | Claude Code | plugin `omi-engineering` lồng trong plugin `omi-coordinator` (ADR-0003 D3, DevTask-0059 #192): `agents/` (11 agent chuyên môn, mỗi agent khai báo tập skill `omi:skills`), `skill-library/` (33 skill theo Spike-0011 #196, DevTask-0063 #197; CLI chỉ chép skill của step vào `.claude/skills/` của task workspace, `omi skill list`, `task run --skills` — DevTask-0065 #199; nguồn ngoài ghi trong `THIRD_PARTY_NOTICES`), `agents-md/` (phần của `AGENTS.md` theo role: DoD, ranh giới, format REPORT; DevTask-0064 #198), `hooks/` (chặn `git push`, `gh`, ghi ra ngoài task workspace); CLI nạp bằng `--plugin-dir <plugin root>/agent-pack`, không cài riêng |
 | `skills/` | Claude Code | **chỉ** entry skill của Coordinator (D3) |
 | `hooks/` | Claude Code | `hooks.json`: `PreToolUse` chặn cứng, `SessionStart` chèn tóm tắt (ADR-0003 D6) |
-| `resources/` | OMI | `role-rules/<role>/`, `shared/` — CLI chép vào `AGENTS.md` của task workspace theo danh sách `omi:rule-pack` trong `agent-pack/agents/<role>.md`; sẽ bỏ, thay bằng `agent-pack/skill-library/` (ADR-0003 D4, Feature-0027 #188) |
 | `runtime/` | OMI | CLI, core (FSM/policy/routing/handoff/errors), adapters, reporting, persistence |
 | `config/` | OMI | policy YAML, cấu hình GitHub Project |
 | `schemas/` | OMI | JSON Schema cho state/step/handoff/comment/cleanup |
@@ -72,8 +71,9 @@ Dữ liệu và phiên làm việc của OMI nằm ngoài repo đích (ADR-0002 
 │   └── <repo>/                         # checkout chính: chạy `omi` ở đây
 └── <name>-workspace-task-<run>/        # task workspace: `omi task start`, dọn bằng `omi task finalize`
     ├── .claude/settings.json           # sinh lại trước mỗi lần chạy agent
+    ├── .claude/skills/                 # chỉ skill của step (role default + --skills), chép lại mỗi lần chạy
     ├── .omi-home/claude/               # CLAUDE_CONFIG_DIR, tạo mới mỗi lần chạy
-    ├── AGENTS.md                       # rule pack của role đang chạy
+    ├── AGENTS.md                       # rules của role đang chạy (agent-pack/agents-md)
     ├── REPORT.md                       # template báo cáo của bước
     └── <repo>/                         # clone (không shallow), branch `<loại>/<issue>-<slug>`
 ```
@@ -119,20 +119,6 @@ omi-plugins/
 │   └── omi-release/SKILL.md            # release check → PR develop → main (PO merge) → release tag
 ├── hooks/
 │   └── hooks.json
-├── resources/                          # not discovered by Claude Code; copied into the task workspace AGENTS.md
-│   ├── shared/                         # knowledge reused by several roles (e.g. api-contracts.md)
-│   └── role-rules/
-│       ├── analysis/                   # requirement-analysis.md, acceptance-criteria.md, rules
-│       ├── architecture/               # system-design.md, adr-management.md, root-cause-analysis.md
-│       ├── design/                     # ux-flows.md, ui-design.md, accessibility.md
-│       ├── frontend/                   # frontend-implementation.md, component-testing.md
-│       ├── backend/                    # backend-implementation.md, unit-test-design.md
-│       ├── database/                   # schema-design.md, database-migration.md
-│       ├── code-review/                # semantic-code-review.md, architecture-compliance.md
-│       ├── security-review/            # threat-assessment.md, security-review.md
-│       ├── manual-qa/                  # test-case-design.md, exploratory-qa.md
-│       ├── automation-qa/              # automated-test-authoring.md, test-maintenance.md
-│       └── devops/                     # ci-cd-engineering.md, deployment-design.md, observability.md
 ├── runtime/
 │   ├── cli/                            # parse, execute, compact output
 │   ├── core/
@@ -206,7 +192,7 @@ omi-plugins/
 ### Directory ownership
 
 - `.claude-plugin/`, `skills/`, `hooks/` and `agent-pack/` (its own `.claude-plugin/`, `agents/`) follow Claude Code plugin contracts (Phase 0 verified: agents register as `<plugin>:<name>`, skills as `<plugin>:<name>`; Spike-0010 #185: a session with the plugin does not scan `agent-pack/`).
-- `resources/`, `config/`, `schemas/`, `templates/`, `runtime/`, `tests/` are OMI-owned, not magic Claude directories.
+- `config/`, `schemas/`, `templates/`, `runtime/`, `tests/` are OMI-owned, not magic Claude directories.
 - No `workflows/` (ADR-0003 D7): orchestration goes through `omi task run`.
 - `bin/omi` must resolve plugin paths and environment reliably, including Windows. Never embed developer-specific absolute paths.
 - No generated files are placed in arbitrary repository locations; update this directory contract through ADR before introducing new root folders.

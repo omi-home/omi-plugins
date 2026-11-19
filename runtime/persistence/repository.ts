@@ -260,8 +260,14 @@ export function startStep(
 export function beginAttempt(
   db: Db,
   stepRunId: number,
-  /** The Coordinator's execution choice (#217); omitted = `agents.routing`. */
-  choice?: { profile: string; model: string; effort: string; reason: string },
+  /** The Coordinator's execution choice (#217, skills #199); no profile = `agents.routing`. */
+  choice?: {
+    profile?: string;
+    model?: string;
+    effort?: string;
+    reason?: string;
+    skills?: string[];
+  },
 ): number {
   return tx(db, "begin attempt", () => {
     const open = db
@@ -281,7 +287,7 @@ export function beginAttempt(
       ) + 1;
     const now = iso();
     db.prepare(
-      "INSERT INTO step_attempt (step_run_id, attempt, started_at, profile, requested_model, requested_effort, reason) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO step_attempt (step_run_id, attempt, started_at, profile, requested_model, requested_effort, reason, skills) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(
       stepRunId,
       next,
@@ -290,6 +296,7 @@ export function beginAttempt(
       choice?.model ?? null,
       choice?.effort ?? null,
       choice?.reason ?? null,
+      choice?.skills ? JSON.stringify(choice.skills) : null,
     );
     setStepState(db, stepRunId, ["PENDING", "RUNNING"], "RUNNING", now);
     return next;

@@ -21,6 +21,7 @@ import {
 } from "../../runtime/core/workflow-engine/slice.ts";
 import { openState } from "../../runtime/persistence/db.ts";
 import * as repo from "../../runtime/persistence/repository.ts";
+import { roleSkills } from "../../runtime/resources/role-files.ts";
 
 type Verdict = "PASSED" | "FAILED" | "BLOCKED";
 interface Script {
@@ -305,6 +306,18 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
   assert.equal(launch.cwd, s.target.taskRoot);
   assert.equal(launch.env.CLAUDE_CONFIG_DIR, join(s.target.taskRoot, ".omi-home", "claude"));
   assert.match(readFileSync(join(s.target.taskRoot, "AGENTS.md"), "utf8"), /^## Code Reviewer$/m);
+  // #199: every attempt records the skills installed for it (role defaults without a choice).
+  const attempts = s.db
+    .prepare("SELECT s.role, a.skills FROM step_attempt a JOIN step_run s ON s.id = a.step_run_id")
+    .all();
+  assert.deepEqual(
+    attempts.map((r) => [r.role, JSON.parse(String(r.skills))]),
+    [
+      ["backend-engineer", roleSkills(s.deps.pluginRoot, "backend-engineer").default],
+      ["code-reviewer", roleSkills(s.deps.pluginRoot, "code-reviewer").default],
+    ],
+  );
+  assert.ok(s.gh.comments.some((c) => c.body.includes("| Skills | semantic-code-review |")));
   // Checks already passed on this HEAD: release validation reuses them, no Manual QA planned.
   assert.deepEqual(titles(s.gh.comments.map((c) => c.body)), [
     "implement:1",

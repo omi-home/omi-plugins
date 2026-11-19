@@ -18,4 +18,4 @@ Script first: every step below is an `omi` command run through Bash. Do not tag,
 5. After the PO merged: `omi release tag <n>` tags the merge commit `<plugin>--v<version>`, pushes the tag, closes the Release Issue and rolls up its Milestone. Re-running it is safe.
 6. Tell the PO the tag and the install line users pin to it: `claude plugin marketplace add <owner>/<repo>#<tag>` (see README "Cài plugin"). Milestone Done stays the PO's acceptance.
 
-Never read anything under the plugin's `resources/role-rules/`.
+Never read anything under the plugin's `agent-pack/`; its rules and skills belong to the specialist agents.

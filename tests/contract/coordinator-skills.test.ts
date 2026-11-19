@@ -27,7 +27,11 @@ for (const [name, min] of Object.entries(SCRIPT_ONLY)) {
     const front = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? "";
     assert.match(front, new RegExp(`^name: ${name}$`, "m"));
     assert.match(front, /^description: Use (when|at) .{30,190}$/m, "short, says when to use");
-    assert.match(text, /resources\/role-rules\//, "must forbid reading role-rules");
+    assert.match(
+      text,
+      /Never read anything under the plugin's `agent-pack\/`/,
+      "forbid agent-pack",
+    );
 
     const code = [...text.matchAll(/`([^`\n]+)`/g)].map((m) => m[1] as string);
     const commands = code.filter((c) => /^omi /.test(c));

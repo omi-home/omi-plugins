@@ -40,7 +40,7 @@ import {
 import { publishPending } from "../../reporting/outbox.ts";
 import { redactDeep } from "../../reporting/redact.ts";
 import { renderStepReport } from "../../reporting/render.ts";
-import { writeRoleFiles } from "../../resources/role-files.ts";
+import { type SkillChoice, stepSkills, writeRoleFiles } from "../../resources/role-files.ts";
 import { git } from "../../resources/worktree.ts";
 import type { OmiConfig, Selection } from "../config.ts";
 import {
@@ -73,6 +73,8 @@ export interface SliceDeps {
   hostEnv?: NodeJS.ProcessEnv;
   /** Profile/model/effort the Coordinator chose for every agent step (#217); none = routing. */
   selection?: Selection;
+  /** Skills the Coordinator chose per role (#199); every step also gets its role's defaults. */
+  skills?: SkillChoice;
   now?: () => Date;
   /** Writes a `<!-- omi:section=… -->` of the Issue body (the Manual QA test cases). */
   writeSection?: (section: string, markdown: string) => void;
@@ -216,6 +218,8 @@ export function prepareAgent(o: {
   prompt: string;
   hostEnv?: NodeJS.ProcessEnv;
   selection?: Selection;
+  /** Skills installed into the task workspace for this run (#199). */
+  skills?: string[];
 }): AgentLaunch {
   const rel = relative(o.taskRoot, o.worktree);
   // ponytail: outside the task workspace (analysis) the absolute path must be typed verbatim.
@@ -287,16 +291,13 @@ function agentStep(
   if (step.state === "REPORT_POSTED") return stepResult(db, step.id);
   for (;;) {
     const sel = d.selection;
-    const attempt = beginAttempt(
-      db,
-      step.id,
-      sel && {
-        profile: sel.profile.name,
-        model: sel.model,
-        effort: sel.effort,
-        reason: sel.reason,
-      },
-    );
+    const skills = stepSkills(d.pluginRoot, { ...planned, round: ctx.round }, d.skills);
+    const reason = sel?.reason ?? d.skills?.reason;
+    const attempt = beginAttempt(db, step.id, {
+      ...(sel ? { profile: sel.profile.name, model: sel.model, effort: sel.effort } : {}),
+      ...(reason ? { reason } : {}),
+      skills,
+    });
     let report: { result: StepResult; actualModel: string; marker: string; body: string };
     try {
       const packet = buildTaskPacket({
@@ -333,6 +334,7 @@ function agentStep(
           prompt: packetPrompt(packet),
           hostEnv: d.hostEnv,
           selection: sel,
+          skills,
         }),
       );
       const quota = detectQuota(stdout);
@@ -369,7 +371,9 @@ function agentStep(
           actualModel: obs.actualModel,
           requestedEffort: sel?.effort ?? route.effort,
           actualEffort: "unknown",
-          ...(sel ? { profile: sel.profile.name, selectionReason: sel.reason } : {}),
+          ...(sel ? { profile: sel.profile.name } : {}),
+          ...(reason ? { selectionReason: reason } : {}),
+          skills,
           thinkingObserved: obs.thinkingObserved,
           commitSha: result.commitSha,
           status: result.status,
@@ -430,7 +434,9 @@ function agentStep(
             actualModel: "unknown",
             requestedEffort: sel?.effort ?? route.effort,
             actualEffort: "unknown",
-            ...(sel ? { profile: sel.profile.name, selectionReason: sel.reason } : {}),
+            ...(sel ? { profile: sel.profile.name } : {}),
+            ...(reason ? { selectionReason: reason } : {}),
+            skills,
             status: "BLOCKED",
             summary: cut(
               `Quota: ${err.message}\nSignal: ${JSON.stringify((err.details as { event?: unknown }).event)}`,

@@ -1,5 +1,5 @@
 ---
-name: security-review
+name: security-code-review
 description: Use when reviewing a diff for vulnerabilities and rating their severity.
 ---
 # Security review

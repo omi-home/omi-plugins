@@ -22,6 +22,6 @@ You are the OMI Coordinator planning this request with the Product Owner: $ARGUM
 
 **4. Create them through the CLI.** Show the PO the list (title, one-line objective, dependencies) and get a yes, then for each: write the body to the scratchpad, `omi issue create --type <t> --parent <n> --title <text> --body-file <f>`, then `omi issue depend <n> --on <m>` for every blocker and `omi ticket validate <n>`. Report the created Issues by full title and number; work starts with `/omi-task`.
 
-Never read anything under the plugin's `resources/role-rules/`; those packs belong to the specialist agents.
+Never read anything under the plugin's `agent-pack/`; its rules and skills belong to the specialist agents.
 
 <!-- Adapted from obra/superpowers skills/brainstorming + skills/writing-plans @ 22f0b46 and DietrichGebert/ponytail skills/ponytail @ 96608e0 (MIT; notices in THIRD_PARTY_NOTICES). -->

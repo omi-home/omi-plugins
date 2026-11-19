@@ -18,12 +18,13 @@ import {
 } from "../adapters/github/project-fields.ts";
 import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/github/repo.ts";
 import { listProfiles } from "../core/config.ts";
-import { IssueType, ProjectStatus, type TokenUsage } from "../core/contracts.ts";
+import { IssueType, ProjectStatus, Role, type TokenUsage } from "../core/contracts.ts";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import type { RepoAction } from "../core/repo-config.ts";
 import { CONFIG_FILE, locate } from "../core/workspace.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { formatUsage, sumUsage } from "../reporting/render.ts";
+import { skillList } from "../resources/role-files.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { contextApply, contextPlan, humanContextPlan } from "./context.ts";
 import { type Check, doctor, probeProfiles } from "./doctor.ts";
@@ -84,7 +85,9 @@ Commands:
                          Runs agents: spends tokens.
                          task run / task analyze: --profile <name> [--model <id>] [--effort <level>]
                          --reason <text> runs every agent step on that profile (\`profile list\`);
-                         model/effort default to the profile's first; none: agents.routing
+                         model/effort default to the profile's first; none: agents.routing.
+                         --skills <role>=<skill>,<skill> (repeatable, needs --reason) adds skills
+                         from that role's set (\`skill list\`) to its steps; defaults always install
   task unblock <n>       Clear a BLOCKED run of Issue #n (a person decided): resume it through the FSM,
                          post one report (who, --reason <text>); the next \`task run\` re-runs the step
                          that reported BLOCKED
@@ -154,6 +157,9 @@ Commands:
   profile list           Read-only: execution profiles not disabled in .omi-plugins/omi.config.json
                          (harness, auth type, models, efforts) and whether each secret env is set;
                          never prints a secret
+  skill list [--role <role>]
+                         Read-only: each role's default and allowed skills (agent-pack) and what each
+                         skill is for; the input for \`task run --skills\`
   context plan [--role <role>]
                          Read-only: measure the context a session starts with in the workspace and in
                          a task workspace of each role (\`/context\`, no tokens) and classify every
@@ -255,6 +261,7 @@ const REPO_WIDE = new Set([
   "context plan",
   "context apply",
   "profile list",
+  "skill list",
   "hook pre-tool-use",
   "hook session-start",
   "hook agent-pre-tool-use",
@@ -298,11 +305,18 @@ const describeRepo = (a: RepoAction) =>
             .join(", ")}`
         : `${a.what}: ${a.reason}`;
 
-const pickFlags = (v: { profile?: string; model?: string; effort?: string; reason?: string }) => ({
+const pickFlags = (v: {
+  profile?: string;
+  model?: string;
+  effort?: string;
+  reason?: string;
+  skills?: string[];
+}) => ({
   profile: v.profile,
   model: v.model,
   effort: v.effort,
   reason: v.reason,
+  skills: v.skills,
 });
 
 const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
@@ -468,6 +482,24 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
                 )
               : ["profiles  none active: steps use agents.routing"],
           ),
+        );
+      }
+      case "skill list": {
+        const role = values.role === undefined ? undefined : Role.safeParse(values.role);
+        if (role && !role.success) {
+          throw new OmiError("USAGE_INVALID", `--role takes one of ${Role.options.join(", ")}`);
+        }
+        const r = skillList(role ? [role.data] : Role.options);
+        return ok(
+          r,
+          lines([
+            ...r.roles.map(
+              (x) =>
+                `${x.role.padEnd(22)} default ${x.default.join(",")}  allowed ${x.allowed.join(",") || "-"}`,
+            ),
+            "",
+            ...r.skills.map((s) => `${s.name.padEnd(30)} ${s.description}`),
+          ]),
         );
       }
       case "doctor": {
@@ -832,6 +864,7 @@ const parse = (args: string[]) =>
       safe: { type: "boolean" },
       reason: { type: "string" },
       profile: { type: "string" },
+      skills: { type: "string", multiple: true },
       model: { type: "string" },
       effort: { type: "string" },
       type: { type: "string" },

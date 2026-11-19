@@ -119,3 +119,23 @@ test("usage (#203): summed per run; cache hit and list-price cost shown only whe
   assert.equal(formatUsage({ inputTokens: 1, outputTokens: 2 }), "1 in / 2 out tokens");
   assert.equal(sumUsage([]), undefined);
 });
+
+test("skills row: the installed skills; the reason shows there when no profile carries it (#199)", () => {
+  const out = renderStepReport(
+    comment({
+      category: "implementation",
+      skills: ["backend-implementation", "minimal-change"],
+      selectionReason: "small diff",
+    }),
+  );
+  assert.match(out, /\| Skills \| backend-implementation, minimal-change \(small diff\) \|/);
+  const withProfile = renderStepReport(
+    comment({
+      category: "review",
+      skills: ["minimal-change"],
+      profile: "sub-a",
+      selectionReason: "spread",
+    }),
+  );
+  assert.match(withProfile, /\| Skills \| minimal-change \|/);
+});

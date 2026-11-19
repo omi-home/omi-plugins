@@ -71,6 +71,14 @@ export function formatUsage(u: TokenUsage): string {
   ].join(" · ");
 }
 
+/** Skills installed for the step; the reason shows here when no profile carries it (#199). */
+function skills(c: StepComment): string {
+  if (c.executor === "omi-cli") return "n/a (omi-cli)";
+  if (!c.skills?.length) return "—";
+  const why = !c.profile && c.selectionReason ? ` (${c.selectionReason})` : "";
+  return `${c.skills.join(", ")}${why}`;
+}
+
 /** Observed tokens and wall time (spec §14): never estimated, `not_available` when unknown. */
 function cost(c: StepComment): string {
   const u = c.usage;
@@ -97,6 +105,7 @@ export function renderStepReport(c: StepComment): string {
     executor: c.executor,
     model: cell(model(c)),
     effort: cell(effort(c)),
+    skills: cell(skills(c)),
     cost: cell(cost(c)),
     commit: c.commitSha ? c.commitSha.slice(0, 8) : "—",
     status: c.status,

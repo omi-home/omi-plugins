@@ -123,6 +123,10 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE step_attempt ADD COLUMN requested_effort TEXT;
   ALTER TABLE step_attempt ADD COLUMN reason TEXT;
   `,
+  // 6 — skills installed for each attempt (JSON array, DevTask-0065 #199)
+  `
+  ALTER TABLE step_attempt ADD COLUMN skills TEXT;
+  `,
 ];
 
 export function migrate(db: DatabaseSync, migrations: readonly string[] = MIGRATIONS): number {

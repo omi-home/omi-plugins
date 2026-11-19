@@ -95,6 +95,7 @@ import {
 import { publishPending } from "../reporting/outbox.ts";
 import { renderStepReport } from "../reporting/render.ts";
 import { applyRetention, cleanupRun } from "../resources/cleanup.ts";
+import { parseSkillChoice } from "../resources/role-files.ts";
 import { branchName, ensureTaskWorkspace, git, type Workspace } from "../resources/worktree.ts";
 
 export interface TaskDeps {
@@ -410,6 +411,8 @@ export interface PickFlags {
   model?: string;
   effort?: string;
   reason?: string;
+  /** `--skills <role>=<a>,<b>` (#199). */
+  skills?: string[];
 }
 
 /**
@@ -429,6 +432,7 @@ export function taskRun(
   const { workspace, config } = repo(deps.cwd);
   // A bad choice is refused before anything starts.
   const selection = selectProfile(loadProfiles(workspace), deps.pick ?? {}, deps.hostEnv);
+  const skills = parseSkillChoice(PLUGIN_ROOT, deps.pick?.skills, deps.pick?.reason);
   // Plan first: a bad role label or a non-delivery type fails before any worktree exists.
   const plan = planFor(config, fetchTicket(config, issue, gh), gh);
   if (plan.kind !== "delivery") {
@@ -454,6 +458,7 @@ export function taskRun(
           runAgent: deps.runAgent,
           hostEnv: deps.hostEnv,
           selection,
+          skills,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),
         },
         {
@@ -529,6 +534,7 @@ export function taskAnalyze(
   const gh = deps.gh ?? spawnGh;
   const { root, workspace, config } = repo(deps.cwd);
   const selection = selectProfile(loadProfiles(workspace), deps.pick ?? {}, deps.hostEnv);
+  const skills = parseSkillChoice(PLUGIN_ROOT, deps.pick?.skills, deps.pick?.reason);
   const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
   const ticket = fetchTicket(config, issue, gh);
   const bad = validateTicket(ticket, config).find((c) => c.status === "fail");
@@ -568,6 +574,7 @@ export function taskAnalyze(
           runAgent: deps.runAgent,
           hostEnv: deps.hostEnv,
           selection,
+          skills,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),
         },
         {
