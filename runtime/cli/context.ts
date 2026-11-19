@@ -3,17 +3,28 @@
 // `/context` of `claude -p` (local command, no model call, no tokens) and classifies each item.
 // System tools and the like have no switch: they are reported only. `apply` is DevTask-0067 #202.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_PACK, agentEnv, PLUGIN_NAME } from "../adapters/claude/launch.ts";
 import { loadConfig } from "../core/config.ts";
+import {
+  AppliedContext,
+  addContext,
+  desiredContext,
+  NOTHING_APPLIED,
+  parseSettings,
+  removeContext,
+  type Settings,
+  settingsDiff,
+} from "../core/context-settings.ts";
 import { classify, parseContext } from "../core/context-usage.ts";
-import { type ContextClass, type ContextUsage, Role } from "../core/contracts.ts";
+import { type ContextClass, type ContextUsage, parseContract, Role } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
-import { locate } from "../core/workspace.ts";
+import { locate, WORKSPACE_DIR } from "../core/workspace.ts";
 import { writeRoleFiles } from "../resources/role-files.ts";
+import { SETTINGS } from "./workspace.ts";
 
 const PLUGIN_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -155,4 +166,101 @@ export function humanContextPlan(p: ContextPlan): string[] {
         .map((c) => `  ${"fixed".padEnd(9)} ${c.name} ${k(c.tokens)} (no switch: reported only)`),
     ];
   });
+}
+
+/** What OMI added to the workspace settings, next to the state (never inside settings.json). */
+export const APPLIED_FILE = "context-apply.json";
+
+const readJson = (file: string): unknown => {
+  if (!existsSync(file)) return undefined;
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    throw new OmiError("CONFIG_INVALID", `${file}: invalid JSON`);
+  }
+};
+
+/** Plugin ids the user enables (read only: OMI never writes ~/.claude). */
+export function userPluginIds(configDir: string): string[] {
+  const data = readJson(join(configDir, "settings.json"));
+  if (data === undefined) return [];
+  return Object.keys(parseSettings(data, "user settings").enabledPlugins ?? {});
+}
+
+const union = (a: string[], b: string[]) => [...new Set([...a, ...b])].sort();
+
+export interface ContextApplyResult {
+  settingsPath: string;
+  /** `+`/`-` lines of the OMI-managed keys. */
+  diff: string[];
+  changed: boolean;
+  dryRun: boolean;
+  removed: boolean;
+}
+
+/**
+ * `omi context apply [--dry-run] [--remove] [--bundled]`: switch the workspace's unneeded items off
+ * in its `.claude/settings.json` only. Items OMI switched off earlier no longer show in `/context`,
+ * so the wanted set is the earlier record plus the new plan, minus `context.keep`: a re-run changes
+ * nothing. `--remove` takes back exactly what OMI added; other keys are never touched.
+ */
+export function contextApply(deps: {
+  cwd: string;
+  dryRun?: boolean;
+  remove?: boolean;
+  /** PO agreed to `disableBundledSkills`. */
+  bundled?: boolean;
+  run?: ContextRunner;
+  userConfigDir?: string;
+}): ContextApplyResult {
+  const loc = locate(deps.cwd);
+  const settingsPath = join(loc.workspace, SETTINGS);
+  const recordPath = join(loc.workspace, WORKSPACE_DIR, APPLIED_FILE);
+  const raw = readJson(settingsPath);
+  const settings = raw === undefined ? {} : parseSettings(raw, SETTINGS);
+  const record = (() => {
+    const r = readJson(recordPath);
+    return r === undefined ? NOTHING_APPLIED : parseContract(AppliedContext, r, APPLIED_FILE);
+  })();
+  const base = removeContext(settings, record);
+  let next: Settings = base;
+  let applied: AppliedContext | null = null;
+  if (!deps.remove) {
+    const { keep } = loadConfig(loc.workspace).context;
+    const plan = measureWorkspace({ workspace: loc.workspace, keep, run: deps.run });
+    const fresh = desiredContext({
+      unneeded: plan.items.filter((i) => i.class === "unneeded"),
+      userPluginIds: userPluginIds(
+        deps.userConfigDir ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"),
+      ),
+      bundled: Boolean(deps.bundled),
+    });
+    const kept = (id: string) => keep.includes(id) || keep.includes(id.split("@")[0] as string);
+    const want: AppliedContext = {
+      enabledPlugins: union(record.enabledPlugins, fresh.enabledPlugins).filter((i) => !kept(i)),
+      skillOverrides: union(record.skillOverrides, fresh.skillOverrides).filter((i) => !kept(i)),
+      deniedMcpServers: union(record.deniedMcpServers, fresh.deniedMcpServers).filter(
+        (i) => !kept(i),
+      ),
+      disableClaudeAiConnectors:
+        (record.disableClaudeAiConnectors || fresh.disableClaudeAiConnectors) &&
+        !keep.some((k) => k.startsWith("claude_ai_")),
+      disableBundledSkills: Boolean(deps.bundled) || record.disableBundledSkills,
+    };
+    ({ settings: next, applied } = addContext(base, want));
+  }
+  const diff = settingsDiff(settings, next);
+  const changed = JSON.stringify(settings) !== JSON.stringify(next);
+  if (!deps.dryRun) {
+    if (changed) writeFileSync(settingsPath, `${JSON.stringify(next, null, 2)}\n`);
+    if (applied) writeFileSync(recordPath, `${JSON.stringify(applied, null, 2)}\n`);
+    else rmSync(recordPath, { force: true });
+  }
+  return {
+    settingsPath,
+    diff,
+    changed,
+    dryRun: Boolean(deps.dryRun),
+    removed: Boolean(deps.remove),
+  };
 }
