@@ -39,7 +39,7 @@ export const POLICY: Policy = {
   maxQaReworks: 2,
 };
 
-/** The run policy a repo configured (`review` in `.omi/config.yaml`). */
+/** The run policy a repo configured (`review` in `.omi-plugins/omi.config.yaml`). */
 export const policyFrom = (c: OmiConfig): Policy => ({ ...c.review });
 
 /** Project Status shown for an executable Issue in each workflow state (DocumentationTask-0007 #99). */
@@ -182,6 +182,7 @@ export function transition(
       }
       break;
     case "MERGE_VERIFIED":
+    case "NO_CODE_VERIFIED":
       // GitHub's merge receipt is a fact, whoever merged (OMI, or the PO for a High risk PR):
       // record it from any pre-merge or held state rather than orphan the merged work.
       if (is(...PRE_MERGE, "BLOCKED", "WAITING_PO")) return to("PR_MERGED", { resumeFrom: null });

@@ -112,6 +112,21 @@ export const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE workflow_run ADD COLUMN context TEXT;
   `,
+  // 4 — host-observed usage (TokenUsage JSON) of each finished attempt (DevTask-0068 #203)
+  `
+  ALTER TABLE step_attempt ADD COLUMN usage TEXT;
+  `,
+  // 5 — execution choice of each attempt (profile/model/effort/reason, DevTask-0074 #217); null = routing
+  `
+  ALTER TABLE step_attempt ADD COLUMN profile TEXT;
+  ALTER TABLE step_attempt ADD COLUMN requested_model TEXT;
+  ALTER TABLE step_attempt ADD COLUMN requested_effort TEXT;
+  ALTER TABLE step_attempt ADD COLUMN reason TEXT;
+  `,
+  // 6 — skills installed for each attempt (JSON array, DevTask-0065 #199)
+  `
+  ALTER TABLE step_attempt ADD COLUMN skills TEXT;
+  `,
 ];
 
 export function migrate(db: DatabaseSync, migrations: readonly string[] = MIGRATIONS): number {

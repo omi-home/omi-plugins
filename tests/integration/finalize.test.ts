@@ -10,6 +10,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +31,7 @@ import {
   releaseLease,
   startStep,
 } from "../../runtime/persistence/repository.ts";
-import { ensureWorktree } from "../../runtime/resources/worktree.ts";
+import { ensureTaskWorkspace } from "../../runtime/resources/worktree.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -53,6 +54,8 @@ interface Fake {
   reason?: Record<number, string>;
   /** Legacy PR: no omi:pr-primary marker, only GitHub's closing link to these issues. */
   closing?: string[];
+  /** Issue body by number (parent scope, Bug-0001 #162). */
+  bodies?: Record<number, string>;
 }
 
 function fakeGh(f: Fake): GhRunner {
@@ -145,6 +148,7 @@ function fakeGh(f: Fake): GhRunner {
           issue: {
             id: `ISSUE_${n}`,
             state: f.open.has(n) ? "OPEN" : "CLOSED",
+            body: f.bodies?.[n] ?? "",
             labels: { nodes: (f.labels[n] ?? []).map((name) => ({ name })) },
             subIssuesSummary: {
               total: kids.length,
@@ -173,6 +177,9 @@ function fakeGh(f: Fake): GhRunner {
           },
         },
       });
+    }
+    if (query.includes("{state}")) {
+      return ok({ repository: { issue: { state: f.open.has(n) ? "OPEN" : "CLOSED" } } });
     }
     // project item + parent of one issue
     const parent = f.parents[n];
@@ -204,17 +211,20 @@ const rest = (c: { id: number; body: string }) => ({
   author_association: "MEMBER",
 });
 
-/** Task #5 (Feature #3 → Milestone #2) with a pushed commit, PR #9 squash-merged. */
-function merged() {
+/**
+ * Task #5 (Feature #3 → Milestone #2) with a pushed commit, PR #9 squash-merged; `code: false`
+ * is a closed task that never committed (Spike): no PR, no remote branch.
+ */
+function merged({ code = true } = {}) {
   const base = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-fin-")));
   git(base, "init", "-q", "--bare", "-b", "main", "origin.git");
   git(base, "clone", "-q", "origin.git", "repo");
   const repo = join(base, "repo");
   git(repo, "config", "user.email", "t@example.invalid");
   git(repo, "config", "user.name", "t");
-  mkdirSync(join(repo, ".omi"));
+  mkdirSync(join(repo, ".omi-plugins"));
   writeFileSync(
-    join(repo, ".omi", "config.yaml"),
+    join(repo, ".omi-plugins", "omi.config.yaml"),
     "github:\n  owner: o\n  repo: repo\n  projectNumber: 2\n",
   );
   git(repo, "add", ".");
@@ -228,15 +238,24 @@ function merged() {
     workflow: "dev-task",
   }).id;
   advanceRun(db, runId, { type: "TICKET_VALID" });
-  const ws = ensureWorktree(db, { repoRoot: repo, config, issue: 5, branch: "feature/5-x", runId });
+  const ws = ensureTaskWorkspace(db, {
+    repoRoot: repo,
+    workspace: repo, // the checkout holds .omi-plugins/: it is its own workspace here
+    config,
+    issue: 5,
+    branch: "feature/5-x",
+    runId,
+  });
   advanceRun(db, runId, { type: "WORKSPACE_CREATED" });
   db.close();
-  writeFileSync(join(ws.path, "a.txt"), "a\n");
-  git(ws.path, "add", "a.txt");
-  git(ws.path, "commit", "-q", "-m", "a");
-  git(ws.path, "push", "-q", "origin", "feature/5-x");
+  if (code) {
+    writeFileSync(join(ws.path, "a.txt"), "a\n");
+    git(ws.path, "add", "a.txt");
+    git(ws.path, "commit", "-q", "-m", "a");
+    git(ws.path, "push", "-q", "origin", "feature/5-x");
+  }
   const f: Fake = {
-    merged: true,
+    merged: code,
     tip: git(ws.path, "rev-parse", "HEAD"),
     branch: "feature/5-x",
     status: { 5: "In Review", 3: "In Progress", 2: "In Progress" },
@@ -306,12 +325,66 @@ test("closed but unaccepted sibling holds the Feature open; a cancelled one does
   assert.equal(cancelled.f.open.has(3), false);
 });
 
+test("Feature with unticked Scope / Acceptance stays open In Progress, held with the reason", () => {
+  const s = merged();
+  s.f.bodies = { 3: "## Scope / Acceptance\n- [x] prep\n- [ ] implement\n## Definition of Done\n" };
+  const r = taskFinalize({ cwd: s.repo, gh: s.gh }, 5);
+  assert.equal(r.held, "o/repo#3: scope not done: 1 unchecked box(es) under Scope / Acceptance");
+  assert.equal(s.f.status[5], "Done");
+  assert.equal(s.f.status[3], "In Progress");
+  assert.equal(s.f.open.has(3), true);
+});
+
 test("PR not merged: refused before any change", () => {
   const s = merged();
   s.f.merged = false;
   assert.throws(() => taskFinalize({ cwd: s.repo, gh: s.gh }, 5), { code: "POLICY_VIOLATION" });
   assert.equal(state(s.repo), "WORKSPACE_READY");
   assert.equal(existsSync(s.wt), true);
+});
+
+test("no code (Spike): closed Issue, no PR, no remote branch → cleaned, report, Done", () => {
+  const s = merged({ code: false });
+  const dry = taskFinalize({ cwd: s.repo, gh: s.gh, dryRun: true }, 5);
+  assert.equal(dry.cleanup?.steps[0]?.status, "done");
+  assert.equal(existsSync(s.wt), true);
+  const r = taskFinalize({ cwd: s.repo, gh: s.gh }, 5);
+  assert.equal(r.run.state, "COMPLETED");
+  assert.equal(r.receipt, null);
+  assert.equal(existsSync(s.wt), false);
+  assert.match(
+    s.f.comments[0]?.body ?? "",
+    /No PR: task without code[\s\S]*verify-merge: done — no code/,
+  );
+  assert.equal(s.f.status[5], "Done");
+  const events = taskStatus({ cwd: s.repo }, 5).transitions.map((t) => t.event);
+  assert.ok(events.includes("NO_CODE_VERIFIED"));
+});
+
+test("no code, task workspace already removed by hand: run closed", () => {
+  const s = merged({ code: false });
+  rmSync(dirname(s.wt), { recursive: true, force: true });
+  assert.equal(taskFinalize({ cwd: s.repo, gh: s.gh }, 5).run.state, "COMPLETED");
+});
+
+test("no PR refused: Issue open, branch on origin, or a local commit", () => {
+  const open = merged({ code: false });
+  open.f.open.add(5);
+  assert.throws(() => taskFinalize({ cwd: open.repo, gh: open.gh }, 5), /still open/);
+  assert.equal(state(open.repo), "WORKSPACE_READY");
+
+  const pushed = merged({ code: false });
+  git(pushed.wt, "push", "-q", "origin", "feature/5-x");
+  assert.throws(() => taskFinalize({ cwd: pushed.repo, gh: pushed.gh }, 5), /exists on origin/);
+
+  const local = merged({ code: false });
+  writeFileSync(join(local.wt, "a.txt"), "a\n");
+  git(local.wt, "add", "a.txt");
+  git(local.wt, "commit", "-q", "-m", "a");
+  const r = taskFinalize({ cwd: local.repo, gh: local.gh }, 5);
+  assert.equal(r.cleanup?.state, "CLEANUP_FAILED");
+  assert.match(r.cleanup?.steps[0]?.detail ?? "", /holds 1 commit/);
+  assert.equal(existsSync(local.wt), true);
 });
 
 test("legacy PR without marker: GitHub closing link to the task is accepted, any other is refused", () => {
@@ -391,17 +464,16 @@ test("apply --safe: merged-but-uncleaned run is finalized once; a second apply h
   assert.throws(() => cleanupApply({ cwd: s.repo, gh: s.gh }), { code: "USAGE_INVALID" });
 });
 
-test("crash mid-cleanup (worktree gone, branch left, CLEANUP_PENDING): apply finishes it", () => {
+test("crash mid-cleanup (task workspace gone, CLEANUP_PENDING): apply finishes it", () => {
   const s = merged();
   const db = db5(s.repo);
   advanceRun(db, "run5", { type: "MERGE_VERIFIED" });
   advanceRun(db, "run5", { type: "CLEANUP_STARTED" });
   db.close();
-  git(s.repo, "worktree", "remove", s.wt);
+  rmSync(dirname(s.wt), { recursive: true });
   const r = cleanupApply({ cwd: s.repo, gh: s.gh, safe: true });
   assert.equal(r.outcomes[0]?.error, null);
   assert.equal(state(s.repo), "COMPLETED");
-  assert.equal(git(s.repo, "branch", "--list", "feature/5-x"), "");
 });
 
 test("report persisted but crash before/after POST: replay leaves exactly one comment", () => {
@@ -439,11 +511,11 @@ test("attempt left open by a crash: closed as CRASH_RECOVERED and retryable; a l
   db3.close();
 });
 
-test("orphan worktree under the OMI root is reported and left alone", () => {
+test("orphan task workspace next to the workspace is reported and left alone", () => {
   const s = merged();
   s.f.merged = false;
-  const orphan = join(dirname(s.wt), "77");
-  git(s.repo, "worktree", "add", "-q", "-b", "feature/77-foreign", orphan, "origin/develop");
+  const orphan = `${s.repo}-task-77-dead`;
+  mkdirSync(orphan);
   const scan = cleanupScan({ cwd: s.repo, gh: s.gh });
   assert.equal(scan.orphans.length, 1);
   cleanupApply({ cwd: s.repo, gh: s.gh, safe: true });

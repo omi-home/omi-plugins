@@ -10,6 +10,7 @@ import {
   type Role,
   StepResult,
   StepState,
+  TokenUsage,
   WorkflowContext,
   WorkflowEventType,
   WorkflowState,
@@ -256,7 +257,18 @@ export function startStep(
 }
 
 /** Opens the next technical attempt and marks the step RUNNING. Returns the attempt number. */
-export function beginAttempt(db: Db, stepRunId: number): number {
+export function beginAttempt(
+  db: Db,
+  stepRunId: number,
+  /** The Coordinator's execution choice (#217, skills #199); no profile = `agents.routing`. */
+  choice?: {
+    profile?: string;
+    model?: string;
+    effort?: string;
+    reason?: string;
+    skills?: string[];
+  },
+): number {
   return tx(db, "begin attempt", () => {
     const open = db
       .prepare("SELECT attempt FROM step_attempt WHERE step_run_id = ? AND finished_at IS NULL")
@@ -274,10 +286,17 @@ export function beginAttempt(db: Db, stepRunId: number): number {
           .get(stepRunId)?.n ?? 0,
       ) + 1;
     const now = iso();
-    db.prepare("INSERT INTO step_attempt (step_run_id, attempt, started_at) VALUES (?, ?, ?)").run(
+    db.prepare(
+      "INSERT INTO step_attempt (step_run_id, attempt, started_at, profile, requested_model, requested_effort, reason, skills) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
       stepRunId,
       next,
       now,
+      choice?.profile ?? null,
+      choice?.model ?? null,
+      choice?.effort ?? null,
+      choice?.reason ?? null,
+      choice?.skills ? JSON.stringify(choice.skills) : null,
     );
     setStepState(db, stepRunId, ["PENDING", "RUNNING"], "RUNNING", now);
     return next;
@@ -335,9 +354,15 @@ export function persistStepResult(
     const step = getStep(db, o.stepRunId);
     const a = db
       .prepare(
-        "UPDATE step_attempt SET finished_at = ?, actual_model = ? WHERE step_run_id = ? AND attempt = ? AND finished_at IS NULL",
+        "UPDATE step_attempt SET finished_at = ?, actual_model = ?, usage = ? WHERE step_run_id = ? AND attempt = ? AND finished_at IS NULL",
       )
-      .run(now, o.actualModel, o.stepRunId, o.attempt);
+      .run(
+        now,
+        o.actualModel,
+        o.result.usage ? JSON.stringify(o.result.usage) : null,
+        o.stepRunId,
+        o.attempt,
+      );
     if (!step || a.changes !== 1) {
       throw new OmiError(
         "INVALID_TRANSITION",
@@ -354,6 +379,34 @@ export function persistStepResult(
     ).run(step.runId, o.stepRunId, o.report.marker, o.report.body, now);
   });
 }
+
+export interface AttemptUsage {
+  stepId: string;
+  round: number;
+  attempt: number;
+  role: Role;
+  actualModel: string | null;
+  /** Execution profile of the attempt; null = `agents.routing` (no profile). */
+  profile: string | null;
+  usage: TokenUsage;
+}
+
+/** Usage of every finished attempt of a run that recorded some, in run order. */
+export const runUsage = (db: Db, runId: string): AttemptUsage[] =>
+  db
+    .prepare(
+      "SELECT s.step_id, s.round, s.role, a.attempt, a.actual_model, a.profile, a.usage FROM step_attempt a JOIN step_run s ON s.id = a.step_run_id WHERE s.run_id = ? AND a.usage IS NOT NULL ORDER BY s.id, a.attempt",
+    )
+    .all(runId)
+    .map((r) => ({
+      stepId: String(r.step_id),
+      round: Number(r.round),
+      attempt: Number(r.attempt),
+      role: r.role as Role,
+      actualModel: r.actual_model === null ? null : String(r.actual_model),
+      profile: r.profile === null ? null : String(r.profile),
+      usage: parseContract(TokenUsage, JSON.parse(String(r.usage)), "stored usage"),
+    }));
 
 export interface PendingReport {
   marker: string;

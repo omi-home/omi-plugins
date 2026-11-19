@@ -1,20 +1,45 @@
 // `omi doctor`: deterministic environment/repository checks (spec §15, ADR-0001 D4/D5, T0.4).
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
+import {
+  agentEnv,
+  atLeast,
+  detectQuota,
+  HARNESSES,
+  observeRun,
+  selectionEnv,
+  versionRefusal,
+} from "../adapters/claude/launch.ts";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
-import { loadConfig, type OmiConfig } from "../core/config.ts";
+import {
+  loadConfig,
+  loadProfiles,
+  type OmiConfig,
+  type Selection,
+  secretEnv,
+} from "../core/config.ts";
+import { parseContext } from "../core/context-usage.ts";
 import type { Check } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
+import {
+  CONFIG_FILE,
+  locate,
+  PROFILES_FILE,
+  STATE_FILE,
+  WORKSPACE_DIR,
+} from "../core/workspace.ts";
+import { openState } from "../persistence/db.ts";
+import { openRuns, ownedRefs } from "../persistence/repository.ts";
+import { redact } from "../reporting/redact.ts";
+import { same } from "../resources/worktree.ts";
+import { memoryDir, OLD_LAYOUT, SETTINGS } from "./workspace.ts";
 
 export type { Check };
 
 const MIN_NODE = "22.18.0";
-/** First Claude Code release that reads AGENTS.md natively (T0.4). */
-const MIN_CLAUDE = "2.1.277";
 
 function run(cmd: string, args: string[], cwd: string) {
   const r = spawnSync(cmd, args, { cwd, encoding: "utf8", timeout: 30_000 });
@@ -23,13 +48,14 @@ function run(cmd: string, args: string[], cwd: string) {
 
 const semver = (s: string) => /(\d+)\.(\d+)\.(\d+)/.exec(s)?.slice(1).map(Number);
 
-export function atLeast(version: string, min: string): boolean {
-  const [a, b] = [semver(version), semver(min)];
-  if (!a || !b) return false;
-  for (let i = 0; i < 3; i++) {
-    if (a[i] !== b[i]) return (a[i] as number) > (b[i] as number);
-  }
-  return true;
+/** Claude Code inside the range the harness registry verified (#219); `omi task run` refuses others. */
+export function harnessCheck(t: Check): Check {
+  if (t.status === "fail") return t;
+  const why = versionRefusal(t.detail);
+  const { min, below } = HARNESSES.claudecode;
+  return why
+    ? { ...t, status: "fail", detail: why }
+    : { ...t, detail: `${t.detail} (verified >=${min} <${below})` };
 }
 
 function toolVersion(name: string, cmd: string, min: string | undefined, cwd: string): Check {
@@ -52,20 +78,6 @@ function toolVersion(name: string, cmd: string, min: string | undefined, cwd: st
   }
   if (min && !atLeast(v, min)) return { name, status: "fail", detail: `${v} < required ${min}` };
   return { name, status: "pass", detail: v };
-}
-
-/**
- * The launcher grants `Read(<plugin root>/resources/**)`; a space or glob character in that path is
- * not verified to match literally in a Claude permission rule (carried CR-002 of #19).
- */
-export function pluginRootCheck(root: string): Check {
-  return /[\s*?[\]{}]/.test(root)
-    ? {
-        name: "plugin-root",
-        status: "warn",
-        detail: `${root} has a space or glob character: agents may be denied their rule pack`,
-      }
-    : { name: "plugin-root", status: "pass", detail: root };
 }
 
 /** CLAUDE.md files at or above the repo root silently disable AGENTS.md (T0.4). */
@@ -99,7 +111,7 @@ export const agentsMdInContext = (contextText: string) =>
  * `claude -p` is a local command (no model call, no tokens). The prompt goes through stdin: a Git
  * Bash shell would rewrite a `/context` argument into a Windows path.
  */
-function agentsMdLoaded(repoRoot: string): Check {
+function agentsMdLoaded(repoRoot: string): Check[] {
   const r = spawnSync("claude", ["-p"], {
     cwd: repoRoot,
     input: "/context",
@@ -108,40 +120,196 @@ function agentsMdLoaded(repoRoot: string): Check {
     windowsHide: true,
   });
   if (r.status !== 0) {
-    return {
-      name: "agents-md",
-      status: "warn",
-      detail: "could not run `claude -p /context` to verify",
-    };
-  }
-  return agentsMdInContext(r.stdout ?? "")
-    ? { name: "agents-md", status: "pass", detail: "Claude Code loads AGENTS.md" }
-    : {
+    return [
+      {
         name: "agents-md",
         status: "warn",
-        detail:
-          "AGENTS.md is not in Claude Code's memory files: is builtin cc-plugin-agents-md off?",
-      };
+        detail: "could not run `claude -p /context` to verify",
+      },
+    ];
+  }
+  return [
+    agentsMdInContext(r.stdout ?? "")
+      ? { name: "agents-md", status: "pass", detail: "Claude Code loads AGENTS.md" }
+      : {
+          name: "agents-md",
+          status: "warn",
+          detail:
+            "AGENTS.md is not in Claude Code's memory files: is builtin cc-plugin-agents-md off?",
+        },
+    contextSummary(r.stdout ?? ""),
+  ];
 }
 
-function workflows(): Check {
-  const settings = join(
-    process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"),
-    "settings.json",
-  );
-  let enabled = false;
+/** Start-of-session context here (DevTask-0066 #201): a number and a pointer, never a target. */
+export function contextSummary(contextText: string): Check {
   try {
-    enabled = JSON.parse(readFileSync(settings, "utf8")).enableWorkflows === true;
+    const { total } = parseContext(contextText);
+    return {
+      name: "context",
+      status: "pass",
+      detail: `${(total / 1000).toFixed(1)}k tokens at session start: \`omi context plan\` classifies them`,
+    };
   } catch {
-    // Missing or unreadable settings: workflows are off.
+    return { name: "context", status: "warn", detail: "could not read `/context` output" };
   }
-  return enabled
-    ? { name: "workflows", status: "pass", detail: "workflow adapter enabled" }
-    : {
-        name: "workflows",
+}
+
+const inside = (dir: string, root: string) => {
+  const rel = relative(root, dir);
+  return !rel.startsWith("..") && !isAbsolute(rel);
+};
+
+/**
+ * Workspace layout (ADR-0002 D1, DevTask-0056 #169): the repo holds no OMI file, the machine's
+ * profiles never sit in the repo, and nothing is left of the old layout (state in the git dir,
+ * runs on `.omi-worktrees/`).
+ */
+export function layout(workspace: string, repoRoot: string): Check[] {
+  const checks: Check[] = [];
+  const old = OLD_LAYOUT.filter((f) => existsSync(join(repoRoot, f)));
+  checks.push(
+    inside(workspace, repoRoot)
+      ? {
+          name: "layout",
+          status: "warn",
+          detail: `${WORKSPACE_DIR}/ is inside the repo: run \`omi workspace migrate\``,
+        }
+      : old.length
+        ? {
+            name: "layout",
+            status: "warn",
+            detail: `the repo still holds ${old.join(", ")}: remove them in a task PR (ADR-0002 D1)`,
+          }
+        : { name: "layout", status: "pass", detail: `workspace ${workspace}` },
+  );
+
+  // The OMI plugin's own repo ships an empty sample (no profile) for `workspace init`.
+  const tracked = run(
+    "git",
+    ["ls-files", "--", "*omi.config.json", ":(exclude)templates/workspace/.omi-plugins/"],
+    repoRoot,
+  );
+  const profiles = join(workspace, PROFILES_FILE);
+  checks.push(
+    tracked.ok && tracked.out
+      ? { name: "profiles-file", status: "fail", detail: `tracked in the repo: ${tracked.out}` }
+      : inside(workspace, repoRoot) && existsSync(profiles)
+        ? { name: "profiles-file", status: "fail", detail: `${profiles} is inside the repo` }
+        : { name: "profiles-file", status: "pass", detail: "omi.config.json outside the repo" },
+  );
+
+  const common = run("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], repoRoot);
+  const oldState = common.ok ? join(common.out, "omi", "state.sqlite") : undefined;
+  const state = join(workspace, STATE_FILE);
+  let stale: string[] = [];
+  if (existsSync(state)) {
+    const db = openState(state);
+    try {
+      stale = openRuns(db)
+        .filter((r) =>
+          ownedRefs(db, r.id, "worktree").some((p) => /[\\/]\.omi-worktrees[\\/]/.test(p)),
+        )
+        .map((r) => `#${r.issue}`);
+    } finally {
+      db.close();
+    }
+  }
+  checks.push(
+    stale.length
+      ? {
+          name: "legacy-runs",
+          status: "warn",
+          detail: `open runs on old .omi-worktrees/: ${stale.join(", ")} (finalize them with the previous OMI)`,
+        }
+      : oldState && existsSync(oldState)
+        ? {
+            name: "legacy-runs",
+            status: "warn",
+            detail: `old state ${oldState} is no longer read: run \`omi workspace migrate\` or remove it`,
+          }
+        : { name: "legacy-runs", status: "pass", detail: "no old-layout state or runs" },
+  );
+  return checks;
+}
+
+/** Claude Code loads only the first 200 lines / 25KB of MEMORY.md: warn with a margin (#180). */
+const MEMORY_MAX_LINES = 150;
+const MEMORY_MAX_BYTES = 15 * 1024;
+
+/**
+ * `memory-dir` (DevTask-0058 #180): the Coordinator's auto memory lives in the workspace, set by
+ * `autoMemoryDirectory` in its `.claude/settings.json`, and its MEMORY.md index stays loadable.
+ */
+export function memoryDirCheck(workspace: string): Check {
+  let dir: unknown;
+  try {
+    dir = JSON.parse(readFileSync(join(workspace, SETTINGS), "utf8")).autoMemoryDirectory;
+  } catch {
+    // Missing or unreadable settings: not set.
+  }
+  if (typeof dir !== "string" || !isAbsolute(dir) || !inside(resolve(dir), workspace)) {
+    return {
+      name: "memory-dir",
+      status: "warn",
+      detail: `set "autoMemoryDirectory": ${JSON.stringify(memoryDir(workspace))} in ${join(workspace, SETTINGS)}`,
+    };
+  }
+  let index = "";
+  try {
+    index = readFileSync(join(dir, "MEMORY.md"), "utf8");
+  } catch {
+    // No memory yet.
+  }
+  const lines = index ? index.replace(/\r?\n$/, "").split(/\r?\n/).length : 0;
+  const bytes = Buffer.byteLength(index);
+  return lines > MEMORY_MAX_LINES || bytes > MEMORY_MAX_BYTES
+    ? {
+        name: "memory-dir",
         status: "warn",
-        detail: "enableWorkflows is off: workflow adapter disabled, direct dispatch unaffected",
-      };
+        detail: `MEMORY.md has ${lines} lines / ${bytes} bytes (keep ≤ ${MEMORY_MAX_LINES} lines and ≤ ${MEMORY_MAX_BYTES} bytes): merge or prune memories`,
+      }
+    : { name: "memory-dir", status: "pass", detail: dir };
+}
+
+export const COORDINATOR = "omi-coordinator";
+const OLD_PLUGIN = "omi-engineering";
+
+/**
+ * `coordinator-plugin` (Feature-0026 #187): the workspace enables `omi-coordinator@<marketplace>`
+ * and Claude Code has it installed for this workspace (user scope, or project scope here); the old
+ * single plugin `omi-engineering` is no longer enabled. Reads `installed_plugins.json` (version 2:
+ * `{plugins: {"<name>@<marketplace>": [{scope, projectPath?}]}}`) under the Claude config dir.
+ */
+export function coordinatorPluginCheck(
+  workspace: string,
+  configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"),
+): Check {
+  const json = (file: string) => {
+    try {
+      return JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      return undefined; // missing or unreadable: nothing enabled / installed
+    }
+  };
+  const warn = (detail: string): Check => ({ name: "coordinator-plugin", status: "warn", detail });
+  const enabled = Object.entries(json(join(workspace, SETTINGS))?.enabledPlugins ?? {})
+    .filter(([, on]) => on === true)
+    .map(([id]) => id);
+  const old = enabled.filter((id) => id.startsWith(`${OLD_PLUGIN}@`));
+  if (old.length) {
+    return warn(`${old.join(", ")} is the old plugin: enable ${COORDINATOR}@omi-plugins instead`);
+  }
+  const id = enabled.find((x) => x.startsWith(`${COORDINATOR}@`));
+  if (!id) return warn(`enable "${COORDINATOR}@omi-plugins" in ${join(workspace, SETTINGS)}`);
+  const installs: { scope?: string; projectPath?: string }[] =
+    json(join(configDir, "plugins", "installed_plugins.json"))?.plugins?.[id] ?? [];
+  const here = installs.some(
+    (i) => i.scope === "user" || (i.projectPath !== undefined && same(i.projectPath, workspace)),
+  );
+  return here
+    ? { name: "coordinator-plugin", status: "pass", detail: id }
+    : warn(`${id} is enabled but not installed: claude plugin install ${id} --scope project`);
 }
 
 const ENV_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
@@ -271,6 +439,210 @@ export function github(config: OmiConfig | undefined, run: GhRunner = spawnGh): 
   return checks;
 }
 
+/**
+ * Static checks of the machine's execution profiles (DevTask-0073 #216): the file parses and every
+ * profile not `disabled` has its secret env set. A real probe is `omi doctor --probe` (#219).
+ */
+export function profilesCheck(workspace: string, env: NodeJS.ProcessEnv = process.env): Check[] {
+  let profiles: ReturnType<typeof loadProfiles>;
+  try {
+    profiles = loadProfiles(workspace);
+  } catch (e) {
+    const err = e instanceof OmiError ? e : new OmiError("INTERNAL", "profiles check crashed");
+    const issues = (err.details as { issues?: { path: string; message: string }[] })?.issues;
+    return [
+      {
+        name: "profiles",
+        status: "fail",
+        detail: [err.message, ...(issues ?? []).map((i) => `${i.path}: ${i.message}`)].join("; "),
+      },
+    ];
+  }
+  const active = profiles.filter((p) => !p.disabled);
+  if (!active.length) {
+    return [
+      {
+        name: "profiles",
+        status: "pass",
+        detail: `no active profile in ${PROFILES_FILE}: steps use agents.routing`,
+      },
+    ];
+  }
+  return active.flatMap((p): Check[] => [
+    env[secretEnv(p)]
+      ? { name: `profile ${p.name}`, status: "pass", detail: `${p.auth.type}, ${secretEnv(p)} set` }
+      : {
+          name: `profile ${p.name}`,
+          status: "fail",
+          detail: `${secretEnv(p)} is not set (or mark the profile disabled)`,
+        },
+    ...(p.auth.type === "gateway"
+      ? [
+          {
+            name: `gateway ${p.name}`,
+            status: "warn" as const,
+            detail: [
+              `${p.auth.baseUrl} is a third party: it sees the code and prompts and may alter model output (zero-width watermark, Spike-0009); OMI blocks zero-width characters`,
+              ...(p.auth.scheme === "bearer" ? ["scheme bearer is not verified yet"] : []),
+            ].join("; "),
+          },
+        ]
+      : []),
+  ]);
+}
+
+/** One HTTP GET: status and body (0 = no response). */
+export type HttpGet = (
+  url: string,
+  headers: Record<string, string>,
+) => { status: number; body: string };
+
+/**
+ * A synchronous GET through a child `node` (the CLI is synchronous); headers travel in the
+ * child's env, never on its command line.
+ */
+const httpGet: HttpGet = (url, headers) => {
+  const script =
+    "fetch(process.env.OMI_URL,{headers:JSON.parse(process.env.OMI_HEADERS)}).then(async r=>process.stdout.write(JSON.stringify({status:r.status,body:await r.text()}))).catch(e=>process.stdout.write(JSON.stringify({status:0,body:String(e)})))";
+  const r = spawnSync(process.execPath, ["-e", script], {
+    env: { ...agentEnv(process.env), OMI_URL: url, OMI_HEADERS: JSON.stringify(headers) },
+    encoding: "utf8",
+    timeout: 30_000,
+    windowsHide: true,
+  });
+  try {
+    return JSON.parse(r.stdout) as { status: number; body: string };
+  } catch {
+    return { status: 0, body: r.stderr || "no response" };
+  }
+};
+
+/** Runs `claude` with these args/env/stdin in `cwd` and returns its stream-json stdout. */
+export type ClaudeRun = (o: {
+  args: string[];
+  env: Record<string, string>;
+  cwd: string;
+  stdin: string;
+}) => string;
+
+const claudeRun: ClaudeRun = (o) =>
+  spawnSync(HARNESSES.claudecode.command, o.args, {
+    cwd: o.cwd,
+    env: o.env,
+    input: o.stdin,
+    encoding: "utf8",
+    timeout: 120_000,
+    windowsHide: true,
+  }).stdout ?? "";
+
+/**
+ * `omi doctor --probe` (#219), spends tokens: every profile not `disabled` gets one short
+ * `claude -p` run on its first model and effort, in an empty dir with a fresh config dir, checking
+ * auth and the `message.model` the host saw. A gateway first lists its models with
+ * `GET /v1/models` (free); a missing model or an error stops there. Details are redacted.
+ */
+export function probeProfiles(
+  workspace: string,
+  env: NodeJS.ProcessEnv = process.env,
+  io: { http?: HttpGet; claude?: ClaudeRun } = {},
+): Check[] {
+  const checks: Check[] = [];
+  for (const p of loadProfiles(workspace).filter((x) => !x.disabled)) {
+    const name = `probe ${p.name}`;
+    const secret = env[secretEnv(p)];
+    // A gateway may echo the key back in an error body: drop the known value, then the patterns.
+    const fail = (detail: string) =>
+      checks.push({
+        name,
+        status: "fail",
+        detail: redact(secret ? detail.replaceAll(secret, "[REDACTED]") : detail),
+      });
+    if (!secret) {
+      fail(`${secretEnv(p)} is not set`);
+      continue;
+    }
+    const [model, effort] = [p.models[0] as string, p.efforts[0] as Selection["effort"]];
+    if (p.auth.type === "gateway") {
+      const auth: Record<string, string> =
+        p.auth.scheme === "x-api-key"
+          ? { "x-api-key": secret }
+          : { authorization: `Bearer ${secret}` };
+      const r = (io.http ?? httpGet)(`${p.auth.baseUrl.replace(/\/+$/, "")}/v1/models`, {
+        ...auth,
+        "anthropic-version": "2023-06-01",
+      });
+      if (r.status !== 200) {
+        fail(
+          `GET /v1/models → ${r.status || "no response"}${r.status === 402 ? " (out of credit)" : ""}: ${r.body.slice(0, 200)}`,
+        );
+        continue;
+      }
+      let ids: string[] = [];
+      try {
+        ids =
+          (JSON.parse(r.body) as { data?: { id?: string }[] }).data?.map((m) => String(m.id)) ?? [];
+      } catch {
+        // an unreadable list is reported as missing models below
+      }
+      const missing = p.models.filter((m) => !ids.includes(m));
+      if (missing.length) {
+        fail(`gateway does not list ${missing.join(", ")}`);
+        continue;
+      }
+    }
+    const dir = mkdtempSync(join(tmpdir(), "omi-probe-"));
+    try {
+      const sel: Selection = { profile: p, model, effort, reason: "omi doctor --probe" };
+      const out = (io.claude ?? claudeRun)({
+        args: [
+          "-p",
+          "--model",
+          model,
+          "--effort",
+          effort,
+          "--no-session-persistence",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+        ],
+        env: { ...selectionEnv(sel, env), CLAUDE_CONFIG_DIR: join(dir, "config") },
+        cwd: dir,
+        stdin: "Reply with OK only.",
+      });
+      const quota = detectQuota(out);
+      if (quota) {
+        fail(`out of quota (${quota.signal})`);
+        continue;
+      }
+      let obs: ReturnType<typeof observeRun>;
+      try {
+        obs = observeRun(out);
+      } catch {
+        fail("claude produced no result: is it installed and in the verified range?");
+        continue;
+      }
+      if (obs.isError) {
+        fail(`run failed: ${obs.result.slice(0, 200)}`);
+        continue;
+      }
+      if (obs.actualModel !== model) {
+        fail(`asked ${model}, the host saw ${obs.actualModel}`);
+        continue;
+      }
+      checks.push({
+        name,
+        status: "pass",
+        detail: `auth ok, message.model ${model}, effort ${effort} ${obs.thinkingObserved ? "(thinking seen)" : "(no thinking block)"}`,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  return checks.length
+    ? checks
+    : [{ name: "probe", status: "pass", detail: `no active profile in ${PROFILES_FILE}` }];
+}
+
 export function doctor(cwd: string): Check[] {
   const checks: Check[] = [
     atLeast(process.versions.node, MIN_NODE)
@@ -278,25 +650,33 @@ export function doctor(cwd: string): Check[] {
       : { name: "node", status: "fail", detail: `${process.versions.node} < required ${MIN_NODE}` },
     toolVersion("git", "git", undefined, cwd),
     toolVersion("gh", "gh", undefined, cwd),
-    toolVersion("claude", "claude", MIN_CLAUDE, cwd),
-    pluginRootCheck(fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "")),
-    workflows(),
+    harnessCheck(toolVersion("claude", "claude", undefined, cwd)),
   ];
 
+  let loc: { workspace: string; root: string } | undefined;
+  let locErr: unknown;
+  try {
+    loc = locate(cwd);
+  } catch (e) {
+    locErr = e;
+  }
   const top = run("git", ["rev-parse", "--show-toplevel"], cwd);
-  if (!top.ok) {
+  const repoRoot = loc?.root ?? (top.ok ? top.out : undefined);
+  if (!repoRoot) {
     checks.push({ name: "repository", status: "fail", detail: "not inside a git repository" });
     return checks;
   }
-  const repoRoot = top.out;
-  const instr = instructions(repoRoot);
+  // The Coordinator's AGENTS.md lives at the workspace root (ADR-0002 D1).
+  const home = loc?.workspace ?? repoRoot;
+  const instr = instructions(home);
   checks.push({ name: "repository", status: "pass", detail: repoRoot }, instr);
-  if (instr.status === "pass") checks.push(agentsMdLoaded(repoRoot));
+  if (instr.status === "pass") checks.push(...agentsMdLoaded(home));
 
   let config: OmiConfig | undefined;
   try {
-    config = loadConfig(repoRoot);
-    checks.push({ name: "config", status: "pass", detail: ".omi/config.yaml" });
+    if (!loc) throw locErr;
+    config = loadConfig(loc.workspace);
+    checks.push({ name: "config", status: "pass", detail: join(loc.workspace, CONFIG_FILE) });
   } catch (e) {
     const err = e instanceof OmiError ? e : new OmiError("INTERNAL", "config check crashed");
     const issues = (err.details as { issues?: { path: string; message: string }[] })?.issues;
@@ -306,6 +686,13 @@ export function doctor(cwd: string): Check[] {
       detail: [err.message, ...(issues ?? []).map((i) => `${i.path}: ${i.message}`)].join("; "),
     });
   }
+  if (loc)
+    checks.push(
+      ...layout(loc.workspace, repoRoot),
+      ...profilesCheck(loc.workspace),
+      memoryDirCheck(loc.workspace),
+      coordinatorPluginCheck(loc.workspace),
+    );
 
   checks.push(...github(config));
   return checks;

@@ -1,10 +1,10 @@
 // Local transactional state (spec §13) on the built-in node:sqlite driver.
-// One database per repository, inside the git common dir: shared by every worktree, never committed.
-import { execFileSync } from "node:child_process";
+// One database per workspace, in .omi-plugins/: shared by every worktree, outside the repo.
 import { mkdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { OmiError } from "../core/errors/errors.ts";
+import { locate, STATE_FILE } from "../core/workspace.ts";
 import { migrate } from "./migrations.ts";
 
 export type Db = DatabaseSync;
@@ -12,19 +12,9 @@ export type Db = DatabaseSync;
 const SQLITE_BUSY = 5;
 const SQLITE_CONSTRAINT = 19;
 
-/** `<git-common-dir>/omi/state.sqlite` for the repository containing `cwd`. */
+/** `<workspace>/.omi-plugins/state.sqlite` for the workspace containing `cwd` (ADR-0002 D1). */
 export function statePath(cwd: string): string {
-  let common: string;
-  try {
-    common = execFileSync("git", ["rev-parse", "--git-common-dir"], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    throw new OmiError("CONFIG_INVALID", "not inside a git repository");
-  }
-  return join(resolve(cwd, common), "omi", "state.sqlite");
+  return join(locate(cwd).workspace, STATE_FILE);
 }
 
 /** Opens (creating if needed) and migrates the state database. */
@@ -33,9 +23,9 @@ export function openState(file: string): Db {
   const db = new DatabaseSync(file);
   try {
     // WAL: readers never block the writer. FULL: a committed transaction survives power loss.
+    db.exec("PRAGMA busy_timeout = 5000");
+    setWal(db);
     db.exec(`
-      PRAGMA busy_timeout = 5000;
-      PRAGMA journal_mode = WAL;
       PRAGMA synchronous = FULL;
       PRAGMA foreign_keys = ON;
     `);
@@ -44,6 +34,24 @@ export function openState(file: string): Db {
   } catch (e) {
     db.close();
     throw sqliteError(e, "open state");
+  }
+}
+
+/**
+ * Switching to WAL holds a read lock while asking for the write lock; when another connection
+ * races it SQLite returns BUSY at once (waiting could deadlock), bypassing busy_timeout.
+ * Retry briefly; the last BUSY still surfaces as LOCK_HELD.
+ */
+function setWal(db: Db): void {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      db.exec("PRAGMA journal_mode = WAL");
+      return;
+    } catch (e) {
+      const code = (e as { errcode?: number }).errcode;
+      if (attempt >= 50 || code === undefined || (code & 0xff) !== SQLITE_BUSY) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
   }
 }
 

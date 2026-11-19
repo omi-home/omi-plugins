@@ -1,12 +1,12 @@
 // `omi ticket validate`, `omi task start`, `omi task status` (spec §7–§8): ticket gates →
 // run (FSM CREATED → TICKET_VALIDATED → WORKSPACE_READY) → owned worktree → Project status.
 // No LLM call anywhere in setup.
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { harnessVersion, versionRefusal } from "../adapters/claude/launch.ts";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import { writeSection } from "../adapters/github/context.ts";
 import {
@@ -34,7 +34,13 @@ import {
   setStatus,
 } from "../adapters/github/project.ts";
 import { fetchTicket, type Ticket, validateTicket } from "../adapters/github/ticket.ts";
-import { loadConfig, type OmiConfig } from "../core/config.ts";
+import {
+  loadConfig,
+  loadProfiles,
+  type OmiConfig,
+  type Selection,
+  selectProfile,
+} from "../core/config.ts";
 import {
   type Check,
   type CleanupResult,
@@ -64,8 +70,10 @@ import {
   runSlice,
   type SliceDeps,
 } from "../core/workflow-engine/slice.ts";
+import { locate } from "../core/workspace.ts";
 import { type Db, openState, statePath } from "../persistence/db.ts";
 import {
+  type AttemptUsage,
   acquireLease,
   addArtifact,
   adoptResources,
@@ -80,13 +88,15 @@ import {
   type RunRow,
   releaseLease,
   runContext,
+  runUsage,
   transitions,
   upsertReport,
 } from "../persistence/repository.ts";
 import { publishPending } from "../reporting/outbox.ts";
 import { renderStepReport } from "../reporting/render.ts";
 import { applyRetention, cleanupRun } from "../resources/cleanup.ts";
-import { branchName, ensureWorktree, git, type Workspace } from "../resources/worktree.ts";
+import { parseSkillChoice } from "../resources/role-files.ts";
+import { branchName, ensureTaskWorkspace, git, type Workspace } from "../resources/worktree.ts";
 
 export interface TaskDeps {
   cwd: string;
@@ -108,20 +118,10 @@ const START_LEASE_MS = 10 * 60_000;
 const RUN_LEASE_MS = 6 * 60 * 60_000;
 const PLUGIN_ROOT = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 
-export function repo(cwd: string): { root: string; config: OmiConfig } {
-  let common: string;
-  try {
-    common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    throw new OmiError("CONFIG_INVALID", "not inside a git repository");
-  }
-  // Main checkout, even when called from inside a task worktree.
-  const root = dirname(resolve(common));
-  return { root, config: loadConfig(root) };
+export function repo(cwd: string): { root: string; workspace: string; config: OmiConfig } {
+  // Main checkout, even when called from inside a task worktree or at the workspace root.
+  const { root, workspace } = locate(cwd);
+  return { root, workspace, config: loadConfig(workspace) };
 }
 
 const typeOf = (t: Ticket) => labelType(t.labels.nodes);
@@ -231,7 +231,7 @@ export interface StartResult {
 
 export function taskStart(deps: TaskDeps, issue: number): StartResult {
   const gh = deps.gh ?? spawnGh;
-  const { root, config } = repo(deps.cwd);
+  const { root, workspace: omiWorkspace, config } = repo(deps.cwd);
   const db = openState(statePath(deps.cwd));
   const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
   const lease = `task:${ref.repository}#${issue}`;
@@ -259,8 +259,9 @@ export function taskStart(deps: TaskDeps, issue: number): StartResult {
       // A resumed task keeps its branch even if the Issue title changed since.
       const branch =
         ownedRefs(db, run.id, "branch")[0] ?? branchName(type, issue, ticket.title, ready.parent);
-      const workspace = ensureWorktree(db, {
+      const workspace = ensureTaskWorkspace(db, {
         repoRoot: root,
+        workspace: omiWorkspace,
         config,
         issue,
         branch,
@@ -284,6 +285,8 @@ export interface TaskStatus {
   worktree: { path: string; exists: boolean } | null;
   branch: string | null;
   transitions: ReturnType<typeof transitions>;
+  /** Host-observed usage of each finished agent attempt (DevTask-0068 #203). */
+  usage: AttemptUsage[];
 }
 
 /** Local state only: no GitHub call. */
@@ -295,13 +298,14 @@ export function taskStatus(deps: TaskDeps, issue: number): TaskStatus {
       repository: `${config.github.owner}/${config.github.repo}`,
       number: issue,
     });
-    if (!run) return { run: null, worktree: null, branch: null, transitions: [] };
+    if (!run) return { run: null, worktree: null, branch: null, transitions: [], usage: [] };
     const path = ownedRefs(db, run.id, "worktree")[0];
     return {
       run,
       worktree: path ? { path, exists: existsSync(path) } : null,
       branch: ownedRefs(db, run.id, "branch")[0] ?? null,
       transitions: transitions(db, run.id),
+      usage: runUsage(db, run.id),
     };
   } finally {
     db.close();
@@ -401,22 +405,40 @@ export interface RunResult {
   error?: { code: string; message: string; file: string };
 }
 
+/** `--profile/--model/--effort/--reason` of `task run`/`task analyze` (#217). */
+export interface PickFlags {
+  profile?: string;
+  model?: string;
+  effort?: string;
+  reason?: string;
+  /** `--skills <role>=<a>,<b>` (#199). */
+  skills?: string[];
+}
+
 /**
  * `omi task run <n>`: start (idempotent) then drive review and QA until PR_PENDING or a person is
  * needed (WAITING_PO, BLOCKED); the Project Status then mirrors the workflow state (#99).
  * Spawns agent processes: this command spends tokens.
  */
 export function taskRun(
-  deps: TaskDeps & Pick<SliceDeps, "runAgent" | "fromSource">,
+  deps: TaskDeps &
+    Pick<SliceDeps, "runAgent" | "hostEnv"> & {
+      pick?: PickFlags;
+      harnessVersion?: () => string | undefined;
+    },
   issue: number,
 ): RunResult {
   const gh = deps.gh ?? spawnGh;
-  const { config } = repo(deps.cwd);
+  const { workspace, config } = repo(deps.cwd);
+  // A bad choice is refused before anything starts.
+  const selection = selectProfile(loadProfiles(workspace), deps.pick ?? {}, deps.hostEnv);
+  const skills = parseSkillChoice(PLUGIN_ROOT, deps.pick?.skills, deps.pick?.reason);
   // Plan first: a bad role label or a non-delivery type fails before any worktree exists.
   const plan = planFor(config, fetchTicket(config, issue, gh), gh);
   if (plan.kind !== "delivery") {
     throw new OmiError("POLICY_VIOLATION", `${plan.workflow}: use \`omi task analyze ${issue}\``);
   }
+  harnessGate(deps, selection);
   const start = taskStart(deps, issue);
   const file = statePath(deps.cwd);
   const db = openState(file);
@@ -434,12 +456,15 @@ export function taskRun(
           pluginRoot: PLUGIN_ROOT,
           evidenceDir,
           runAgent: deps.runAgent,
-          fromSource: deps.fromSource,
+          hostEnv: deps.hostEnv,
+          selection,
+          skills,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),
         },
         {
           run: start.run,
           worktree: start.workspace.path,
+          taskRoot: dirname(start.workspace.path),
           baseSha: start.workspace.baseSha,
           plan,
         },
@@ -458,6 +483,20 @@ export function taskRun(
   } finally {
     db.close();
   }
+}
+
+/**
+ * The harness must be in the verified range before any agent runs (#219). An injected runner
+ * (tests) or a harness passed in `deps` decides without spawning the real CLI.
+ */
+export function harnessGate(
+  deps: Pick<SliceDeps, "runAgent"> & { harnessVersion?: () => string | undefined },
+  selection: Selection | undefined,
+): void {
+  if (deps.runAgent && !deps.harnessVersion) return;
+  const h = selection?.profile.harness ?? "claudecode";
+  const why = versionRefusal((deps.harnessVersion ?? (() => harnessVersion(h)))(), h);
+  if (why) throw new OmiError("CONFIG_INVALID", `${why}: see \`omi doctor\``);
 }
 
 const blockedBy = (state: WorkflowContext["state"], evidenceDir: string) => {
@@ -485,11 +524,17 @@ function planFor(config: OmiConfig, ticket: Ticket, gh: GhRunner): WorkflowPlan 
  * superseded (cancelled) by the new run. Spends tokens.
  */
 export function taskAnalyze(
-  deps: TaskDeps & Pick<SliceDeps, "runAgent" | "fromSource">,
+  deps: TaskDeps &
+    Pick<SliceDeps, "runAgent" | "hostEnv"> & {
+      pick?: PickFlags;
+      harnessVersion?: () => string | undefined;
+    },
   issue: number,
 ): RunResult {
   const gh = deps.gh ?? spawnGh;
-  const { root, config } = repo(deps.cwd);
+  const { root, workspace, config } = repo(deps.cwd);
+  const selection = selectProfile(loadProfiles(workspace), deps.pick ?? {}, deps.hostEnv);
+  const skills = parseSkillChoice(PLUGIN_ROOT, deps.pick?.skills, deps.pick?.reason);
   const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
   const ticket = fetchTicket(config, issue, gh);
   const bad = validateTicket(ticket, config).find((c) => c.status === "fail");
@@ -498,6 +543,7 @@ export function taskAnalyze(
   if (plan.kind !== "analysis") {
     throw new OmiError("POLICY_VIOLATION", `${plan.workflow}: use \`omi task run ${issue}\``);
   }
+  harnessGate(deps, selection);
   const file = statePath(deps.cwd);
   const db = openState(file);
   const lease = `task:${ref.repository}#${issue}`;
@@ -526,10 +572,18 @@ export function taskAnalyze(
           pluginRoot: PLUGIN_ROOT,
           evidenceDir: evidenceOf(run.id),
           runAgent: deps.runAgent,
-          fromSource: deps.fromSource,
+          hostEnv: deps.hostEnv,
+          selection,
+          skills,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),
         },
-        { run, worktree: root, baseSha: git(["rev-parse", "HEAD"], root), plan },
+        {
+          run,
+          worktree: root,
+          taskRoot: join(evidenceOf(run.id), "workspace"),
+          baseSha: git(["rev-parse", "HEAD"], root),
+          plan,
+        },
       );
       // Analysis done or an open question: either way the PO decides next.
       const status = setStatus(
@@ -785,7 +839,36 @@ export interface FinalizeResult {
   held?: string;
 }
 
-function cleanupComment(run: RunRow, round: number, receipt: MergeReceipt, r: CleanupResult) {
+/**
+ * Proof that a task without a PR left nothing behind on GitHub: the Issue is closed and the branch
+ * was never pushed. Local commits are checked by cleanup (`noCode`), which owns the clone.
+ */
+function noCodeProof(cwd: string, config: OmiConfig, issue: number, branch: string, gh: GhRunner) {
+  const { owner, repo: name } = config.github;
+  const state = graphql(
+    "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){state}}}",
+    { owner, repo: name, number: issue },
+    z.strictObject({
+      repository: z.strictObject({ issue: z.strictObject({ state: z.string() }).nullable() }),
+    }),
+    "issue state",
+    gh,
+  ).repository.issue?.state;
+  if (state !== "CLOSED") {
+    throw new OmiError("POLICY_VIOLATION", `no PR for ${branch} and #${issue} is still open`);
+  }
+  if (git(["ls-remote", "--heads", "origin", branch], repo(cwd).root)) {
+    throw new OmiError("POLICY_VIOLATION", `no PR, but ${branch} exists on origin`);
+  }
+  return true;
+}
+
+function cleanupComment(
+  run: RunRow,
+  round: number,
+  receipt: MergeReceipt | undefined,
+  r: CleanupResult,
+) {
   const failed = r.steps.filter((s) => s.status === "failed");
   const comment: StepComment = {
     schemaVersion: SCHEMA_VERSION,
@@ -804,7 +887,9 @@ function cleanupComment(run: RunRow, round: number, receipt: MergeReceipt, r: Cl
     actualEffort: null,
     status: r.state === "COMPLETED" ? "PASSED" : "FAILED",
     summary: [
-      `PR #${receipt.number} merged ${receipt.mergedAt} (head ${receipt.headSha.slice(0, 12)}).`,
+      receipt
+        ? `PR #${receipt.number} merged ${receipt.mergedAt} (head ${receipt.headSha.slice(0, 12)}).`
+        : "No PR: task without code.",
       ...r.steps.map(
         (s) => `- ${s.name}: ${s.status}${s.detail ? ` — ${s.detail.slice(0, 120)}` : ""}`,
       ),
@@ -823,7 +908,7 @@ function cleanupComment(run: RunRow, round: number, receipt: MergeReceipt, r: Cl
         : "Fix the failed step, then rerun `omi task finalize`; resources were kept.",
     executionId: `${run.id}-cleanup`,
     createdAt: new Date().toISOString(),
-    ...(receipt.mergeCommit ? { commitSha: receipt.mergeCommit } : {}),
+    ...(receipt?.mergeCommit ? { commitSha: receipt.mergeCommit } : {}),
   };
   return renderStepReport(parseContract(StepComment, comment, "cleanup comment"));
 }
@@ -840,7 +925,7 @@ export function taskFinalize(
   issue: number,
 ): FinalizeResult {
   const gh = deps.gh ?? spawnGh;
-  const { root, config } = repo(deps.cwd);
+  const { config } = repo(deps.cwd);
   const file = statePath(deps.cwd);
   const db = openState(file);
   const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
@@ -868,32 +953,41 @@ export function taskFinalize(
       const branch = claimedRefs(db, runId, "branch")[0];
       if (!branch) throw new OmiError("OWNERSHIP_MISMATCH", `${primary} never owned a branch`);
       const base = config.git.baseBranch;
-      const facts = prFacts(config, { head: branch, base, states: ["MERGED"] }, gh);
+      const facts = prFacts(config, { head: branch, base, states: ["OPEN", "MERGED"] }, gh);
       const receipt = receiptOf(facts.pr);
-      if (!receipt || receipt.baseRef !== base) {
+      // No PR at all: a task without code (Spike, Issue-only) may still be finalized.
+      const noCode = facts.count === 0 ? noCodeProof(deps.cwd, config, issue, branch, gh) : null;
+      if (!noCode && (!receipt || receipt.baseRef !== base)) {
         throw new OmiError("POLICY_VIOLATION", `${branch} has no PR merged into ${base}`);
       }
-      const marked = markedPrimaries(facts.pr?.body ?? "");
-      // PRs opened before `omi pr create` carry no marker: GitHub's closing link is the proof.
-      const named = marked.length
-        ? marked.includes(primary)
-        : closingIssues(facts.pr?.id ?? "", { run: gh, sleep: deps.sleep }).join() === primary;
-      if (!named) {
-        throw new OmiError(
-          "POLICY_VIOLATION",
-          `merged PR #${receipt.number} does not name ${primary}`,
-        );
+      if (receipt) {
+        const marked = markedPrimaries(facts.pr?.body ?? "");
+        // PRs opened before `omi pr create` carry no marker: GitHub's closing link is the proof.
+        const named = marked.length
+          ? marked.includes(primary)
+          : closingIssues(facts.pr?.id ?? "", { run: gh, sleep: deps.sleep }).join() === primary;
+        if (!named) {
+          throw new OmiError(
+            "POLICY_VIOLATION",
+            `merged PR #${receipt.number} does not name ${primary}`,
+          );
+        }
       }
-      const cleanOpts = { repoRoot: root, runId, receipt, tempRoot: dirname(file) };
+      const cleanOpts = {
+        runId,
+        receipt,
+        tempRoot: dirname(file),
+        ...(noCode ? { noCode: { base } } : {}),
+      };
       if (deps.dryRun) {
         const cleanup = cleanupRun(db, { ...cleanOpts, dryRun: true });
-        return { run, receipt, cleanup, report: null, status: [] };
+        return { run, receipt: receipt ?? null, cleanup, report: null, status: [] };
       }
 
       publishPending(db, runId, { gh }); // earlier reports first: progress waits for them
       const state = () => runContext(db, runId).state;
       if ([...PRE_MERGE, "BLOCKED", "WAITING_PO"].includes(state())) {
-        advanceRun(db, runId, { type: "MERGE_VERIFIED" });
+        advanceRun(db, runId, { type: noCode ? "NO_CODE_VERIFIED" : "MERGE_VERIFIED" });
       }
       if (["PR_MERGED", "CLEANUP_FAILED"].includes(state())) {
         advanceRun(db, runId, { type: "CLEANUP_STARTED" });
@@ -905,7 +999,7 @@ export function taskFinalize(
       const evidence = join(dirname(file), "evidence", runId);
       mkdirSync(evidence, { recursive: true });
       const receiptFile = join(evidence, "merge-receipt.json");
-      if (!existsSync(receiptFile)) {
+      if (receipt && !existsSync(receiptFile)) {
         writeFileSync(receiptFile, `${JSON.stringify(receipt, null, 2)}\n`);
         addArtifact(db, { runId, kind: "evidence", path: receiptFile });
       }
@@ -923,12 +1017,19 @@ export function taskFinalize(
       if (cleanup.state === "CLEANUP_FAILED") {
         run = advanceRun(db, runId, { type: "CLEANUP_ERROR" }).run;
         const blocked = setStatus(config, issue, PROJECT_STATUS.CLEANUP_FAILED, gh);
-        return { run, receipt, cleanup, report, status: blocked ? [blocked] : [] };
+        return { run, receipt: receipt ?? null, cleanup, report, status: blocked ? [blocked] : [] };
       }
       run = advanceRun(db, runId, { type: "CLEANUP_SUCCEEDED" }).run;
       // COMPLETED is recorded first; a failure below is repaired by rerunning finalize.
       const fin = markFinished(config, issue, gh);
-      return { run, receipt, cleanup, report, status: fin.changes, held: fin.held };
+      return {
+        run,
+        receipt: receipt ?? null,
+        cleanup,
+        report,
+        status: fin.changes,
+        held: fin.held,
+      };
     } finally {
       releaseLease(db, { key: lease, holder: session });
     }

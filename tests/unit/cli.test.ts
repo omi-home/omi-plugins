@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { atLeast } from "../../runtime/cli/doctor.ts";
+import { atLeast } from "../../runtime/adapters/claude/launch.ts";
 import { HELP } from "../../runtime/cli/main.ts";
 
 const bin = fileURLToPath(new URL("../../bin/omi", import.meta.url));
@@ -30,7 +30,8 @@ test("golden: help and version, human and json", () => {
     `Usage: omi <command> [--output human|json]
 
 Commands:
-  doctor                 Check tools, repository, AGENTS.md, .omi/config.yaml and GitHub access
+  doctor [--probe]       Check tools, repository, AGENTS.md, workspace config and GitHub access;
+                         --probe runs one short claude call per active profile (spends tokens)
   status [--milestone <n>]
                          Read-only overview of a Milestone (default: the active one): its Issues by
                          Project Status with open PRs, local runs and leftovers, Status drift and
@@ -42,10 +43,14 @@ Commands:
                          Reviewer (→ Security Reviewer when risk:high/security or asked) (→ Architect)
                          → release validation (→ Manual QA for bugs, ui, qa:manual) until In Review
                          or it needs a person (Waiting PO, Blocked). Runs agents: spends tokens.
-                         --from-source loads the agents from this checkout instead of the installed plugin
   task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
                          write their sections into the Issue body, then Waiting PO. No worktree.
-                         Runs agents: spends tokens. --from-source as for task run
+                         Runs agents: spends tokens.
+                         task run / task analyze: --profile <name> [--model <id>] [--effort <level>]
+                         --reason <text> runs every agent step on that profile (\`profile list\`);
+                         model/effort default to the profile's first; none: agents.routing.
+                         --skills <role>=<skill>,<skill> (repeatable, needs --reason) adds skills
+                         from that role's set (\`skill list\`) to its steps; defaults always install
   task unblock <n>       Clear a BLOCKED run of Issue #n (a person decided): resume it through the FSM,
                          post one report (who, --reason <text>); the next \`task run\` re-runs the step
                          that reported BLOCKED
@@ -76,10 +81,20 @@ Commands:
                          (<!-- omi:carried-findings=... --> comments: source | finding | action)
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
+  workspace init [--name <n>] [--repo <path|url>]
+                         Build <name>-workspace/ (default: next to the repo) with .claude/, .omi-plugins/
+                         (omi.config.yaml, omi.config.json) and the Coordinator's AGENTS.md, and clone the
+                         repo into it. Re-running reports each item created or kept; never overwrites
+  workspace migrate [--name <n>] [--dry-run]
+                         From a repo on the old layout (.omi/config.yaml, worktrees): build the workspace
+                         with workspace init, copy the config and the state into .omi-plugins/. Refused
+                         while a run is open or a task worktree is left; deletes nothing in the repo and
+                         lists the old files to remove in a task PR. Re-running keeps what exists
   github project init [--title <text>]
                          Bootstrap this repo into OMI: find or create the Project (title, default: repo
-                         name), link it, write .omi/config.yaml and install templates/github/ into .github/
-                         where missing. Re-running changes nothing; never overwrites a file
+                         name), link it, write the github section of .omi-plugins/omi.config.yaml and
+                         install templates/github/ into .github/ where missing. Re-running changes nothing;
+                         never overwrites a file
   github project plan    Diff the Project's custom fields (config/github/project.yaml), views, built-in
                          workflows and Insights (views.yaml) and list items whose Status their type does
                          not use (status-transitions.yaml). Read-only; exits 1 while anything is pending,
@@ -102,10 +117,33 @@ Commands:
                          Post the handoff on the active Milestone (the one open Milestone In Progress or
                          In Review) with marker <date>-s<N>; the same text again changes nothing, a text
                          opening with an existing marker updates that comment. Redacted
+  profile list           Read-only: execution profiles not disabled in .omi-plugins/omi.config.json
+                         (harness, auth type, models, efforts) and whether each secret env is set;
+                         never prints a secret
+  skill list [--role <role>]
+                         Read-only: each role's default and allowed skills (agent-pack) and what each
+                         skill is for; the input for \`task run --skills\`
+  context plan [--role <role>]
+                         Read-only: measure the context a session starts with in the workspace and in
+                         a task workspace of each role (\`/context\`, no tokens) and classify every
+                         plugin, skill, MCP server and memory file as needed / unneeded / unknown;
+                         keep list: context.keep in omi.config.yaml
+  context apply [--dry-run] [--remove] [--bundled]
+                         Switch the workspace's unneeded items off in its .claude/settings.json only
+                         (enabledPlugins incl. @synced, skillOverrides, disableClaudeAiConnectors,
+                         deniedMcpServers; disableBundledSkills only with --bundled). Re-run changes
+                         nothing; --remove takes back what OMI added; other keys untouched
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
                          prune missing worktrees; orphans are reported, never removed
+  hook pre-tool-use      Coordinator plugin hook (hook input JSON on stdin): exit 2 with the reason when
+                         the call edits the main repo, commits on or pushes to develop/main, or uses
+                         --force; anything else (or no OMI workspace, bad input) passes
+  hook session-start     Coordinator plugin hook: short summary (latest handoff, Milestone status)
+  hook agent-pre-tool-use
+                         Agent-pack hook (hook input JSON on stdin): exit 2 when an agent runs git
+                         push or gh, or writes a file outside its task workspace (CLAUDE_PROJECT_DIR)
   version                Print the OMI version
   help                   Show this help
 

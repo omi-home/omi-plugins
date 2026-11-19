@@ -7,14 +7,21 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import type { AgentLaunch } from "../../runtime/adapters/claude/launch.ts";
 import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { parseConfig } from "../../runtime/core/config.ts";
 import type { TaskPacket } from "../../runtime/core/contracts.ts";
 import type { DeliveryPlan, WorkflowPlan } from "../../runtime/core/workflow-engine/plan.ts";
-import { lastStepError, runAnalysis, runSlice } from "../../runtime/core/workflow-engine/slice.ts";
+import {
+  lastStepError,
+  runAnalysis,
+  runSlice,
+  zeroWidthIn,
+} from "../../runtime/core/workflow-engine/slice.ts";
 import { openState } from "../../runtime/persistence/db.ts";
 import * as repo from "../../runtime/persistence/repository.ts";
+import { roleSkills } from "../../runtime/resources/role-files.ts";
 
 type Verdict = "PASSED" | "FAILED" | "BLOCKED";
 interface Script {
@@ -238,7 +245,15 @@ function stubAgents(script: Script) {
         type: "result",
         is_error: false,
         result: JSON.stringify(result),
-        usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 5 },
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cache_read_input_tokens: 5,
+          output_tokens_details: { thinking_tokens: 7 },
+        },
+        total_cost_usd: 0.0123,
+        num_turns: 3,
+        duration_ms: 4200,
         permission_denials: [],
       }),
     ].join("\n");
@@ -266,11 +281,12 @@ function setup(script: Script = {}, plan?: WorkflowPlan) {
     db,
     config,
     gh: gh.run,
-    pluginRoot: dir, // unused by stubs; must be absolute
+    pluginRoot: fileURLToPath(new URL("../../", import.meta.url)), // real agents/ for role files
     evidenceDir: mkdtempSync(join(tmpdir(), "omi-evidence-")),
     runAgent: agents.runAgent,
   };
-  const target = { run, worktree: dir, baseSha: base, plan };
+  const taskRoot = mkdtempSync(join(tmpdir(), "omi-task-"));
+  const target = { run, worktree: dir, taskRoot, baseSha: base, plan };
   return { db, gh, agents, deps, target };
 }
 
@@ -285,6 +301,23 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
   const ctx = runSlice(s.deps, s.target);
   assert.equal(ctx.state, "PR_PENDING");
   assert.deepEqual(s.agents.calls, ["backend-engineer:1", "code-reviewer:1"]);
+  // Each agent runs in the task workspace with its role files and its own config dir (#168).
+  const launch = s.agents.launches.at(-1) as AgentLaunch;
+  assert.equal(launch.cwd, s.target.taskRoot);
+  assert.equal(launch.env.CLAUDE_CONFIG_DIR, join(s.target.taskRoot, ".omi-home", "claude"));
+  assert.match(readFileSync(join(s.target.taskRoot, "AGENTS.md"), "utf8"), /^## Code Reviewer$/m);
+  // #199: every attempt records the skills installed for it (role defaults without a choice).
+  const attempts = s.db
+    .prepare("SELECT s.role, a.skills FROM step_attempt a JOIN step_run s ON s.id = a.step_run_id")
+    .all();
+  assert.deepEqual(
+    attempts.map((r) => [r.role, JSON.parse(String(r.skills))]),
+    [
+      ["backend-engineer", roleSkills(s.deps.pluginRoot, "backend-engineer").default],
+      ["code-reviewer", roleSkills(s.deps.pluginRoot, "code-reviewer").default],
+    ],
+  );
+  assert.ok(s.gh.comments.some((c) => c.body.includes("| Skills | semantic-code-review |")));
   // Checks already passed on this HEAD: release validation reuses them, no Manual QA planned.
   assert.deepEqual(titles(s.gh.comments.map((c) => c.body)), [
     "implement:1",
@@ -293,10 +326,10 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
     "release-validation:1",
   ]);
   assert.match(s.gh.comments[3]?.body ?? "", /1 commit\(s\) over base · checks passed on/);
-  // Cost row: host-observed tokens and wall time, never estimated (spec §14).
+  // Cost row: host-observed tokens, cache hit, list-price cost and host duration (spec §14).
   assert.match(
     s.gh.comments[0]?.body ?? "",
-    /\| Cost \| 100 in \/ 20 out tokens \(5 cache read\) · \d+\.\d s wall \|/,
+    /\| Cost \| 100 in \/ 20 out tokens · 7 thinking · 5 cache read \(5% hit\) · 3 turns · ≈ \$0\.0123 \(list-price estimate\) · 4\.2 s wall \|/,
   );
   assert.match(
     s.gh.comments[1]?.body ?? "",
@@ -324,11 +357,25 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
   );
   assert.deepEqual(repo.pendingReports(s.db, "run"), []);
   const stored = s.db.prepare("SELECT result FROM step_run WHERE step_id = 'implement'").get();
-  assert.deepEqual(JSON.parse(String(stored?.result)).usage, {
+  const usage = {
     inputTokens: 100,
     outputTokens: 20,
     cacheReadTokens: 5,
-  });
+    thinkingTokens: 7,
+    costUsd: 0.0123,
+    numTurns: 3,
+  };
+  assert.deepEqual(JSON.parse(String(stored?.result)).usage, usage);
+  // Every finished agent attempt keeps its usage in step_attempt (migration 4).
+  const rows = repo.runUsage(s.db, "run");
+  assert.deepEqual(
+    rows.map((r) => [r.stepId, r.round, r.attempt, r.role, r.actualModel]),
+    [
+      ["implement", 1, 1, "backend-engineer", "claude-sonnet-5-5"],
+      ["code-review", 1, 1, "code-reviewer", "claude-sonnet-5-5"],
+    ],
+  );
+  assert.deepEqual(rows[0]?.usage, usage);
 });
 
 test("2 + Architect + 2: every round reported, delta findings, no fifth Dev, one Architect", () => {
@@ -676,7 +723,9 @@ test("Manual QA may run the repo's check commands; reviewers may not (PO #124)",
   const args = (role: string) =>
     s.agents.launches.find((l) => l.stdin.includes(`"role": "${role}"`))?.args ?? [];
   assert.ok(args("manual-qa-engineer").includes(check));
-  assert.ok(!args("manual-qa-engineer").includes("Bash(git commit*)"));
+  const commit = (role: string) => args(role).some((t) => /^Bash\(git -C .+ commit\*\)$/.test(t));
+  assert.ok(commit("backend-engineer"), "engineers commit through git -C <repo>");
+  assert.ok(!commit("manual-qa-engineer"));
   assert.ok(!args("code-reviewer").includes(check));
 });
 
@@ -686,4 +735,200 @@ test("Manual QA that leaves the worktree dirty blocks the run, with the reason k
   const err = lastStepError(s.deps.evidenceDir);
   assert.equal(err?.code, "POLICY_VIOLATION");
   assert.match(err?.message ?? "", /qa-scratch\.txt/);
+});
+
+const gatewaySelection = () => ({
+  profile: {
+    name: "cc-gw",
+    harness: "claudecode" as const,
+    disabled: false,
+    auth: {
+      type: "gateway" as const,
+      baseUrl: "https://gw.example.com",
+      scheme: "x-api-key" as const,
+      keyEnv: "OMI_GW",
+    },
+    models: ["claude-opus-5-5"],
+    efforts: ["high" as const],
+  },
+  model: "claude-opus-5-5",
+  effort: "high" as const,
+  reason: "spread evenly",
+});
+const subSelection = () => ({
+  profile: {
+    name: "cc-sub",
+    harness: "claudecode" as const,
+    disabled: false,
+    auth: { type: "subscription" as const, tokenEnv: "OMI_SUB" },
+    models: ["claude-sonnet-5-5"],
+    efforts: ["medium" as const],
+  },
+  model: "claude-sonnet-5-5",
+  effort: "medium" as const,
+  reason: "spread evenly",
+});
+const hostEnv = { PATH: "/bin", OMI_GW: "k", OMI_SUB: "t" };
+
+for (const [name, transcript] of [
+  [
+    "rate_limit_event rejected",
+    [
+      {
+        type: "rate_limit_event",
+        rate_limit_info: { status: "rejected", rateLimitType: "five_hour" },
+      },
+      { type: "result", is_error: true, api_error_status: 429, result: "limit" },
+    ],
+  ],
+  ["429", [{ type: "result", is_error: true, api_error_status: 429, result: "limit" }]],
+  ["402 (gateway)", [{ type: "result", is_error: true, api_error_status: 402, result: "credit" }]],
+] as const) {
+  test(`quota mid-step (${name}) → BLOCKED with a report; another profile runs a new attempt (#218)`, () => {
+    const s = setup();
+    const real = s.deps.runAgent;
+    let quotaOnce = true;
+    const runAgent = (l: AgentLaunch) => {
+      if (quotaOnce) {
+        // The engineer is cut after a first edit: the next attempt must find it.
+        quotaOnce = false;
+        s.agents.packets.push(JSON.parse(l.stdin.split("\n\n")[1] as string));
+        s.agents.launches.push(l);
+        writeFileSync(join(s.target.worktree, "half-done.txt"), "wip\n");
+        return transcript.map((e) => JSON.stringify(e)).join("\n");
+      }
+      return real(l);
+    };
+    const first = { ...s.deps, runAgent, hostEnv, selection: subSelection() };
+    assert.equal(runSlice(first, s.target).state, "BLOCKED");
+    const err = lastStepError(s.deps.evidenceDir);
+    assert.equal(err?.code, "QUOTA_EXHAUSTED");
+    assert.match(err?.message ?? "", /profile cc-sub is out of quota .*"disabled": true/);
+    assert.equal(s.gh.comments.length, 1);
+    assert.match(s.gh.comments[0]?.body ?? "", /step=implement;round=1;attempt=1/);
+    assert.match(s.gh.comments[0]?.body ?? "", /api_error_status|rate_limit_info/);
+    assert.equal(repo.runContext(s.db, "run").resumeFrom, "RUNNING");
+
+    repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+    const second = { ...s.deps, runAgent, hostEnv, selection: gatewaySelection() };
+    assert.equal(runSlice(second, s.target).state, "PR_PENDING");
+    const dev = s.agents.packets.filter((p) => p.role === "backend-engineer");
+    assert.deepEqual(
+      dev.map((p) => [p.stepId, p.attempt, p.priorAttemptCut]),
+      [
+        ["implement", 1, undefined],
+        ["implement", 2, true],
+      ],
+    );
+    assert.doesNotMatch(s.agents.launches[0]?.stdin ?? "", /git diff/);
+    assert.match(s.agents.launches[1]?.stdin ?? "", /read `git status` and `git diff`/i);
+    assert.equal(s.agents.launches[1]?.env.ANTHROPIC_API_KEY, "k");
+    assert.deepEqual(
+      s.db
+        .prepare("SELECT attempt, profile, error_code FROM step_attempt WHERE step_run_id = 1")
+        .all()
+        .map((r) => ({ ...r })),
+      [
+        { attempt: 1, profile: "cc-sub", error_code: "QUOTA_EXHAUSTED" },
+        { attempt: 2, profile: "cc-gw", error_code: null },
+      ],
+    );
+  });
+}
+
+test("gateway profile: zero-width characters in the diff block the run before any report (#218)", () => {
+  const s = setup();
+  const real = s.deps.runAgent;
+  const runAgent = (l: AgentLaunch) => {
+    const out = real(l);
+    writeFileSync(join(s.target.worktree, "src", "wm.txt"), "ok\u200B\n");
+    git(s.target.worktree, "add", "-A");
+    git(s.target.worktree, "commit", "-qm", "wm");
+    return out;
+  };
+  const deps = { ...s.deps, runAgent, hostEnv, selection: gatewaySelection() };
+  assert.equal(runSlice(deps, s.target).state, "BLOCKED");
+  const err = lastStepError(s.deps.evidenceDir);
+  assert.equal(err?.code, "POLICY_VIOLATION");
+  assert.match(err?.message ?? "", /zero-width .* in: diff/);
+  assert.equal(s.gh.comments.length, 0);
+});
+
+test("gateway profile: zero-width characters in the report block it; a subscription is not checked", () => {
+  for (const [selection, blocked] of [
+    [gatewaySelection(), true],
+    [subSelection(), false],
+  ] as const) {
+    const s = setup();
+    const real = s.deps.runAgent;
+    const runAgent = (l: AgentLaunch) => real(l).replace("implemented", "implemented\u2060");
+    const ctx = runSlice({ ...s.deps, runAgent, hostEnv, selection }, s.target);
+    assert.equal(ctx.state, blocked ? "BLOCKED" : "PR_PENDING");
+    if (blocked) assert.match(lastStepError(s.deps.evidenceDir)?.message ?? "", /in: report\./);
+  }
+});
+
+test("zeroWidthIn: untracked files and commit messages of an editing step", () => {
+  const s = setup();
+  const wt = s.target.worktree;
+  writeFileSync(join(wt, "a.txt"), "x");
+  git(wt, "add", "-A");
+  git(wt, "commit", "-qm", "msg\u200C");
+  writeFileSync(join(wt, "new.txt"), "\u200D");
+  assert.deepEqual(zeroWidthIn(s.target, true, ["clean"]), ["new.txt", "commit message"]);
+  assert.deepEqual(zeroWidthIn(s.target, false, ["clean"]), []);
+});
+
+test("profile chosen (#217): every agent runs on it; state and report record the choice", () => {
+  const s = setup();
+  const selection = {
+    profile: {
+      name: "cc-gw",
+      harness: "claudecode" as const,
+      disabled: false,
+      auth: {
+        type: "gateway" as const,
+        baseUrl: "https://gw.example.com",
+        scheme: "x-api-key" as const,
+        keyEnv: "OMI_GW",
+      },
+      models: ["claude-opus-5-5"],
+      efforts: ["high" as const],
+    },
+    model: "claude-opus-5-5",
+    effort: "high" as const,
+    reason: "hard review",
+  };
+  const ctx = runSlice({ ...s.deps, selection, hostEnv: { PATH: "/bin", OMI_GW: "k" } }, s.target);
+  assert.equal(ctx.state, "PR_PENDING");
+  for (const l of s.agents.launches) {
+    assert.deepEqual(l.args.slice(l.args.indexOf("--model"), l.args.indexOf("--model") + 4), [
+      "--model",
+      "claude-opus-5-5",
+      "--effort",
+      "high",
+    ]);
+    assert.equal(l.env.ANTHROPIC_API_KEY, "k");
+  }
+  assert.match(
+    s.gh.comments[0]?.body ?? "",
+    /profile cc-gw \(hard review\) · requested claude-opus-5-5 · actual claude-sonnet-5-5 \(observed\)/,
+  );
+  assert.match(s.gh.comments[0]?.body ?? "", /requested high · actual unknown \(not observable\)/);
+  assert.deepEqual(
+    repo.runUsage(s.db, "run").map((r) => r.profile),
+    ["cc-gw", "cc-gw"],
+  );
+  const a = s.db
+    .prepare("SELECT profile, requested_model, requested_effort, reason FROM step_attempt LIMIT 1")
+    .get();
+  assert.deepEqual(
+    { ...a },
+    {
+      profile: "cc-gw",
+      requested_model: "claude-opus-5-5",
+      requested_effort: "high",
+      reason: "hard review",
+    },
+  );
 });

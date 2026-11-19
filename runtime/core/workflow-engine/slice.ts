@@ -5,9 +5,23 @@
 // agent process (ADR-0001 D1) → verified result → persisted with its report → report posted
 // before the next step. The FSM decides every move; agents only recommend.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { type AgentLaunch, buildAgentLaunch, observeRun } from "../../adapters/claude/launch.ts";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { isAbsolute, join, relative } from "node:path";
+import {
+  type AgentLaunch,
+  AUTH_ENV,
+  buildAgentLaunch,
+  detectQuota,
+  observeRun,
+} from "../../adapters/claude/launch.ts";
 import type { GhRunner } from "../../adapters/github/client.ts";
 import { fetchIssueContext } from "../../adapters/github/context.ts";
 import type { Db } from "../../persistence/db.ts";
@@ -26,8 +40,9 @@ import {
 import { publishPending } from "../../reporting/outbox.ts";
 import { redactDeep } from "../../reporting/redact.ts";
 import { renderStepReport } from "../../reporting/render.ts";
+import { type SkillChoice, stepSkills, writeRoleFiles } from "../../resources/role-files.ts";
 import { git } from "../../resources/worktree.ts";
-import type { OmiConfig } from "../config.ts";
+import type { OmiConfig, Selection } from "../config.ts";
 import {
   type CheckRun,
   commentMarker,
@@ -54,8 +69,12 @@ export interface SliceDeps {
   evidenceDir: string;
   /** Runs one agent process and returns its stream-json stdout. */
   runAgent?: (l: AgentLaunch) => string;
-  /** Load agents from `pluginRoot` (`--plugin-dir`) instead of the installed plugin. */
-  fromSource?: boolean;
+  /** Host env the agent env is filtered from (default `process.env`). */
+  hostEnv?: NodeJS.ProcessEnv;
+  /** Profile/model/effort the Coordinator chose for every agent step (#217); none = routing. */
+  selection?: Selection;
+  /** Skills the Coordinator chose per role (#199); every step also gets its role's defaults. */
+  skills?: SkillChoice;
   now?: () => Date;
   /** Writes a `<!-- omi:section=… -->` of the Issue body (the Manual QA test cases). */
   writeSection?: (section: string, markdown: string) => void;
@@ -85,6 +104,8 @@ export interface SliceTarget {
   run: RunRow;
   worktree: string;
   baseSha: string;
+  /** Task workspace (ADR-0002 D2): the agent's cwd; role files are written there. */
+  taskRoot: string;
   /** Defaults to the original slice: Backend Engineer, Feature Implementation. */
   plan?: WorkflowPlan;
 }
@@ -152,8 +173,18 @@ export const isTest = (f: string) =>
 const AGENT_TIMEOUT_MS = 30 * 60_000;
 
 export const spawnAgent = (l: AgentLaunch): string => {
+  // A gateway profile authenticates with its own key (#217).
+  if (!l.env[AUTH_ENV] && !l.env.ANTHROPIC_API_KEY && !l.env.ANTHROPIC_AUTH_TOKEN) {
+    throw new OmiError(
+      "CONFIG_INVALID",
+      `${AUTH_ENV} is not set: run \`claude setup-token\` and export it, or pick a profile (agents do not use the host login)`,
+    );
+  }
+  rmSync(l.configDir, { recursive: true, force: true }); // a fresh config dir per run (D5)
+  mkdirSync(l.configDir, { recursive: true });
   const r = spawnSync(l.command, l.args, {
     cwd: l.cwd,
+    env: l.env,
     input: l.stdin,
     encoding: "utf8",
     timeout: AGENT_TIMEOUT_MS,
@@ -166,15 +197,74 @@ export const spawnAgent = (l: AgentLaunch): string => {
   return r.stdout ?? ""; // a cut or failed run has no result event: observeRun reports it
 };
 
-/** Read-only git for everyone; implementers may also commit and run the repo's own checks. */
-function tools(config: OmiConfig, spec: StepSpec): string[] {
-  const read = ["Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)"];
-  const checks = Object.values(config.checks).flatMap((c) => (c ? [`Bash(${c.run})`] : []));
-  if (!spec.edits) return spec.runsChecks ? [...read, ...checks] : read;
-  return [...read, "Bash(git add*)", "Bash(git commit*)", ...checks];
+/**
+ * Writes the role files of the task workspace, then the launch of its agent (ADR-0002 D2/D4).
+ * Every Bash call starts in the task workspace: git is granted as `git -C <repo> …` (a `cd` before
+ * git is refused by Claude Code) and check commands run as `cd <repo> && <check>`.
+ * Read-only git for everyone; implementers may also commit and run the repo's checks.
+ */
+export function prepareAgent(o: {
+  pluginRoot: string;
+  role: Role;
+  category: ReportCategory;
+  /** Implementing roles may edit files in the clone. */
+  edits: boolean;
+  /** May run the check commands without editing (Manual QA, PO #124). */
+  runsChecks?: boolean;
+  /** The repo's configured check commands. */
+  checks: string[];
+  taskRoot: string;
+  worktree: string;
+  prompt: string;
+  hostEnv?: NodeJS.ProcessEnv;
+  selection?: Selection;
+  /** Skills installed into the task workspace for this run (#199). */
+  skills?: string[];
+}): AgentLaunch {
+  const rel = relative(o.taskRoot, o.worktree);
+  // ponytail: outside the task workspace (analysis) the absolute path must be typed verbatim.
+  const repo = rel.startsWith("..") || isAbsolute(rel) ? o.worktree : rel.replaceAll("\\", "/");
+  const git = (sub: string[]) => sub.map((c) => `Bash(git -C ${repo} ${c}*)`);
+  const read = git(["status", "diff", "log", "show"]);
+  const checks = o.checks.map((c) => `Bash(${c})`);
+  const allowedTools = o.edits
+    ? [...read, ...git(["add", "commit"]), ...checks]
+    : o.runsChecks
+      ? [...read, ...checks]
+      : read;
+  writeRoleFiles({ ...o, repo });
+  return buildAgentLaunch({ ...o, allowedTools, acceptEdits: o.edits });
 }
 
 const cut = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+
+/** Invisible characters a gateway was seen inserting into model output (Spike-0009 Q2). */
+const ZERO_WIDTH = /[\u200B-\u200D\u2060]/;
+
+/**
+ * Where a gateway step left zero-width characters: its diff over the base (committed or not),
+ * untracked files, commit messages (editing steps), and the report it is about to post.
+ */
+export function zeroWidthIn(t: SliceTarget, edits: boolean, texts: string[]): string[] {
+  const out = (args: string[]) =>
+    spawnSync("git", args, {
+      cwd: t.worktree,
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+      windowsHide: true,
+    }).stdout ?? "";
+  const where: string[] = [];
+  if (edits) {
+    if (ZERO_WIDTH.test(out(["diff", t.baseSha]))) where.push("diff");
+    for (const f of out(["ls-files", "--others", "--exclude-standard", "-z"]).split("\0")) {
+      if (f && ZERO_WIDTH.test(readFileSync(join(t.worktree, f), "utf8"))) where.push(f);
+    }
+    if (ZERO_WIDTH.test(out(["log", "--format=%B", `${t.baseSha}..HEAD`])))
+      where.push("commit message");
+  }
+  if (texts.some((s) => ZERO_WIDTH.test(s))) where.push("report");
+  return where;
+}
 
 /**
  * One agent step of the current round. Technical failures close the attempt and go through the
@@ -200,7 +290,14 @@ function agentStep(
   });
   if (step.state === "REPORT_POSTED") return stepResult(db, step.id);
   for (;;) {
-    const attempt = beginAttempt(db, step.id);
+    const sel = d.selection;
+    const skills = stepSkills(d.pluginRoot, { ...planned, round: ctx.round }, d.skills);
+    const reason = sel?.reason ?? d.skills?.reason;
+    const attempt = beginAttempt(db, step.id, {
+      ...(sel ? { profile: sel.profile.name, model: sel.model, effort: sel.effort } : {}),
+      ...(reason ? { reason } : {}),
+      skills,
+    });
     let report: { result: StepResult; actualModel: string; marker: string; body: string };
     try {
       const packet = buildTaskPacket({
@@ -217,24 +314,41 @@ function agentStep(
         openFindings,
         readOnlyArtifacts: [],
         checkResults,
+        // Attempts that finish are never re-run: an earlier one was cut and may have left edits.
+        ...(attempt > 1 ? { priorAttemptCut: true as const } : {}),
       });
       const file = join(d.evidenceDir, `${spec.stepId}-r${ctx.round}-a${attempt}.packet.json`);
       writeFileSync(file, JSON.stringify(packet, null, 2));
       addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "task-packet", path: file });
       const started = Date.now();
       const stdout = (d.runAgent ?? spawnAgent)(
-        buildAgentLaunch({
+        prepareAgent({
           pluginRoot: d.pluginRoot,
           role: spec.role,
+          category: spec.category,
+          edits: spec.edits,
+          taskRoot: t.taskRoot,
           worktree: t.worktree,
+          runsChecks: spec.runsChecks,
+          checks: Object.values(config.checks).flatMap((c) => (c ? [c.run] : [])),
           prompt: packetPrompt(packet),
-          fromSource: d.fromSource,
-          allowedTools: tools(config, spec),
-          acceptEdits: spec.edits,
+          hostEnv: d.hostEnv,
+          selection: sel,
+          skills,
         }),
       );
-      const durationMs = Date.now() - started;
+      const quota = detectQuota(stdout);
+      if (quota) {
+        const name = sel?.profile.name ?? "default";
+        const n = t.run.issue;
+        throw new OmiError(
+          "QUOTA_EXHAUSTED",
+          `profile ${name} is out of quota (${quota.signal}): PO sets "disabled": true for it in .omi-plugins/omi.config.json; Coordinator runs \`omi task unblock ${n}\` then \`omi task run ${n} --profile <another>\``,
+          { profile: name, signal: quota.signal, event: quota.event },
+        );
+      }
       const obs = observeRun(stdout);
+      const durationMs = obs.durationMs ?? Date.now() - started;
       if (obs.isError) throw new OmiError("INTERNAL", `${spec.role} run ended in an error`);
       // Token usage is what the host observed, never what the agent claims.
       const { usage: _claimed, ...claimed } = acceptStepResult(packet, obs.result);
@@ -253,10 +367,14 @@ function agentStep(
           round: ctx.round,
           attempt,
           executor: spec.role,
-          requestedModel: route.model,
+          requestedModel: sel?.model ?? route.model,
           actualModel: obs.actualModel,
-          requestedEffort: route.effort,
+          requestedEffort: sel?.effort ?? route.effort,
           actualEffort: "unknown",
+          ...(sel ? { profile: sel.profile.name } : {}),
+          ...(reason ? { selectionReason: reason } : {}),
+          skills,
+          thinkingObserved: obs.thinkingObserved,
           commitSha: result.commitSha,
           status: result.status,
           summary: result.summary,
@@ -277,6 +395,17 @@ function agentStep(
         marker: commentMarker(comment),
         body: renderStepReport(comment),
       };
+      // A gateway may watermark model output: nothing it touched is posted or carried on.
+      if (sel?.profile.auth.type === "gateway") {
+        const texts = [report.body, ...result.sectionUpdates.map((u) => u.markdown)];
+        const where = zeroWidthIn(t, spec.edits, texts);
+        if (where.length) {
+          throw new OmiError(
+            "POLICY_VIOLATION",
+            `gateway profile ${sel.profile.name} left zero-width characters (U+200B/C/D, U+2060) in: ${where.join(", ")}. Nothing was posted; strip them or re-run the step on another profile.`,
+          );
+        }
+      }
     } catch (e) {
       const err = e instanceof OmiError ? e : new OmiError("INTERNAL", (e as Error).message);
       // The reason survives the attempt (G6-002, #121): the DB keeps only the code.
@@ -285,6 +414,48 @@ function agentStep(
       const failure = { code: err.code, message: err.message, details: err.details ?? null };
       writeFileSync(file, JSON.stringify(redactDeep(failure), null, 2));
       addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "log", path: file });
+      if (err.code === "QUOTA_EXHAUSTED") {
+        // The Issue shows why the step stopped, with the host's own signal (#218).
+        const route = config.agents.routing[spec.role];
+        const comment = parseContract(
+          StepComment,
+          {
+            schemaVersion: 1,
+            issue,
+            workflowRunId: t.run.id,
+            category: spec.category,
+            workflow: workflowOf(t),
+            stepId: spec.stepId,
+            stepTitle: spec.title,
+            round: ctx.round,
+            attempt,
+            executor: spec.role,
+            requestedModel: sel?.model ?? route.model,
+            actualModel: "unknown",
+            requestedEffort: sel?.effort ?? route.effort,
+            actualEffort: "unknown",
+            ...(sel ? { profile: sel.profile.name } : {}),
+            ...(reason ? { selectionReason: reason } : {}),
+            skills,
+            status: "BLOCKED",
+            summary: cut(
+              `Quota: ${err.message}\nSignal: ${JSON.stringify((err.details as { event?: unknown }).event)}`,
+              2000,
+            ),
+            nextAction:
+              "Coordinator: a new attempt of this step on another profile, in the same task workspace.",
+            executionId: `${t.run.id}.${spec.stepId}.r${ctx.round}.a${attempt}`,
+            createdAt: (d.now?.() ?? new Date()).toISOString(),
+          },
+          "quota comment",
+        );
+        enqueueReport(db, {
+          runId: t.run.id,
+          marker: commentMarker(comment),
+          body: renderStepReport(comment),
+        });
+        publishPending(db, t.run.id, { gh: d.gh }); // a failure leaves it for the next run
+      }
       failAttempt(db, { stepRunId: step.id, attempt, errorCode: err.code });
       const next = advanceRun(
         db,
@@ -619,7 +790,8 @@ const ANALYST_STEP: Partial<Record<Role, Omit<StepSpec, "role" | "edits">>> = {
  * Analysis workflow for an Issue without a worktree (PO 2026-11-18): each analyst in turn reads
  * the Issue chain (with the sections written so far) and proposes its own section; the CLI writes
  * it into the Issue body before the next analyst runs. Ends COMPLETED (handed to the PO) or
- * WAITING_PO / BLOCKED when an analyst could not finish. `t.worktree` is the main checkout.
+ * WAITING_PO / BLOCKED when an analyst could not finish. `t.worktree` is the main checkout, read
+ * through `--add-dir`; `t.taskRoot` holds the role files.
  */
 export function runAnalysis(
   d: SliceDeps & Required<Pick<SliceDeps, "writeSection">>,

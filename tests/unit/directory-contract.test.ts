@@ -3,12 +3,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
+import { OLD_LAYOUT } from "../../runtime/cli/workspace.ts";
 
 const ALLOWED_ROOT_DIRS = new Set([
   ".claude-plugin",
   ".github",
-  ".omi", // per-repo OMI config contract (runtime/core/config.ts); this repo runs OMI on itself
-  "agents",
+  "agent-pack",
   "bin",
   "config",
   "docs",
@@ -20,7 +20,6 @@ const ALLOWED_ROOT_DIRS = new Set([
   "skills",
   "templates",
   "tests",
-  "workflows",
 ]);
 
 const repoRoot = new URL("../../", import.meta.url);
@@ -34,9 +33,9 @@ test("tracked root folders stay within the directory contract", () => {
   assert.deepEqual(unapproved, [], `unapproved root folders (ADR required): ${unapproved}`);
 });
 
-test("canonical instructions file is AGENTS.md, no CLAUDE.md shim", () => {
-  assert.ok(tracked.includes("AGENTS.md"));
-  assert.ok(!tracked.includes("CLAUDE.md"), "CLAUDE.md needs an approved compatibility decision");
+test("no OMI instructions or config in the repo: they live in the workspace (ADR-0002 D1)", () => {
+  const left = tracked.filter((p) => OLD_LAYOUT.some((f) => p === f || p.startsWith(`${f}/`)));
+  assert.deepEqual(left, []);
 });
 
 test("skills/ holds only Coordinator entry skills (ADR-0001 D3)", () => {

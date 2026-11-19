@@ -35,7 +35,7 @@ types:
     Backlog: [Analysis, In Progress]
     Analysis: [Approved, Waiting PO]
     Approved: [In Progress]
-    # Done: the CLI closes a Feature when its last child closes (AGENTS.md rule 6).
+    # Done: the CLI closes a Feature when its last child closes (workspace AGENTS.md, workflow rule 6).
     In Progress: [In Review, Waiting PO, Done]
     In Review: [In Progress, Done]
     Waiting PO: [Approved, In Progress, In Review]

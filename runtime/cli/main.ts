@@ -1,5 +1,6 @@
 // OMI CLI entry. Pure function of argv/cwd → {code, stdout, stderr}; bin/omi does the I/O.
 // Everything leaving the process goes through redact.
+
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -16,15 +17,21 @@ import {
   type StatusDrift,
 } from "../adapters/github/project-fields.ts";
 import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/github/repo.ts";
-import { IssueType, ProjectStatus } from "../core/contracts.ts";
+import { listProfiles } from "../core/config.ts";
+import { IssueType, ProjectStatus, Role, type TokenUsage } from "../core/contracts.ts";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import type { RepoAction } from "../core/repo-config.ts";
+import { CONFIG_FILE, locate } from "../core/workspace.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
+import { formatUsage, sumUsage } from "../reporting/render.ts";
+import { skillList } from "../resources/role-files.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
-import { type Check, doctor } from "./doctor.ts";
+import { contextApply, contextPlan, humanContextPlan } from "./context.ts";
+import { type Check, doctor, probeProfiles } from "./doctor.ts";
+import { agentPreToolUse, type HookInput, preToolUse, sessionStart } from "./hook.ts";
 import { projectInit } from "./init.ts";
 import { releaseCheck, releaseTag } from "./release.ts";
-import { NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "./status.ts";
+import { NO_PROFILE, NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "./status.ts";
 import {
   prCreate,
   prMerge,
@@ -38,6 +45,7 @@ import {
   taskUnblock,
   ticketValidate,
 } from "./task.ts";
+import { workspaceInit, workspaceMigrate } from "./workspace.ts";
 
 const humanScan = (s: ScanResult) => [
   ...s.runs.map(
@@ -59,7 +67,8 @@ const humanScan = (s: ScanResult) => [
 export const HELP = `Usage: omi <command> [--output human|json]
 
 Commands:
-  doctor                 Check tools, repository, AGENTS.md, .omi/config.yaml and GitHub access
+  doctor [--probe]       Check tools, repository, AGENTS.md, workspace config and GitHub access;
+                         --probe runs one short claude call per active profile (spends tokens)
   status [--milestone <n>]
                          Read-only overview of a Milestone (default: the active one): its Issues by
                          Project Status with open PRs, local runs and leftovers, Status drift and
@@ -71,10 +80,14 @@ Commands:
                          Reviewer (→ Security Reviewer when risk:high/security or asked) (→ Architect)
                          → release validation (→ Manual QA for bugs, ui, qa:manual) until In Review
                          or it needs a person (Waiting PO, Blocked). Runs agents: spends tokens.
-                         --from-source loads the agents from this checkout instead of the installed plugin
   task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
                          write their sections into the Issue body, then Waiting PO. No worktree.
-                         Runs agents: spends tokens. --from-source as for task run
+                         Runs agents: spends tokens.
+                         task run / task analyze: --profile <name> [--model <id>] [--effort <level>]
+                         --reason <text> runs every agent step on that profile (\`profile list\`);
+                         model/effort default to the profile's first; none: agents.routing.
+                         --skills <role>=<skill>,<skill> (repeatable, needs --reason) adds skills
+                         from that role's set (\`skill list\`) to its steps; defaults always install
   task unblock <n>       Clear a BLOCKED run of Issue #n (a person decided): resume it through the FSM,
                          post one report (who, --reason <text>); the next \`task run\` re-runs the step
                          that reported BLOCKED
@@ -105,10 +118,20 @@ Commands:
                          (<!-- omi:carried-findings=... --> comments: source | finding | action)
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
+  workspace init [--name <n>] [--repo <path|url>]
+                         Build <name>-workspace/ (default: next to the repo) with .claude/, .omi-plugins/
+                         (omi.config.yaml, omi.config.json) and the Coordinator's AGENTS.md, and clone the
+                         repo into it. Re-running reports each item created or kept; never overwrites
+  workspace migrate [--name <n>] [--dry-run]
+                         From a repo on the old layout (.omi/config.yaml, worktrees): build the workspace
+                         with workspace init, copy the config and the state into .omi-plugins/. Refused
+                         while a run is open or a task worktree is left; deletes nothing in the repo and
+                         lists the old files to remove in a task PR. Re-running keeps what exists
   github project init [--title <text>]
                          Bootstrap this repo into OMI: find or create the Project (title, default: repo
-                         name), link it, write .omi/config.yaml and install templates/github/ into .github/
-                         where missing. Re-running changes nothing; never overwrites a file
+                         name), link it, write the github section of .omi-plugins/omi.config.yaml and
+                         install templates/github/ into .github/ where missing. Re-running changes nothing;
+                         never overwrites a file
   github project plan    Diff the Project's custom fields (config/github/project.yaml), views, built-in
                          workflows and Insights (views.yaml) and list items whose Status their type does
                          not use (status-transitions.yaml). Read-only; exits 1 while anything is pending,
@@ -131,10 +154,33 @@ Commands:
                          Post the handoff on the active Milestone (the one open Milestone In Progress or
                          In Review) with marker <date>-s<N>; the same text again changes nothing, a text
                          opening with an existing marker updates that comment. Redacted
+  profile list           Read-only: execution profiles not disabled in .omi-plugins/omi.config.json
+                         (harness, auth type, models, efforts) and whether each secret env is set;
+                         never prints a secret
+  skill list [--role <role>]
+                         Read-only: each role's default and allowed skills (agent-pack) and what each
+                         skill is for; the input for \`task run --skills\`
+  context plan [--role <role>]
+                         Read-only: measure the context a session starts with in the workspace and in
+                         a task workspace of each role (\`/context\`, no tokens) and classify every
+                         plugin, skill, MCP server and memory file as needed / unneeded / unknown;
+                         keep list: context.keep in omi.config.yaml
+  context apply [--dry-run] [--remove] [--bundled]
+                         Switch the workspace's unneeded items off in its .claude/settings.json only
+                         (enabledPlugins incl. @synced, skillOverrides, disableClaudeAiConnectors,
+                         deniedMcpServers; disableBundledSkills only with --bundled). Re-run changes
+                         nothing; --remove takes back what OMI added; other keys untouched
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
                          prune missing worktrees; orphans are reported, never removed
+  hook pre-tool-use      Coordinator plugin hook (hook input JSON on stdin): exit 2 with the reason when
+                         the call edits the main repo, commits on or pushes to develop/main, or uses
+                         --force; anything else (or no OMI workspace, bad input) passes
+  hook session-start     Coordinator plugin hook: short summary (latest handoff, Milestone status)
+  hook agent-pre-tool-use
+                         Agent-pack hook (hook input JSON on stdin): exit 2 when an agent runs git
+                         push or gh, or writes a file outside its task workspace (CLAUDE_PROJECT_DIR)
   version                Print the OMI version
   help                   Show this help
 
@@ -210,6 +256,15 @@ const REPO_WIDE = new Set([
   "project apply",
   "handoff show",
   "handoff post",
+  "workspace init",
+  "workspace migrate",
+  "context plan",
+  "context apply",
+  "profile list",
+  "skill list",
+  "hook pre-tool-use",
+  "hook session-start",
+  "hook agent-pre-tool-use",
 ]);
 
 const describe = (a: ProjectAction) =>
@@ -249,6 +304,20 @@ const describeRepo = (a: RepoAction) =>
             .map(([k, v]) => `${k}=${v}`)
             .join(", ")}`
         : `${a.what}: ${a.reason}`;
+
+const pickFlags = (v: {
+  profile?: string;
+  model?: string;
+  effort?: string;
+  reason?: string;
+  skills?: string[];
+}) => ({
+  profile: v.profile,
+  model: v.model,
+  effort: v.effort,
+  reason: v.reason,
+  skills: v.skills,
+});
 
 const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
 
@@ -317,6 +386,8 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         "github",
         "handoff",
         "release",
+        "workspace",
+        "hook",
       ].includes(command)
     ) {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
@@ -359,6 +430,15 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
                 `${(n ? "" : k).padEnd(12)} ${"  ".repeat(i.depth - 1)}#${i.number} ${i.title}${i.state === "CLOSED" ? " (closed)" : ""}${i.prs.map((p) => ` PR #${p.number}${p.draft ? " (draft)" : ""}`).join("")}`,
             );
           }),
+          ...(r.usage.ok
+            ? r.usage.value.flatMap((u) => [
+                `usage     #${u.issue} ${u.runId} (${u.models.join(",")}): ${formatUsage(u.usage)}`,
+                // Per profile once a run used one (`routing` = no profile chosen).
+                ...(u.byProfile.some((b) => b.profile !== NO_PROFILE)
+                  ? u.byProfile.map((b) => `            ${b.profile}: ${formatUsage(b.usage)}`)
+                  : []),
+              ])
+            : [`usage     ${fail(r.usage)}`]),
           ...(r.cleanup.ok
             ? humanScan(r.cleanup.value).map((l) => `run       ${l}`)
             : [`runs      ${fail(r.cleanup)}`]),
@@ -373,8 +453,59 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         ];
         return ok(r, lines(human));
       }
+      case "context plan": {
+        const p = contextPlan({ cwd, role: values.role });
+        return ok(p, lines(humanContextPlan(p)));
+      }
+      case "context apply": {
+        const r = contextApply({
+          cwd,
+          dryRun: values["dry-run"],
+          remove: values.remove,
+          bundled: values.bundled,
+        });
+        const verb = r.dryRun ? "would change" : r.changed ? "changed" : "unchanged";
+        return ok(
+          r,
+          lines([`settings  ${r.settingsPath} (${verb})`, ...r.diff.map((d) => `  ${d}`)]),
+        );
+      }
+      case "profile list": {
+        const profiles = listProfiles(locate(cwd).workspace);
+        return ok(
+          { profiles },
+          lines(
+            profiles.length
+              ? profiles.map(
+                  (p) =>
+                    `${p.name.padEnd(16)} ${p.harness} ${p.auth} ${p.secretEnv}=${p.secretSet ? "set" : "UNSET"}  models ${p.models.join(",")}  efforts ${p.efforts.join(",")}`,
+                )
+              : ["profiles  none active: steps use agents.routing"],
+          ),
+        );
+      }
+      case "skill list": {
+        const role = values.role === undefined ? undefined : Role.safeParse(values.role);
+        if (role && !role.success) {
+          throw new OmiError("USAGE_INVALID", `--role takes one of ${Role.options.join(", ")}`);
+        }
+        const r = skillList(role ? [role.data] : Role.options);
+        return ok(
+          r,
+          lines([
+            ...r.roles.map(
+              (x) =>
+                `${x.role.padEnd(22)} default ${x.default.join(",")}  allowed ${x.allowed.join(",") || "-"}`,
+            ),
+            "",
+            ...r.skills.map((s) => `${s.name.padEnd(30)} ${s.description}`),
+          ]),
+        );
+      }
       case "doctor": {
         const checks = doctor(cwd);
+        // Spends tokens: only on request (#219).
+        if (values.probe) checks.push(...probeProfiles(locate(cwd).workspace));
         return ok({ checks }, humanChecks(checks), checksExit(checks));
       }
       case "release check": {
@@ -414,12 +545,21 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
               `worktree  ${st.worktree ? `${st.worktree.path}${st.worktree.exists ? "" : " (missing)"}` : "none"}`,
               `branch    ${st.branch ?? "none"}`,
               ...st.transitions.map((t) => `  ${t.from ?? "-"} → ${t.to} (${t.event})`),
+              ...st.usage.map(
+                (u) =>
+                  `usage     ${u.stepId} r${u.round} a${u.attempt} ${u.role} (${u.profile ? `${u.profile} ` : ""}${u.actualModel ?? "unknown"}): ${formatUsage(u.usage)}`,
+              ),
+              ...(st.usage.length > 1
+                ? [
+                    `usage     total: ${formatUsage(sumUsage(st.usage.map((u) => u.usage)) as TokenUsage)}`,
+                  ]
+                : []),
             ]
           : [`no run for issue #${issue}`];
         return ok(st, lines(human));
       }
       case "task run": {
-        const r = taskRun({ cwd, fromSource: values["from-source"] }, issue);
+        const r = taskRun({ cwd, pick: pickFlags(values) }, issue);
         const human = [
           `run       ${r.run.id} (${r.state}, round ${r.round})`,
           ...(r.status
@@ -430,7 +570,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         return ok(r, lines(human));
       }
       case "task analyze": {
-        const r = taskAnalyze({ cwd, fromSource: values["from-source"] }, issue);
+        const r = taskAnalyze({ cwd, pick: pickFlags(values) }, issue);
         const human = [
           `run       ${r.run.id} (${r.state})`,
           ...(r.status
@@ -548,6 +688,32 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
           : "handoff   none found\n";
         return ok(h, human);
       }
+      case "hook pre-tool-use":
+      case "hook agent-pre-tool-use":
+      case "hook session-start": {
+        // Fail-open: a broken hook input or a failing lookup never blocks the session.
+        let input: HookInput = {};
+        try {
+          input = JSON.parse(readFileSync(0, "utf8"));
+        } catch {
+          // no or bad stdin: empty input
+        }
+        if (command === "hook session-start") return ok(null, sessionStart(input));
+        let why: string | null = null;
+        try {
+          why = command === "hook agent-pre-tool-use" ? agentPreToolUse(input) : preToolUse(input);
+        } catch {
+          why = null;
+        }
+        return why
+          ? {
+              code: 2,
+              stdout: "",
+              stderr: `${why}
+`,
+            }
+          : ok(null, "");
+      }
       case "handoff post": {
         const text = bodyFile();
         const milestone = values.milestone === undefined ? undefined : issueArg(values.milestone);
@@ -595,12 +761,31 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         const checks = projectValidate(repo(cwd).config);
         return ok({ checks }, humanChecks(checks), checksExit(checks));
       }
+      case "workspace init": {
+        const r = workspaceInit({ cwd, name: values.name, repo: values.repo });
+        const human = [
+          `workspace ${r.workspace}`,
+          ...r.items.map((i) => `${i.result.padEnd(9)} ${i.path}`),
+          "next      cd into the workspace, then `omi github project init` (skill omi-start)",
+        ];
+        return ok(r, lines(human));
+      }
+      case "workspace migrate": {
+        const r = workspaceMigrate({ cwd, name: values.name, dryRun: values["dry-run"] });
+        const human = [
+          `workspace ${r.workspace}${r.dryRun ? " (dry run: nothing changed)" : ""}`,
+          ...r.actions.map((a) => `${r.dryRun ? "would" : "done "}     ${a}`),
+          ...r.remove.map((f) => `remove    ${f} (old layout: git rm it in a task PR)`),
+          ...(r.dryRun ? [] : ["next      open Claude Code in the workspace; `omi doctor` there"]),
+        ];
+        return ok(r, lines(human));
+      }
       case "github project init": {
         const r = projectInit({ cwd, title: values.title });
         const human = [
           `project   #${r.project.number} ${r.project.title}${r.project.created ? " (created)" : ""}`,
           `repo      ${r.owner}/${r.repo}${r.linked ? " (linked)" : ""}`,
-          `config    ${r.config === "created" ? "created" : "kept"} .omi/config.yaml`,
+          `config    ${r.config === "created" ? "created" : "kept"} ${CONFIG_FILE}`,
           ...r.templates.copied.map((f) => `template  ${f}`),
           ...(r.templates.kept.length
             ? [`template  ${r.templates.kept.length} kept (already present)`]
@@ -673,16 +858,25 @@ const parse = (args: string[]) =>
     options: {
       output: { type: "string", default: "human" },
       help: { type: "boolean", short: "h" },
-      "from-source": { type: "boolean" },
       title: { type: "string" },
       "body-file": { type: "string" },
       "dry-run": { type: "boolean" },
       safe: { type: "boolean" },
       reason: { type: "string" },
+      profile: { type: "string" },
+      skills: { type: "string", multiple: true },
+      model: { type: "string" },
+      effort: { type: "string" },
       type: { type: "string" },
       parent: { type: "string" },
       on: { type: "string" },
       "approved-plan": { type: "string" },
       milestone: { type: "string" },
+      name: { type: "string" },
+      repo: { type: "string" },
+      role: { type: "string" },
+      remove: { type: "boolean" },
+      bundled: { type: "boolean" },
+      probe: { type: "boolean" },
     },
   });

@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { MergeReceipt } from "../../runtime/adapters/github/merge.ts";
 import { parseConfig } from "../../runtime/core/config.ts";
@@ -24,7 +24,7 @@ import {
   ownedRefs,
 } from "../../runtime/persistence/repository.ts";
 import { type CleanupOptions, cleanupRun } from "../../runtime/resources/cleanup.ts";
-import { ensureWorktree } from "../../runtime/resources/worktree.ts";
+import { ensureTaskWorkspace } from "../../runtime/resources/worktree.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -49,7 +49,18 @@ function merged() {
     issue: { repository: "o/repo", number: 5 },
     workflow: "dev-task",
   }).id;
-  const ws = ensureWorktree(db, { repoRoot: repo, config, issue: 5, branch: "feature/5-x", runId });
+  const workspace = join(base, "ws");
+  mkdirSync(workspace);
+  const ws = ensureTaskWorkspace(db, {
+    repoRoot: repo,
+    workspace,
+    config,
+    issue: 5,
+    branch: "feature/5-x",
+    runId,
+  });
+  // Role files OMI writes next to the clone before an agent run.
+  writeFileSync(join(dirname(ws.path), "AGENTS.md"), "rules\n");
   writeFileSync(join(ws.path, "a.txt"), "a\n");
   git(ws.path, "add", "a.txt");
   git(ws.path, "commit", "-q", "-m", "a");
@@ -70,7 +81,6 @@ function merged() {
   const stateDir = join(base, "state");
   mkdirSync(stateDir);
   const opts = (o: Partial<CleanupOptions> = {}): CleanupOptions => ({
-    repoRoot: repo,
     runId,
     receipt,
     tempRoot: stateDir,
@@ -85,7 +95,7 @@ const summary = (r: ReturnType<typeof cleanupRun>) => r.steps.map((s) => `${s.na
 const failedStep = (r: ReturnType<typeof cleanupRun>) =>
   r.steps.find((s) => s.status === "failed")?.name;
 
-test("squash merge: worktree, branch and temp dir removed without --force; replay is a no-op", () => {
+test("squash merge: task workspace (clone + branch) and temp dir removed; replay is a no-op", () => {
   const s = merged();
   assert.equal(git(s.repo, "branch", "--merged", "origin/develop").includes("feature/5-x"), false);
   const tmp = join(s.stateDir, "tmp-run5");
@@ -94,6 +104,7 @@ test("squash merge: worktree, branch and temp dir removed without --force; repla
   const r = cleanupRun(s.db, s.opts());
   assert.equal(r.state, "COMPLETED", JSON.stringify(r.steps));
   assert.equal(existsSync(s.wt), false);
+  assert.equal(existsSync(dirname(s.wt)), false);
   assert.equal(existsSync(tmp), false);
   assert.equal(git(s.repo, "branch", "--list", "feature/5-x"), "");
   assert.equal(git(s.repo, "ls-remote", "origin", "feature/5-x") !== "", true); // remote kept
@@ -127,20 +138,20 @@ test("no receipt or a tip that differs from the merged head: CLEANUP_FAILED, not
   assert.equal(existsSync(s.wt), true);
 });
 
-test("dirty or locked worktree: CLEANUP_FAILED, worktree and branch kept", () => {
+test("dirty clone or unknown files in the task workspace: CLEANUP_FAILED, everything kept", () => {
   const s = merged();
   writeFileSync(join(s.wt, "scratch.txt"), "x\n");
   const dirty = cleanupRun(s.db, s.opts());
   assert.deepEqual([dirty.state, failedStep(dirty)], ["CLEANUP_FAILED", "verify-clean-worktree"]);
   assert.ok(summary(dirty).includes("remove-worktree:skipped"));
   execFileSync("git", ["clean", "-fq"], { cwd: s.wt });
-  git(s.repo, "worktree", "lock", s.wt);
+  writeFileSync(join(dirname(s.wt), "notes.txt"), "mine\n");
   assert.match(
     cleanupRun(s.db, s.opts()).steps.find((x) => x.status === "failed")?.detail ?? "",
-    /locked/,
+    /unknown files: notes\.txt/,
   );
   assert.equal(existsSync(s.wt), true);
-  assert.match(git(s.repo, "branch", "--list", "feature/5-x"), /feature\/5-x/);
+  assert.match(git(s.wt, "branch", "--list", "feature/5-x"), /feature\/5-x/);
 });
 
 test("a held cleanup lease refuses a concurrent cleanup", () => {

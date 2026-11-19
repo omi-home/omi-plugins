@@ -2,10 +2,10 @@
 // a crash. Scan only reads. Apply acts only on what is positively verified: attempts left open
 // by a dead session (no live run lease), reports persisted but not posted, and runs whose PR
 // GitHub reports merged (finalized through the same safe path as `omi task finalize`).
-// Orphan worktrees are reported, never removed; nothing is ever forced.
+// Orphan task workspaces are reported, never removed; nothing is ever forced.
 
-import { existsSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { type GhRunner, spawnGh } from "../adapters/github/client.ts";
 import { prFacts, receiptOf } from "../adapters/github/merge.ts";
 import { OmiError } from "../core/errors/errors.ts";
@@ -51,7 +51,7 @@ const runLease = (r: { repository: string; issue: number }) => `task:${r.reposit
 
 export function cleanupScan(deps: { cwd: string; gh?: GhRunner }): ScanResult {
   const gh = deps.gh ?? spawnGh;
-  const { root, config } = repo(deps.cwd);
+  const { root, workspace, config } = repo(deps.cwd);
   const db = openState(statePath(deps.cwd));
   try {
     const runs = openRuns(db).map((run): ScanRun => {
@@ -76,18 +76,18 @@ export function cleanupScan(deps: { cwd: string; gh?: GhRunner }): ScanResult {
         leased: leaseActive(db, runLease(run)),
       };
     });
-    const omiRoot = resolve(root, config.git.worktreeRoot, config.github.repo);
-    const owned = liveRefs(db, "worktree");
-    const listed = listWorktrees(root);
-    const orphans = listed
-      .filter((w) => {
-        const rel = relative(omiRoot, w.path);
-        return (
-          rel && !rel.startsWith("..") && !isAbsolute(rel) && !owned.some((p) => same(p, w.path))
-        );
-      })
+    // Task workspaces are `<workspace>-task-<runId>/` siblings of the workspace.
+    const owned = liveRefs(db, "worktree").map((p) => dirname(p));
+    const prefix = `${basename(workspace)}-task-`;
+    const orphans = readdirSync(dirname(workspace))
+      .filter((f) => f.startsWith(prefix))
+      .map((f) => join(dirname(workspace), f))
+      .filter((p) => !owned.some((o) => same(o, p)));
+    // Worktrees of the old layout (before ADR-0002) that git can prune.
+    const prunable = listWorktrees(root)
+      .filter((w) => w.prunable)
       .map((w) => w.path);
-    return { runs, orphans, prunable: listed.filter((w) => w.prunable).map((w) => w.path) };
+    return { runs, orphans, prunable };
   } finally {
     db.close();
   }

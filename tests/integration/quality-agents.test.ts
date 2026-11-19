@@ -1,21 +1,23 @@
 // T5.3 Code/Security Reviewer, Manual/Automation QA, DevOps, live (costs tokens: OMI_LIVE=1):
-// each loads exactly its own packs; on a diff with an injection + hard-coded secret the Security
+// each sees exactly its default skills; on a diff with an injection + hard-coded secret the Security
 // Reviewer owns the finding and the Code Reviewer only routes it; Automation QA authors tests (not
 // just runs them); Manual QA reports through its section; DevOps stays in its scope.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildAgentLaunch, observeRun } from "../../runtime/adapters/claude/launch.ts";
+import { observeRun } from "../../runtime/adapters/claude/launch.ts";
 import type { Role } from "../../runtime/core/contracts.ts";
 import {
   acceptStepResult,
   buildTaskPacket,
   packetPrompt,
 } from "../../runtime/core/handoff/packet.ts";
+import { prepareAgent, spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
+import { roleSkills } from "../../runtime/resources/role-files.ts";
 
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 const live = process.env.OMI_LIVE === "1" && spawnSync("claude", ["--version"]).status === 0;
@@ -23,50 +25,29 @@ const skip = !live && "set OMI_LIVE=1 (costs tokens)";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
-const packId = (rel: string) =>
-  /^Pack-ID: (\S+)$/m.exec(readFileSync(join(pluginRoot, rel), "utf8"))?.[1] as string;
-const allIds = (readdirSync(join(pluginRoot, "resources"), { recursive: true }) as string[])
-  .filter((f) => f.endsWith(".md"))
-  .map((f) => packId(join("resources", f)));
-const idsOf = (role: Role) =>
-  [
-    ...readFileSync(join(pluginRoot, "agents", `${role}.md`), "utf8").matchAll(
-      /\$\{CLAUDE_PLUGIN_ROOT\}\/(resources\/\S+\.md)/g,
-    ),
-  ].map((m) => packId(m[1] as string));
-
-const READ = ["Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)"];
-const EDIT = [...READ, "Bash(git add*)", "Bash(git commit*)", "Bash(npm test)"];
+/** Skill canary (#199): an agent sees exactly the skills OMI installed for its step. */
+const allIds = readdirSync(join(pluginRoot, "agent-pack", "skill-library"));
+const idsOf = (role: Role) => roleSkills(pluginRoot, role).default;
 
 function launch(role: Role, prompt: string, cwd: string, edits: boolean) {
-  const l = buildAgentLaunch({
+  // The allowlisted env also drops NODE_TEST_CONTEXT: `npm test` inside the agent is not nested.
+  const l = prepareAgent({
     pluginRoot,
     role,
+    category: edits ? "implementation" : "review",
+    edits,
+    taskRoot: dirname(cwd),
     worktree: cwd,
     prompt,
-    fromSource: true,
-    acceptEdits: edits,
-    allowedTools: edits ? EDIT : READ,
+    checks: edits ? ["npm test"] : [],
   });
-  const r = spawnSync(
-    l.command,
-    [...l.args, "--setting-sources", "project,local", "--no-session-persistence"],
-    // Without this, `npm test` inside the agent thinks it is nested in this test run and skips.
-    {
-      cwd: l.cwd,
-      input: l.stdin,
-      encoding: "utf8",
-      timeout: 900_000,
-      env: { ...process.env, NODE_TEST_CONTEXT: undefined },
-    },
-  );
-  assert.equal(r.status, 0, r.stderr);
-  return observeRun(r.stdout);
+  return observeRun(spawnAgent(l));
 }
 
 /** Notes app at `base`; `change` (if any) is committed on top as the task's work. */
 function fixture(change: Record<string, string> = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "omi-t53-"));
+  const dir = join(mkdtempSync(join(tmpdir(), "omi-t53-")), "notes");
+  mkdirSync(dir);
   git(dir, "init", "-q", "-b", "main");
   git(dir, "config", "user.email", "t@example.invalid");
   git(dir, "config", "user.name", "t");
@@ -140,18 +121,18 @@ const ROLES: Role[] = [
   "devops-engineer",
 ];
 for (const role of ROLES) {
-  test(`live ${role}: loads exactly its own packs; model observed, effort unknown`, {
+  test(`live ${role}: sees exactly its default skills; model observed, effort unknown`, {
     skip,
   }, () => {
     const o = launch(
       role,
-      "Which rule packs did you load? Reply with their Pack-IDs only.",
+      "Which skills are available to you? Reply with their names only.",
       fixture().dir,
       false,
     );
     for (const id of idsOf(role)) assert.ok(o.result.includes(id), `${id} missing: ${o.result}`);
     for (const id of allIds.filter((x) => !idsOf(role).includes(x))) {
-      assert.ok(!o.result.includes(id), `foreign pack ${id}`);
+      assert.ok(!o.result.includes(id), `foreign skill ${id}`);
     }
     assert.match(o.actualModel, role.endsWith("reviewer") ? /^claude-opus-/ : /^claude-sonnet-/);
     assert.equal(o.actualEffort, "unknown");

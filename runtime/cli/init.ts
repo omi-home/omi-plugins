@@ -1,5 +1,6 @@
 // `omi github project init` (DevTask-0031 #63): bootstrap a repository into OMI. Finds or creates
-// the Project (by title), links it to the repo, writes .omi/config.yaml and installs the Issue
+// the Project (by title), links it to the repo, writes the github section of the workspace's
+// .omi-plugins/omi.config.yaml and installs the Issue
 // Forms / PR template from templates/github/. Read → diff → write: re-running changes nothing and
 // never overwrites a file. Fields, views, labels and protection follow with
 // `github project apply` and `github repo plan/apply` (see skills/omi-start).
@@ -14,8 +15,9 @@ import {
   type ProjectRef,
   projectByNumber,
 } from "../adapters/github/project.ts";
-import { CONFIG_PATH, loadConfig } from "../core/config.ts";
+import { CONFIG_PATH, loadConfig, readConfigData } from "../core/config.ts";
 import { OmiError } from "../core/errors/errors.ts";
+import { locate } from "../core/workspace.ts";
 
 const TEMPLATES = fileURLToPath(new URL("../../templates/github/", import.meta.url));
 
@@ -49,7 +51,7 @@ export function originRepo(url: string): { owner: string; repo: string } {
 }
 
 /** Every file under `dir`, as paths relative to it with `/` separators. */
-const files = (dir: string): string[] =>
+export const files = (dir: string): string[] =>
   readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((d) => d.isFile())
     .map((d) => relative(dir, join(d.parentPath, d.name)).replaceAll("\\", "/"))
@@ -62,9 +64,11 @@ export function projectInit(
   if (o.title !== undefined && !o.title.trim()) {
     throw new OmiError("USAGE_INVALID", "--title must not be empty");
   }
-  const root = git(o.cwd, "rev-parse", "--show-toplevel");
-  const hasConfig = existsSync(join(root, CONFIG_PATH));
-  const existing = hasConfig ? loadConfig(root).github : undefined;
+  const { root, workspace } = locate(o.cwd);
+  // A missing file or the comment-only template from `workspace init` is not a config yet.
+  const data = readConfigData(workspace);
+  const hasConfig = data !== undefined && data !== null;
+  const existing = hasConfig ? loadConfig(workspace).github : undefined;
   const { owner, repo } = existing ?? originRepo(git(root, "remote", "get-url", "origin"));
 
   let project: ProjectRef & { created: boolean };
@@ -89,17 +93,19 @@ export function projectInit(
   const linked = linkProject(owner, repo, project, run);
 
   if (!hasConfig) {
-    mkdirSync(join(root, ".omi"), { recursive: true });
+    const file = join(workspace, CONFIG_PATH);
+    const template = existsSync(file) ? readFileSync(file, "utf8") : "";
+    mkdirSync(dirname(file), { recursive: true });
     // JSON strings are valid YAML: a repo named 2048 or true stays a string.
     writeFileSync(
-      join(root, CONFIG_PATH),
+      file,
       `# Written by \`omi github project init\`. Add this repo's checks (lint/build/test commands)
 # before \`omi task run\`; see runtime/core/config.ts for every setting and its default.
 github:
   owner: ${JSON.stringify(owner)}
   repo: ${JSON.stringify(repo)}
   projectNumber: ${project.number}
-`,
+${template}`,
     );
   }
 

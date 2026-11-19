@@ -20,9 +20,9 @@ function repo(version = "0.2.0", pkg = version, changelog = `## [${version}] - 2
   const root = join(base, "repo");
   git(root, "config", "user.email", "t@example.invalid");
   git(root, "config", "user.name", "t");
-  mkdirSync(join(root, ".omi"));
+  mkdirSync(join(root, ".omi-plugins"));
   writeFileSync(
-    join(root, ".omi", "config.yaml"),
+    join(root, ".omi-plugins", "omi.config.yaml"),
     "github:\n  owner: o\n  repo: repo\n  projectNumber: 2\n",
   );
   git(root, "add", ".");

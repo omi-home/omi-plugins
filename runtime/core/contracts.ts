@@ -154,6 +154,8 @@ export const WorkflowEventType = z.enum([
   "QA_PASSED",
   "QA_FAILED",
   "MERGE_VERIFIED",
+  /** No PR to merge (Spike, Issue-only task): no commit, no remote branch, Issue closed. */
+  "NO_CODE_VERIFIED",
   "CLEANUP_STARTED",
   "CLEANUP_SUCCEEDED",
   "CLEANUP_ERROR",
@@ -239,6 +241,72 @@ export interface Check {
   detail: string;
   code?: ErrorCode;
 }
+
+// ---- Execution profiles: <workspace>/.omi-plugins/omi.config.json (ADR-0002, Feature-0021 #137) ----
+
+/** Harnesses an execution profile can run on (v1: Claude Code only). */
+export const Harness = z.enum(["claudecode"]);
+export type Harness = z.infer<typeof Harness>;
+
+/** `claude --effort` levels a profile may offer. */
+export const ProfileEffort = z.enum(["low", "medium", "high", "xhigh", "max"]);
+export type ProfileEffort = z.infer<typeof ProfileEffort>;
+
+/** Name of an environment variable holding a secret: profiles never hold the value itself. */
+const envName = z
+  .string()
+  .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "expected an environment variable name");
+
+/** A gateway sees code and prompts: https only, plain http only to this machine. */
+const gatewayUrl = z.url({ protocol: /^https?$/ }).refine((u) => {
+  const { protocol, hostname } = new URL(u);
+  return protocol === "https:" || ["localhost", "127.0.0.1", "[::1]"].includes(hostname);
+}, "expected https (http only for localhost)");
+
+export const ProfileAuth = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("subscription"), tokenEnv: envName }),
+  z.strictObject({
+    type: z.literal("gateway"),
+    baseUrl: gatewayUrl,
+    scheme: z.enum(["x-api-key", "bearer"]),
+    keyEnv: envName,
+  }),
+]);
+export type ProfileAuth = z.infer<typeof ProfileAuth>;
+
+const unique = <T>(a: T[]) => new Set(a).size === a.length;
+
+export const Profile = z.discriminatedUnion("harness", [
+  z.strictObject({
+    name: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "expected lowercase letters, digits, -"),
+    harness: z.literal(Harness.enum.claudecode),
+    disabled: z.boolean().default(false),
+    auth: ProfileAuth,
+    models: z
+      .array(z.string().regex(/^[\w.:[\]-]{1,100}$/, "expected a model id"))
+      .min(1)
+      .max(20)
+      .refine(unique, "duplicate model"),
+    efforts: z.array(ProfileEffort).min(1).refine(unique, "duplicate effort"),
+  }),
+]);
+export type Profile = z.infer<typeof Profile>;
+
+export const ProfilesFile = z.strictObject({
+  profiles: z
+    .array(Profile)
+    .max(20)
+    .default([])
+    .refine((ps) => unique(ps.map((p) => p.name)), "duplicate profile name"),
+});
+export type ProfilesFile = z.infer<typeof ProfilesFile>;
+
+/**
+ * How a harness run said its profile is out of quota (#218, Spike-0009 Q4): a subscription sends
+ * `rate_limit_event` with `status=rejected` and/or fails with 429; a gateway only fails with 402.
+ */
+export const QuotaSignal = z.enum(["rate_limit_rejected", "http_429", "http_402"]);
+export type QuotaSignal = z.infer<typeof QuotaSignal>;
 
 export const Severity = z.enum(["critical", "high", "medium", "low", "info"]);
 
@@ -333,6 +401,8 @@ export const TaskPacket = z.strictObject({
   readOnlyArtifacts: z.array(relPath).max(50),
   /** Deterministic checks the runtime already ran on this worktree this round (review steps). */
   checkResults: z.array(CheckRun).max(10).optional(),
+  /** An earlier attempt of this step was cut (quota, crash): its edits may be in the worktree. */
+  priorAttemptCut: z.literal(true).optional(),
   outputSchema: z.literal(STEP_RESULT_SCHEMA),
 });
 export type TaskPacket = z.infer<typeof TaskPacket>;
@@ -346,6 +416,10 @@ export const TokenUsage = z.strictObject({
   outputTokens: z.int().min(0),
   cacheReadTokens: z.int().min(0).optional(),
   cacheCreationTokens: z.int().min(0).optional(),
+  thinkingTokens: z.int().min(0).optional(),
+  /** Host `total_cost_usd`: computed from list prices, an estimate behind a gateway. */
+  costUsd: z.number().min(0).optional(),
+  numTurns: z.int().min(0).optional(),
 });
 
 /** Proposed rewrite of one `<!-- omi:section=… -->` of the Issue body; only the CLI writes it. */
@@ -409,6 +483,16 @@ export const StepComment = z
     actualModel: z.string().nullable(), // observed, or "unknown"; null only for omi-cli
     requestedEffort: z.string().nullable(),
     actualEffort: z.literal("unknown").nullable(), // not observable (ADR-0001 D2)
+    /** Execution profile the Coordinator chose and why (Feature-0021 #137); absent = routing. */
+    profile: z.string().max(40).optional(),
+    selectionReason: text(500).optional(),
+    /** Skills installed for the step (DevTask-0065 #199): role defaults + chosen + rework. */
+    skills: z
+      .array(z.string().regex(/^[a-z0-9-]{1,60}$/))
+      .max(30)
+      .optional(),
+    /** A thinking block was seen in the transcript: the observable trace of effort. */
+    thinkingObserved: z.boolean().optional(),
     commitSha: sha.optional(),
     status: StepOutcome,
     summary: text(2000),
@@ -468,6 +552,8 @@ export const CleanupResult = z
         headSha: sha,
       })
       .nullable(),
+    /** Task without code: no PR, no remote branch, no commit (stands in for the merge). */
+    noCode: z.literal(true).optional(),
     steps: z
       .array(
         z.strictObject({
@@ -479,8 +565,8 @@ export const CleanupResult = z
       .min(1),
     state: WorkflowState.extract(["COMPLETED", "CLEANUP_FAILED"]),
   })
-  .refine((r) => r.state !== "COMPLETED" || r.pr?.merged, {
-    message: "COMPLETED requires a verified merge",
+  .refine((r) => r.state !== "COMPLETED" || r.pr?.merged || r.noCode, {
+    message: "COMPLETED requires a verified merge (or a verified task without code)",
     path: ["pr", "merged"],
   })
   .refine((r) => (r.state === "COMPLETED") === r.steps.every((s) => s.status !== "failed"), {
@@ -488,6 +574,36 @@ export const CleanupResult = z
     path: ["state"],
   });
 export type CleanupResult = z.infer<typeof CleanupResult>;
+
+// ---- Context at session start (`omi context plan`, DevTask-0066 #201) ----
+
+/** What a `/context` row belongs to; `apply` (#202) has a setting per kind except agent. */
+export const ContextItemKind = z.enum(["plugin", "skill", "mcp", "memory", "agent"]);
+export type ContextItemKind = z.infer<typeof ContextItemKind>;
+
+/** OMI needs it, does not need it, or the PO decides. */
+export const ContextClass = z.enum(["needed", "unneeded", "unknown"]);
+export type ContextClass = z.infer<typeof ContextClass>;
+
+const tokens = z.int().min(0);
+
+/** Parsed `/context` output of `claude -p` (markdown tables, no model call). */
+export const ContextUsage = z.strictObject({
+  total: tokens,
+  /** Category rows ("System tools", "Skills", ...): reported, not switchable as such. */
+  categories: z.array(z.strictObject({ name: text(100), tokens })).max(50),
+  items: z
+    .array(
+      z.strictObject({
+        kind: ContextItemKind,
+        id: text(500),
+        source: z.string().max(200),
+        tokens,
+      }),
+    )
+    .max(1000),
+});
+export type ContextUsage = z.infer<typeof ContextUsage>;
 
 // ---- Validation entry point ----
 

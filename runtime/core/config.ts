@@ -1,11 +1,20 @@
 // OMI configuration contract with safe defaults (spec §3, §7, §9, §14, §20).
-// Project config lives in <repo>/.omi/config.yaml; plugin config/ holds only default policies.
+// Project config lives in <workspace>/.omi-plugins/omi.config.yaml (ADR-0002 D1); plugin config/
+// holds only default policies.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-import { GateCheck, parseContract, Role } from "./contracts.ts";
+import {
+  GateCheck,
+  type Profile,
+  ProfileEffort,
+  ProfilesFile,
+  parseContract,
+  Role,
+} from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
+import { CONFIG_FILE, PROFILES_FILE } from "./workspace.ts";
 
 const ModelAlias = z.enum(["sonnet", "opus", "haiku"]);
 const Effort = z.enum(["low", "medium", "high"]);
@@ -47,7 +56,6 @@ export const OmiConfig = z.strictObject({
     .strictObject({
       baseBranch: z.string().min(1).default("develop"),
       releaseBranch: z.string().min(1).default("main"),
-      worktreeRoot: z.string().min(1).default("../.omi-worktrees"),
       mergeMethod: z.enum(["squash", "merge", "rebase"]).default("squash"),
     })
     .prefault({}),
@@ -70,6 +78,12 @@ export const OmiConfig = z.strictObject({
     .prefault({}),
   /** Unset checks are skipped; a repo with none configured has no deterministic gate. */
   checks: GateChecks.prefault({}),
+  context: z
+    .strictObject({
+      /** Context items the PO keeps (`omi context plan`): plugin/skill/MCP server names, paths. */
+      keep: z.array(z.string().min(1).max(500)).max(200).default([]),
+    })
+    .prefault({}),
   cleanup: z
     .strictObject({
       // Remote branch deletion is never assumed safe (spec §14).
@@ -83,22 +97,145 @@ export type OmiConfig = z.infer<typeof OmiConfig>;
 export const parseConfig = (input: unknown): OmiConfig =>
   parseContract(OmiConfig, input, "config", "CONFIG_INVALID");
 
-export const CONFIG_PATH = ".omi/config.yaml";
+export const CONFIG_PATH = CONFIG_FILE;
 
-/** Reads and validates `<repoRoot>/.omi/config.yaml`. Errors never echo config values. */
-export function loadConfig(repoRoot: string): OmiConfig {
+/** Parsed YAML of the workspace config, or undefined when the file is missing. */
+export function readConfigData(workspace: string): unknown {
   let text: string;
   try {
-    text = readFileSync(join(repoRoot, CONFIG_PATH), "utf8");
+    text = readFileSync(join(workspace, CONFIG_PATH), "utf8");
   } catch {
-    throw new OmiError("CONFIG_INVALID", `${CONFIG_PATH} not found`);
+    return undefined;
   }
-  let data: unknown;
   try {
-    data = parse(text);
+    return parse(text) ?? null;
   } catch (e) {
     const line = (e as { linePos?: { line: number }[] }).linePos?.[0]?.line;
     throw new OmiError("CONFIG_INVALID", `${CONFIG_PATH}: invalid YAML`, { line });
   }
+}
+
+/** Reads and validates `<workspace>/.omi-plugins/omi.config.yaml`. Errors never echo values. */
+export function loadConfig(workspace: string): OmiConfig {
+  const data = readConfigData(workspace);
+  if (data === undefined) throw new OmiError("CONFIG_INVALID", `${CONFIG_PATH} not found`);
+  if (data === null) {
+    throw new OmiError(
+      "CONFIG_INVALID",
+      `${CONFIG_PATH} has no settings yet: run \`omi github project init\``,
+    );
+  }
   return parseConfig(data);
+}
+
+/**
+ * Execution profiles of this machine (`<workspace>/.omi-plugins/omi.config.json`, never committed).
+ * A missing file means no profile: steps keep the `agents.routing` defaults. Errors never echo values.
+ */
+export function loadProfiles(workspace: string): Profile[] {
+  let text: string;
+  try {
+    text = readFileSync(join(workspace, PROFILES_FILE), "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new OmiError("CONFIG_INVALID", `${PROFILES_FILE}: unreadable`);
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(text.replace(/^﻿/, "")); // editors on Windows may write a BOM
+  } catch {
+    throw new OmiError("CONFIG_INVALID", `${PROFILES_FILE}: invalid JSON`);
+  }
+  return parseContract(ProfilesFile, data, PROFILES_FILE, "CONFIG_INVALID").profiles;
+}
+
+/** The env variable a profile's secret is read from. */
+export const secretEnv = (p: Profile) =>
+  p.auth.type === "subscription" ? p.auth.tokenEnv : p.auth.keyEnv;
+
+export interface ProfileListing {
+  name: string;
+  harness: Profile["harness"];
+  auth: Profile["auth"]["type"];
+  /** Variable name only; its value is never read out, just whether it is set. */
+  secretEnv: string;
+  secretSet: boolean;
+  models: string[];
+  efforts: Profile["efforts"];
+}
+
+/** Profiles the Coordinator may pick from: every profile not `disabled`. */
+export const listProfiles = (
+  workspace: string,
+  env: NodeJS.ProcessEnv = process.env,
+): ProfileListing[] =>
+  loadProfiles(workspace)
+    .filter((p) => !p.disabled)
+    .map((p) => ({
+      name: p.name,
+      harness: p.harness,
+      auth: p.auth.type,
+      secretEnv: secretEnv(p),
+      secretSet: Boolean(env[secretEnv(p)]),
+      models: p.models,
+      efforts: p.efforts,
+    }));
+
+/** The execution choice the Coordinator made for the agent steps of one `task run`/`task analyze`. */
+export interface Selection {
+  profile: Profile;
+  model: string;
+  effort: ProfileEffort;
+  reason: string;
+}
+
+/**
+ * Validates `--profile/--model/--effort/--reason` against the machine's profiles (#217). No
+ * `--profile` means no selection: steps keep the `agents.routing` defaults. Model and effort
+ * default to the first the profile lists; the reason is required and recorded; the profile's
+ * secret must be set, so nothing starts that cannot authenticate.
+ */
+export function selectProfile(
+  profiles: Profile[],
+  o: { profile?: string; model?: string; effort?: string; reason?: string },
+  env: NodeJS.ProcessEnv = process.env,
+): Selection | undefined {
+  if (o.profile === undefined) {
+    if (o.model !== undefined || o.effort !== undefined) {
+      throw new OmiError("USAGE_INVALID", "--model and --effort need --profile");
+    }
+    return undefined;
+  }
+  const profile = profiles.find((p) => p.name === o.profile);
+  if (!profile) {
+    throw new OmiError(
+      "USAGE_INVALID",
+      `no profile ${o.profile} in ${PROFILES_FILE}: see \`omi profile list\``,
+    );
+  }
+  if (profile.disabled) throw new OmiError("USAGE_INVALID", `profile ${profile.name} is disabled`);
+  if (!env[secretEnv(profile)]) {
+    throw new OmiError(
+      "CONFIG_INVALID",
+      `profile ${profile.name}: ${secretEnv(profile)} is not set`,
+    );
+  }
+  const model = o.model ?? profile.models[0];
+  if (!model || !profile.models.includes(model)) {
+    throw new OmiError(
+      "USAGE_INVALID",
+      `profile ${profile.name} offers models ${profile.models.join(", ")}`,
+    );
+  }
+  const effort = o.effort ?? profile.efforts[0];
+  const parsed = ProfileEffort.safeParse(effort);
+  if (!parsed.success || !profile.efforts.includes(parsed.data)) {
+    throw new OmiError(
+      "USAGE_INVALID",
+      `profile ${profile.name} offers efforts ${profile.efforts.join(", ")}`,
+    );
+  }
+  const reason = o.reason?.trim();
+  if (!reason) throw new OmiError("USAGE_INVALID", "--reason is required with --profile");
+  return { profile, model, effort: parsed.data, reason };
 }

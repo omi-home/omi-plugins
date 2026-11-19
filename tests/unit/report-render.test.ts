@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { parseContract, ReportCategory, StepComment } from "../../runtime/core/contracts.ts";
-import { renderStepReport } from "../../runtime/reporting/render.ts";
+import { formatUsage, renderStepReport, sumUsage } from "../../runtime/reporting/render.ts";
 
 const FIXTURES = new URL("../fixtures/reports/", import.meta.url);
 
@@ -96,4 +96,46 @@ test("sanitization: secrets redacted, forged markers and table breaks neutralize
   assert.match(out, /a \\\| b c/);
   const fenced = renderStepReport(comment({ category: "review", summary: "log:\n```\nboom" }));
   assert.equal(fenced.match(/```/g)?.length, 2, "dangling fence closed");
+});
+
+test("usage (#203): summed per run; cache hit and list-price cost shown only when known", () => {
+  const total = sumUsage([
+    { inputTokens: 10, outputTokens: 5, cacheReadTokens: 30, costUsd: 0.01, numTurns: 2 },
+    { inputTokens: 20, outputTokens: 5, cacheCreationTokens: 40, costUsd: 0.02 },
+  ]);
+  assert.deepEqual(total, {
+    inputTokens: 30,
+    outputTokens: 10,
+    cacheReadTokens: 30,
+    cacheCreationTokens: 40,
+    thinkingTokens: undefined,
+    costUsd: 0.03,
+    numTurns: 2,
+  });
+  assert.equal(
+    formatUsage(total as NonNullable<typeof total>),
+    "30 in / 10 out tokens · 30 cache read (30% hit) · 2 turns · ≈ $0.0300 (list-price estimate)",
+  );
+  assert.equal(formatUsage({ inputTokens: 1, outputTokens: 2 }), "1 in / 2 out tokens");
+  assert.equal(sumUsage([]), undefined);
+});
+
+test("skills row: the installed skills; the reason shows there when no profile carries it (#199)", () => {
+  const out = renderStepReport(
+    comment({
+      category: "implementation",
+      skills: ["backend-implementation", "minimal-change"],
+      selectionReason: "small diff",
+    }),
+  );
+  assert.match(out, /\| Skills \| backend-implementation, minimal-change \(small diff\) \|/);
+  const withProfile = renderStepReport(
+    comment({
+      category: "review",
+      skills: ["minimal-change"],
+      profile: "sub-a",
+      selectionReason: "spread",
+    }),
+  );
+  assert.match(withProfile, /\| Skills \| minimal-change \|/);
 });
