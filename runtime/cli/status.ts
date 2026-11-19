@@ -10,7 +10,7 @@ import { repoValidate } from "../adapters/github/repo.ts";
 import { type Check, ProjectStatus, type TokenUsage } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
 import { openState, statePath } from "../persistence/db.ts";
-import { latestRun, runUsage } from "../persistence/repository.ts";
+import { type AttemptUsage, latestRun, runUsage } from "../persistence/repository.ts";
 import { sumUsage } from "../reporting/render.ts";
 import { cleanupScan, type ScanResult } from "./cleanup.ts";
 import { repo } from "./task.ts";
@@ -41,9 +41,25 @@ export interface StatusResult {
 export interface IssueUsage {
   issue: number;
   runId: string;
-  /** Observed models of its agent attempts (profiles arrive with Feature-0021 #137). */
+  /** Observed models of its agent attempts. */
   models: string[];
   usage: TokenUsage;
+  /** Usage per execution profile (`routing` = no profile chosen), #217. */
+  byProfile: { profile: string; usage: TokenUsage }[];
+}
+
+/** Attempts without a profile ran on `agents.routing`. */
+export const NO_PROFILE = "routing";
+
+/** Summed usage per execution profile, in first-use order. */
+export function usageByProfile(
+  rows: Pick<AttemptUsage, "profile" | "usage">[],
+): IssueUsage["byProfile"] {
+  const key = (r: Pick<AttemptUsage, "profile">) => r.profile ?? NO_PROFILE;
+  return [...new Set(rows.map(key))].map((profile) => ({
+    profile,
+    usage: sumUsage(rows.filter((r) => key(r) === profile).map((r) => r.usage)) as TokenUsage,
+  }));
 }
 
 /** Local state only: per Issue, the summed usage of its latest run. */
@@ -56,7 +72,7 @@ export function issueUsage(cwd: string, repository: string, issues: number[]): I
       const usage = sumUsage(rows.map((r) => r.usage));
       if (!run || !usage) return [];
       const models = [...new Set(rows.map((r) => r.actualModel ?? "unknown"))];
-      return [{ issue: number, runId: run.id, models, usage }];
+      return [{ issue: number, runId: run.id, models, usage, byProfile: usageByProfile(rows) }];
     });
   } finally {
     db.close();

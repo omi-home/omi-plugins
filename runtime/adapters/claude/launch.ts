@@ -2,13 +2,14 @@
 // task workspace (role files next to the clone are loaded natively), plugin from `--plugin-dir`,
 // a fresh CLAUDE_CONFIG_DIR per run and an env built from an allowlist, never the host's env.
 import { isAbsolute, join, relative } from "node:path";
+import { type Selection, secretEnv } from "../../core/config.ts";
 import type { Role, TokenUsage } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 
 export const PLUGIN_NAME = "omi-engineering";
 /** Agent pack inside the plugin root (ADR-0003 D3): the only plugin an agent run loads. */
 export const AGENT_PACK = "agent-pack";
-/** Subscription token (`claude setup-token`); a profile supplies it later (Feature-0021 #137). */
+/** Subscription token (`claude setup-token`); with a profile, the profile supplies it (#217). */
 export const AUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN";
 
 /**
@@ -75,6 +76,23 @@ export function agentEnv(host: NodeJS.ProcessEnv): Record<string, string> {
   return env;
 }
 
+/**
+ * Auth env of a profile (#217): the secret is read from the variable the profile names and set
+ * under the one name Claude Code reads for that auth; the host's own auth variables never pass
+ * (`ANTHROPIC_API_KEY` would win over an OAuth token, Spike-0009 Q3).
+ */
+export function profileEnv(sel: Selection, host: NodeJS.ProcessEnv): Record<string, string> {
+  const name = secretEnv(sel.profile);
+  const secret = host[name];
+  if (!secret)
+    throw new OmiError("CONFIG_INVALID", `profile ${sel.profile.name}: ${name} is not set`);
+  const a = sel.profile.auth;
+  if (a.type === "subscription") return { [AUTH_ENV]: secret };
+  return a.scheme === "x-api-key"
+    ? { ANTHROPIC_BASE_URL: a.baseUrl, ANTHROPIC_API_KEY: secret }
+    : { ANTHROPIC_BASE_URL: a.baseUrl, ANTHROPIC_AUTH_TOKEN: secret };
+}
+
 export function buildAgentLaunch(o: {
   pluginRoot: string;
   role: Role;
@@ -88,6 +106,8 @@ export function buildAgentLaunch(o: {
   /** Let the agent edit files in its worktree (implementing roles only). */
   acceptEdits?: boolean;
   hostEnv?: NodeJS.ProcessEnv;
+  /** Profile, model and effort the Coordinator chose; none keeps the agent's own defaults. */
+  selection?: Selection;
 }): AgentLaunch {
   for (const [name, p] of [
     ["pluginRoot", o.pluginRoot],
@@ -99,6 +119,12 @@ export function buildAgentLaunch(o: {
   const rel = relative(o.taskRoot, o.worktree);
   const outside = rel.startsWith("..") || isAbsolute(rel);
   const configDir = join(o.taskRoot, ".omi-home", "claude");
+  const host = o.hostEnv ?? process.env;
+  const sel = o.selection;
+  const base = agentEnv(host);
+  if (sel) {
+    for (const k of Object.keys(base)) if (k.toUpperCase() === AUTH_ENV) delete base[k];
+  }
   return {
     command: "claude",
     args: [
@@ -112,13 +138,18 @@ export function buildAgentLaunch(o: {
       ...(outside ? ["--add-dir", o.worktree] : []),
       ...(o.allowedTools?.length ? ["--allowedTools", ...o.allowedTools] : []),
       ...(o.acceptEdits ? ["--permission-mode", "acceptEdits"] : []),
+      ...(sel ? ["--model", sel.model, "--effort", sel.effort] : []),
       "--no-session-persistence",
       "--output-format",
       "stream-json",
       "--verbose",
     ],
     cwd: o.taskRoot,
-    env: { ...agentEnv(o.hostEnv ?? process.env), CLAUDE_CONFIG_DIR: configDir },
+    env: {
+      ...base,
+      ...(sel ? profileEnv(sel, host) : {}),
+      CLAUDE_CONFIG_DIR: configDir,
+    },
     configDir,
     stdin: o.prompt,
   };
@@ -128,6 +159,11 @@ export interface AgentObservation {
   /** From assistant `message.model` (ADR-0001 D2); "unknown" when none observed. */
   actualModel: string;
   actualEffort: "unknown";
+  /**
+   * Whether any assistant turn carried a thinking block: the observable trace of effort
+   * (`thinking_tokens` is 0 behind a gateway, Spike-0009 addendum 2).
+   */
+  thinkingObserved: boolean;
   isError: boolean;
   result: string;
   /** `<tool>:<file_path?>` for every permission the run was denied. */
@@ -171,6 +207,14 @@ export function observeRun(streamJson: string): AgentObservation {
   return {
     actualModel: models.length ? models.join(",") : "unknown",
     actualEffort: "unknown",
+    thinkingObserved: events.some(
+      (e) =>
+        e.type === "assistant" &&
+        Array.isArray(e.message?.content) &&
+        e.message.content.some(
+          (b: { type?: unknown }) => b?.type === "thinking" || b?.type === "redacted_thinking",
+        ),
+    ),
     isError: Boolean(result.is_error),
     result: String(result.result ?? ""),
     permissionDenials: (result.permission_denials ?? []).map(

@@ -5,7 +5,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-import { GateCheck, type Profile, ProfilesFile, parseContract, Role } from "./contracts.ts";
+import {
+  GateCheck,
+  type Profile,
+  ProfileEffort,
+  ProfilesFile,
+  parseContract,
+  Role,
+} from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
 import { CONFIG_FILE, PROFILES_FILE } from "./workspace.ts";
 
@@ -173,3 +180,62 @@ export const listProfiles = (
       models: p.models,
       efforts: p.efforts,
     }));
+
+/** The execution choice the Coordinator made for the agent steps of one `task run`/`task analyze`. */
+export interface Selection {
+  profile: Profile;
+  model: string;
+  effort: ProfileEffort;
+  reason: string;
+}
+
+/**
+ * Validates `--profile/--model/--effort/--reason` against the machine's profiles (#217). No
+ * `--profile` means no selection: steps keep the `agents.routing` defaults. Model and effort
+ * default to the first the profile lists; the reason is required and recorded; the profile's
+ * secret must be set, so nothing starts that cannot authenticate.
+ */
+export function selectProfile(
+  profiles: Profile[],
+  o: { profile?: string; model?: string; effort?: string; reason?: string },
+  env: NodeJS.ProcessEnv = process.env,
+): Selection | undefined {
+  if (o.profile === undefined) {
+    if (o.model !== undefined || o.effort !== undefined) {
+      throw new OmiError("USAGE_INVALID", "--model and --effort need --profile");
+    }
+    return undefined;
+  }
+  const profile = profiles.find((p) => p.name === o.profile);
+  if (!profile) {
+    throw new OmiError(
+      "USAGE_INVALID",
+      `no profile ${o.profile} in ${PROFILES_FILE}: see \`omi profile list\``,
+    );
+  }
+  if (profile.disabled) throw new OmiError("USAGE_INVALID", `profile ${profile.name} is disabled`);
+  if (!env[secretEnv(profile)]) {
+    throw new OmiError(
+      "CONFIG_INVALID",
+      `profile ${profile.name}: ${secretEnv(profile)} is not set`,
+    );
+  }
+  const model = o.model ?? profile.models[0];
+  if (!model || !profile.models.includes(model)) {
+    throw new OmiError(
+      "USAGE_INVALID",
+      `profile ${profile.name} offers models ${profile.models.join(", ")}`,
+    );
+  }
+  const effort = o.effort ?? profile.efforts[0];
+  const parsed = ProfileEffort.safeParse(effort);
+  if (!parsed.success || !profile.efforts.includes(parsed.data)) {
+    throw new OmiError(
+      "USAGE_INVALID",
+      `profile ${profile.name} offers efforts ${profile.efforts.join(", ")}`,
+    );
+  }
+  const reason = o.reason?.trim();
+  if (!reason) throw new OmiError("USAGE_INVALID", "--reason is required with --profile");
+  return { profile, model, effort: parsed.data, reason };
+}

@@ -25,12 +25,19 @@ const list = (items: string[]) => (items.length ? items.map((i) => `- ${i}`).joi
 function model(c: StepComment): string {
   if (c.executor === "omi-cli") return "n/a (omi-cli)";
   const source = c.actualModel === "unknown" ? "not observed" : "observed";
-  return `requested ${c.requestedModel} · actual ${c.actualModel} (${source})`;
+  const profile = c.profile ? `profile ${c.profile} (${c.selectionReason ?? "no reason"}) · ` : "";
+  return `${profile}requested ${c.requestedModel} · actual ${c.actualModel} (${source})`;
 }
 const effort = (c: StepComment) =>
   c.executor === "omi-cli"
     ? "n/a (omi-cli)"
-    : `requested ${c.requestedEffort} · actual unknown (not observable)`;
+    : `requested ${c.requestedEffort} · actual unknown (not observable)${
+        c.thinkingObserved === undefined
+          ? ""
+          : c.thinkingObserved
+            ? " · thinking observed"
+            : " · no thinking observed"
+      }`;
 
 /** Field-wise sum; an optional field stays absent only when no part has it. */
 export function sumUsage(parts: TokenUsage[]): TokenUsage | undefined {

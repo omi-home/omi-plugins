@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { agentEnv, buildAgentLaunch, observeRun } from "../../runtime/adapters/claude/launch.ts";
+import type { Selection } from "../../runtime/core/config.ts";
 import { spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
 
 const win = process.platform === "win32";
@@ -163,6 +164,7 @@ test("observeRun: model from assistant messages, not modelUsage; effort unknown;
   assert.deepEqual(observeRun(transcript), {
     actualModel: "claude-sonnet-5-5",
     actualEffort: "unknown",
+    thinkingObserved: false,
     isError: false,
     result: "BLOCKED: rule pack unreadable",
     permissionDenials: ["Read:E:\\p\\r.md"],
@@ -183,4 +185,77 @@ test("observeRun: thinking tokens from usage.output_tokens_details (Spike-0010),
   assert.equal(think({ output_tokens_details: { thinking_tokens: 9 } }), 9);
   assert.equal(think({ thinking_tokens: 4 }), 4);
   assert.equal(think({}), undefined);
+});
+
+const profile = (auth: Selection["profile"]["auth"]): Selection => ({
+  profile: {
+    name: "p1",
+    harness: "claudecode",
+    disabled: false,
+    auth,
+    models: ["claude-opus-5-5"],
+    efforts: ["high"],
+  },
+  model: "claude-opus-5-5",
+  effort: "high",
+  reason: "complex task",
+});
+
+test("profile (#217): model/effort passed; auth env from the profile only, host auth stays out", () => {
+  const base = {
+    pluginRoot: root,
+    role: "code-reviewer" as const,
+    taskRoot: task,
+    worktree: repo,
+    prompt: "",
+    hostEnv: { ...host, OMI_SUB: "sub-tok", OMI_GW: "gw-key" },
+  };
+  const sub = buildAgentLaunch({
+    ...base,
+    selection: profile({ type: "subscription", tokenEnv: "OMI_SUB" }),
+  });
+  assert.deepEqual(sub.args.slice(sub.args.indexOf("--model"), sub.args.indexOf("--model") + 4), [
+    "--model",
+    "claude-opus-5-5",
+    "--effort",
+    "high",
+  ]);
+  assert.deepEqual(sub.env, {
+    PATH: "/bin",
+    HOME: "/home/u",
+    CLAUDE_CODE_OAUTH_TOKEN: "sub-tok",
+    CLAUDE_CONFIG_DIR: join(task, ".omi-home", "claude"),
+  });
+  const gw = { type: "gateway", baseUrl: "https://gw.example.com", keyEnv: "OMI_GW" } as const;
+  const key = buildAgentLaunch({ ...base, selection: profile({ ...gw, scheme: "x-api-key" }) });
+  assert.equal(key.env.ANTHROPIC_API_KEY, "gw-key");
+  assert.equal(key.env.ANTHROPIC_BASE_URL, "https://gw.example.com");
+  assert.equal(key.env.CLAUDE_CODE_OAUTH_TOKEN, undefined); // the host token would not win, but stays out
+  const bearer = buildAgentLaunch({ ...base, selection: profile({ ...gw, scheme: "bearer" }) });
+  assert.equal(bearer.env.ANTHROPIC_AUTH_TOKEN, "gw-key");
+  assert.equal(bearer.env.ANTHROPIC_API_KEY, undefined); // host sk-host never passes
+  assert.throws(
+    () =>
+      buildAgentLaunch({
+        ...base,
+        hostEnv: host,
+        selection: profile({ type: "subscription", tokenEnv: "OMI_SUB" }),
+      }),
+    { code: "CONFIG_INVALID", message: /OMI_SUB is not set/ },
+  );
+  // No selection: unchanged (no --model, host token inherited).
+  assert.ok(!buildAgentLaunch(base).args.includes("--model"));
+});
+
+test("observeRun: a thinking block is the observable trace of effort", () => {
+  const think = (type: string) =>
+    observeRun(
+      [
+        line({ type: "assistant", message: { model: "m", content: [{ type }] } }),
+        line({ type: "result", result: "" }),
+      ].join("\n"),
+    ).thinkingObserved;
+  assert.equal(think("thinking"), true);
+  assert.equal(think("redacted_thinking"), true);
+  assert.equal(think("text"), false);
 });

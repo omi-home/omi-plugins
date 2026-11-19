@@ -41,7 +41,7 @@ import { redactDeep } from "../../reporting/redact.ts";
 import { renderStepReport } from "../../reporting/render.ts";
 import { writeRoleFiles } from "../../resources/role-files.ts";
 import { git } from "../../resources/worktree.ts";
-import type { OmiConfig } from "../config.ts";
+import type { OmiConfig, Selection } from "../config.ts";
 import {
   type CheckRun,
   commentMarker,
@@ -70,6 +70,8 @@ export interface SliceDeps {
   runAgent?: (l: AgentLaunch) => string;
   /** Host env the agent env is filtered from (default `process.env`). */
   hostEnv?: NodeJS.ProcessEnv;
+  /** Profile/model/effort the Coordinator chose for every agent step (#217); none = routing. */
+  selection?: Selection;
   now?: () => Date;
   /** Writes a `<!-- omi:section=… -->` of the Issue body (the Manual QA test cases). */
   writeSection?: (section: string, markdown: string) => void;
@@ -168,10 +170,11 @@ export const isTest = (f: string) =>
 const AGENT_TIMEOUT_MS = 30 * 60_000;
 
 export const spawnAgent = (l: AgentLaunch): string => {
-  if (!l.env[AUTH_ENV]) {
+  // A gateway profile authenticates with its own key (#217).
+  if (!l.env[AUTH_ENV] && !l.env.ANTHROPIC_API_KEY && !l.env.ANTHROPIC_AUTH_TOKEN) {
     throw new OmiError(
       "CONFIG_INVALID",
-      `${AUTH_ENV} is not set: run \`claude setup-token\` and export it (agents do not use the host login)`,
+      `${AUTH_ENV} is not set: run \`claude setup-token\` and export it, or pick a profile (agents do not use the host login)`,
     );
   }
   rmSync(l.configDir, { recursive: true, force: true }); // a fresh config dir per run (D5)
@@ -211,6 +214,7 @@ export function prepareAgent(o: {
   worktree: string;
   prompt: string;
   hostEnv?: NodeJS.ProcessEnv;
+  selection?: Selection;
 }): AgentLaunch {
   const rel = relative(o.taskRoot, o.worktree);
   // ponytail: outside the task workspace (analysis) the absolute path must be typed verbatim.
@@ -253,7 +257,17 @@ function agentStep(
   });
   if (step.state === "REPORT_POSTED") return stepResult(db, step.id);
   for (;;) {
-    const attempt = beginAttempt(db, step.id);
+    const sel = d.selection;
+    const attempt = beginAttempt(
+      db,
+      step.id,
+      sel && {
+        profile: sel.profile.name,
+        model: sel.model,
+        effort: sel.effort,
+        reason: sel.reason,
+      },
+    );
     let report: { result: StepResult; actualModel: string; marker: string; body: string };
     try {
       const packet = buildTaskPacket({
@@ -287,6 +301,7 @@ function agentStep(
           checks: Object.values(config.checks).flatMap((c) => (c ? [c.run] : [])),
           prompt: packetPrompt(packet),
           hostEnv: d.hostEnv,
+          selection: sel,
         }),
       );
       const obs = observeRun(stdout);
@@ -309,10 +324,12 @@ function agentStep(
           round: ctx.round,
           attempt,
           executor: spec.role,
-          requestedModel: route.model,
+          requestedModel: sel?.model ?? route.model,
           actualModel: obs.actualModel,
-          requestedEffort: route.effort,
+          requestedEffort: sel?.effort ?? route.effort,
           actualEffort: "unknown",
+          ...(sel ? { profile: sel.profile.name, selectionReason: sel.reason } : {}),
+          thinkingObserved: obs.thinkingObserved,
           commitSha: result.commitSha,
           status: result.status,
           summary: result.summary,
