@@ -1,61 +1,123 @@
-// Named-agent launcher (ADR-0001 D1): one `claude -p --agent` process per step, cwd = task worktree.
-// Grants Read on <plugin-root>/resources/** only, so the agent can load its rule pack (D3).
-import { isAbsolute, join, resolve } from "node:path";
+// Named-agent launcher (ADR-0002 D2/D4/D5): one `claude -p --agent` process per step, cwd = the
+// task workspace (role files next to the clone are loaded natively), plugin from `--plugin-dir`,
+// a fresh CLAUDE_CONFIG_DIR per run and an env built from an allowlist, never the host's env.
+import { isAbsolute, join, relative } from "node:path";
 import type { Role, TokenUsage } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 
 export const PLUGIN_NAME = "omi-engineering";
+/** Subscription token (`claude setup-token`); a profile supplies it later (Feature-0021 #137). */
+export const AUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN";
+
+/**
+ * Host variables an agent may inherit: OS basics for claude, git and npm, proxies, and the auth
+ * token. Everything else (ANTHROPIC_API_KEY, GH_TOKEN, CLAUDECODE, …) is dropped (D5).
+ */
+export const ENV_ALLOWLIST = [
+  "PATH",
+  "PATHEXT",
+  "SystemRoot",
+  "SystemDrive",
+  "windir",
+  "ComSpec",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "HOME",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "ProgramData",
+  "ProgramFiles",
+  "ProgramFiles(x86)",
+  "CommonProgramFiles",
+  "NUMBER_OF_PROCESSORS",
+  "PROCESSOR_ARCHITECTURE",
+  "OS",
+  "USER",
+  "USERNAME",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "TERM",
+  "TZ",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "NODE_EXTRA_CA_CERTS",
+  "CLAUDE_CODE_GIT_BASH_PATH",
+  AUTH_ENV,
+];
 
 export interface AgentLaunch {
   command: "claude";
   args: string[];
   cwd: string;
+  env: Record<string, string>;
+  /** Wiped and recreated before every run. */
+  configDir: string;
   /** Prompt goes through stdin: no shell quoting, no Windows command-line length limit. */
   stdin: string;
 }
 
-/** Absolute path → Claude permission-rule form: `E:\a\b` → `//e/a/b`, `/home/x` → `//home/x`. */
-export function permissionPath(absPath: string): string {
-  const p = resolve(absPath).replaceAll("\\", "/");
-  const drive = /^([A-Za-z]):\//.exec(p);
-  return drive?.[1] ? `//${drive[1].toLowerCase()}/${p.slice(3)}` : `/${p}`;
+/** Allowlisted host variables (names matched case-insensitively, as Windows does). */
+export function agentEnv(host: NodeJS.ProcessEnv): Record<string, string> {
+  const allowed = new Map(ENV_ALLOWLIST.map((k) => [k.toUpperCase(), k]));
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(host)) {
+    if (v !== undefined && allowed.has(k.toUpperCase())) env[k] = v;
+  }
+  return env;
 }
 
 export function buildAgentLaunch(o: {
   pluginRoot: string;
   role: Role;
+  /** Task workspace: cwd of the agent, holds the role files and `.omi-home/claude/`. */
+  taskRoot: string;
+  /** The repository the agent works on; added with `--add-dir` when outside `taskRoot`. */
   worktree: string;
   prompt: string;
-  /** Load the plugin from source (`--plugin-dir`) instead of the installed copy. */
-  fromSource?: boolean;
   /** Extra permission rules, e.g. `Bash(npm test)` for the repo's own check commands. */
   allowedTools?: string[];
   /** Let the agent edit files in its worktree (implementing roles only). */
   acceptEdits?: boolean;
+  hostEnv?: NodeJS.ProcessEnv;
 }): AgentLaunch {
   for (const [name, p] of [
     ["pluginRoot", o.pluginRoot],
+    ["taskRoot", o.taskRoot],
     ["worktree", o.worktree],
   ] as const) {
     if (!isAbsolute(p)) throw new OmiError("CONTRACT_INVALID", `${name} must be an absolute path`);
   }
-  const resources = permissionPath(join(o.pluginRoot, "resources"));
+  const rel = relative(o.taskRoot, o.worktree);
+  const outside = rel.startsWith("..") || isAbsolute(rel);
+  const configDir = join(o.taskRoot, ".omi-home", "claude");
   return {
     command: "claude",
     args: [
       "-p",
       "--agent",
       `${PLUGIN_NAME}:${o.role}`,
-      "--allowedTools",
-      `Read(${resources}/**)`,
-      ...(o.allowedTools ?? []),
+      "--plugin-dir",
+      o.pluginRoot,
+      "--setting-sources",
+      "project,local",
+      ...(outside ? ["--add-dir", o.worktree] : []),
+      ...(o.allowedTools?.length ? ["--allowedTools", ...o.allowedTools] : []),
       ...(o.acceptEdits ? ["--permission-mode", "acceptEdits"] : []),
+      "--no-session-persistence",
       "--output-format",
       "stream-json",
       "--verbose",
-      ...(o.fromSource ? ["--plugin-dir", o.pluginRoot] : []),
     ],
-    cwd: o.worktree,
+    cwd: o.taskRoot,
+    env: { ...agentEnv(o.hostEnv ?? process.env), CLAUDE_CONFIG_DIR: configDir },
+    configDir,
     stdin: o.prompt,
   };
 }

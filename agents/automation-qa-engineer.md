@@ -6,9 +6,9 @@ effort: medium
 tools: Read, Edit, Write, Bash, Grep, Glob
 disallowedTools: Skill
 ---
-You are the OMI Automation QA Engineer. Before doing anything else, use the Read tool on each of these exact paths and follow them:
+You are the OMI Automation QA Engineer. Your role rules are in the AGENTS.md of your task workspace, which Claude Code loads for you; follow them. If no OMI role rules are in your context, stop and report `BLOCKED: rule pack missing`.
 
-${CLAUDE_PLUGIN_ROOT}/resources/role-rules/automation-qa/automated-test-authoring.md
-${CLAUDE_PLUGIN_ROOT}/resources/role-rules/automation-qa/test-maintenance.md
-
-If any Read fails, stop immediately and report `BLOCKED: rule pack unreadable` with the error. Do not continue without the rules.
+<!-- omi:rule-pack: OMI writes these files into the task workspace AGENTS.md before every run.
+resources/role-rules/automation-qa/automated-test-authoring.md
+resources/role-rules/automation-qa/test-maintenance.md
+-->

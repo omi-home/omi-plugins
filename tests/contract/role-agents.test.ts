@@ -1,12 +1,13 @@
 // Specialist agents and their resource packs (spec §3–§4, ADR-0001 D3): every agent is a known
-// Role, never loads skills, reads only existing packs by explicit path, each pack file carries a
-// unique Pack-ID canary, and the runtime's read-only role list matches what the agents may do.
+// Role, never loads skills, lists only existing packs (copied into AGENTS.md, #168), each pack file
+// carries a unique Pack-ID canary, and the runtime's read-only role list matches what the agents may do.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { READ_ONLY_ROLES, Role } from "../../runtime/core/contracts.ts";
+import { RULE } from "../../runtime/resources/role-files.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const read = (p: string) => readFileSync(join(root, p), "utf8");
@@ -28,9 +29,7 @@ const agents = readdirSync(join(root, "agents"))
       name: field("name"),
       tools: list("tools"),
       disallowed: list("disallowedTools"),
-      packs: [...src.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(resources\/\S+\.md)/g)].map(
-        (m) => m[1] as string,
-      ),
+      packs: [...src.matchAll(RULE)].map((m) => m[1] as string),
     };
   });
 
@@ -47,6 +46,7 @@ test("every agent is a Role named after its file, blocks Skill, has no skills:/i
     assert.ok(a.disallowed.includes("Skill"), `${a.file} must disallow Skill`);
     assert.doesNotMatch(a.front, /^(skills|isolation):/m, a.file);
     assert.ok(a.packs.length > 0, `${a.file} loads no rule pack`);
+    assert.doesNotMatch(read(`agents/${a.file}`), /CLAUDE_PLUGIN_ROOT|Read tool/, a.file);
   }
 });
 

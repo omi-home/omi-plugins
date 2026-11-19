@@ -5,9 +5,22 @@
 // agent process (ADR-0001 D1) → verified result → persisted with its report → report posted
 // before the next step. The FSM decides every move; agents only recommend.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
-import { type AgentLaunch, buildAgentLaunch, observeRun } from "../../adapters/claude/launch.ts";
+import {
+  type AgentLaunch,
+  AUTH_ENV,
+  buildAgentLaunch,
+  observeRun,
+} from "../../adapters/claude/launch.ts";
 import type { GhRunner } from "../../adapters/github/client.ts";
 import { fetchIssueContext } from "../../adapters/github/context.ts";
 import type { Db } from "../../persistence/db.ts";
@@ -55,8 +68,8 @@ export interface SliceDeps {
   evidenceDir: string;
   /** Runs one agent process and returns its stream-json stdout. */
   runAgent?: (l: AgentLaunch) => string;
-  /** Load agents from `pluginRoot` (`--plugin-dir`) instead of the installed plugin. */
-  fromSource?: boolean;
+  /** Host env the agent env is filtered from (default `process.env`). */
+  hostEnv?: NodeJS.ProcessEnv;
   now?: () => Date;
   /** Writes a `<!-- omi:section=… -->` of the Issue body (the Manual QA test cases). */
   writeSection?: (section: string, markdown: string) => void;
@@ -86,8 +99,8 @@ export interface SliceTarget {
   run: RunRow;
   worktree: string;
   baseSha: string;
-  /** Task workspace root around the clone (ADR-0002 D2): role files are written there. */
-  taskRoot?: string;
+  /** Task workspace (ADR-0002 D2): the agent's cwd; role files are written there. */
+  taskRoot: string;
   /** Defaults to the original slice: Backend Engineer, Feature Implementation. */
   plan?: WorkflowPlan;
 }
@@ -155,8 +168,17 @@ export const isTest = (f: string) =>
 const AGENT_TIMEOUT_MS = 30 * 60_000;
 
 export const spawnAgent = (l: AgentLaunch): string => {
+  if (!l.env[AUTH_ENV]) {
+    throw new OmiError(
+      "CONFIG_INVALID",
+      `${AUTH_ENV} is not set: run \`claude setup-token\` and export it (agents do not use the host login)`,
+    );
+  }
+  rmSync(l.configDir, { recursive: true, force: true }); // a fresh config dir per run (D5)
+  mkdirSync(l.configDir, { recursive: true });
   const r = spawnSync(l.command, l.args, {
     cwd: l.cwd,
+    env: l.env,
     input: l.stdin,
     encoding: "utf8",
     timeout: AGENT_TIMEOUT_MS,
@@ -168,6 +190,24 @@ export const spawnAgent = (l: AgentLaunch): string => {
   }
   return r.stdout ?? ""; // a cut or failed run has no result event: observeRun reports it
 };
+
+/** Writes the role files of the task workspace, then the launch of its agent (ADR-0002 D2/D4). */
+export function prepareAgent(o: {
+  pluginRoot: string;
+  role: Role;
+  category: ReportCategory;
+  /** Implementing roles may edit files in the clone. */
+  edits: boolean;
+  taskRoot: string;
+  worktree: string;
+  prompt: string;
+  allowedTools?: string[];
+  hostEnv?: NodeJS.ProcessEnv;
+}): AgentLaunch {
+  const { category, edits, ...launch } = o;
+  writeRoleFiles({ taskRoot: o.taskRoot, pluginRoot: o.pluginRoot, role: o.role, category, edits });
+  return buildAgentLaunch({ ...launch, acceptEdits: edits });
+}
 
 /** Read-only git for everyone; implementers may also commit and run the repo's own checks. */
 function tools(config: OmiConfig, spec: StepSpec): string[] {
@@ -224,25 +264,18 @@ function agentStep(
       const file = join(d.evidenceDir, `${spec.stepId}-r${ctx.round}-a${attempt}.packet.json`);
       writeFileSync(file, JSON.stringify(packet, null, 2));
       addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "task-packet", path: file });
-      if (t.taskRoot) {
-        writeRoleFiles({
-          taskRoot: t.taskRoot,
+      const started = Date.now();
+      const stdout = (d.runAgent ?? spawnAgent)(
+        prepareAgent({
           pluginRoot: d.pluginRoot,
           role: spec.role,
           category: spec.category,
           edits: spec.edits,
-        });
-      }
-      const started = Date.now();
-      const stdout = (d.runAgent ?? spawnAgent)(
-        buildAgentLaunch({
-          pluginRoot: d.pluginRoot,
-          role: spec.role,
+          taskRoot: t.taskRoot,
           worktree: t.worktree,
           prompt: packetPrompt(packet),
-          fromSource: d.fromSource,
           allowedTools: tools(config, spec),
-          acceptEdits: spec.edits,
+          hostEnv: d.hostEnv,
         }),
       );
       const durationMs = Date.now() - started;
@@ -631,7 +664,8 @@ const ANALYST_STEP: Partial<Record<Role, Omit<StepSpec, "role" | "edits">>> = {
  * Analysis workflow for an Issue without a worktree (PO 2026-11-18): each analyst in turn reads
  * the Issue chain (with the sections written so far) and proposes its own section; the CLI writes
  * it into the Issue body before the next analyst runs. Ends COMPLETED (handed to the PO) or
- * WAITING_PO / BLOCKED when an analyst could not finish. `t.worktree` is the main checkout.
+ * WAITING_PO / BLOCKED when an analyst could not finish. `t.worktree` is the main checkout, read
+ * through `--add-dir`; `t.taskRoot` holds the role files.
  */
 export function runAnalysis(
   d: SliceDeps & Required<Pick<SliceDeps, "writeSection">>,

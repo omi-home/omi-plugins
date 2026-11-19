@@ -6,16 +6,18 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildAgentLaunch, observeRun } from "../../runtime/adapters/claude/launch.ts";
+import { observeRun } from "../../runtime/adapters/claude/launch.ts";
 import type { Role } from "../../runtime/core/contracts.ts";
 import {
   acceptStepResult,
   buildTaskPacket,
   packetPrompt,
 } from "../../runtime/core/handoff/packet.ts";
+import { prepareAgent, spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
+import { RULE } from "../../runtime/resources/role-files.ts";
 
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 const live = process.env.OMI_LIVE === "1" && spawnSync("claude", ["--version"]).status === 0;
@@ -29,44 +31,32 @@ const allIds = (readdirSync(join(pluginRoot, "resources"), { recursive: true }) 
   .filter((f) => f.endsWith(".md"))
   .map((f) => packId(join("resources", f)));
 const idsOf = (role: Role) =>
-  [
-    ...readFileSync(join(pluginRoot, "agents", `${role}.md`), "utf8").matchAll(
-      /\$\{CLAUDE_PLUGIN_ROOT\}\/(resources\/\S+\.md)/g,
-    ),
-  ].map((m) => packId(m[1] as string));
+  [...readFileSync(join(pluginRoot, "agents", `${role}.md`), "utf8").matchAll(RULE)].map((m) =>
+    packId(m[1] as string),
+  );
 
 const READ = ["Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)"];
 const EDIT = [...READ, "Bash(git add*)", "Bash(git commit*)", "Bash(npm test)"];
 
 function launch(role: Role, prompt: string, cwd: string, edits: boolean) {
-  const l = buildAgentLaunch({
+  // The allowlisted env also drops NODE_TEST_CONTEXT: `npm test` inside the agent is not nested.
+  const l = prepareAgent({
     pluginRoot,
     role,
+    category: edits ? "implementation" : "review",
+    edits,
+    taskRoot: dirname(cwd),
     worktree: cwd,
     prompt,
-    fromSource: true,
-    acceptEdits: edits,
     allowedTools: edits ? EDIT : READ,
   });
-  const r = spawnSync(
-    l.command,
-    [...l.args, "--setting-sources", "project,local", "--no-session-persistence"],
-    // Without this, `npm test` inside the agent thinks it is nested in this test run and skips.
-    {
-      cwd: l.cwd,
-      input: l.stdin,
-      encoding: "utf8",
-      timeout: 900_000,
-      env: { ...process.env, NODE_TEST_CONTEXT: undefined },
-    },
-  );
-  assert.equal(r.status, 0, r.stderr);
-  return observeRun(r.stdout);
+  return observeRun(spawnAgent(l));
 }
 
 /** Notes app at `base`; `change` (if any) is committed on top as the task's work. */
 function fixture(change: Record<string, string> = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "omi-t53-"));
+  const dir = join(mkdtempSync(join(tmpdir(), "omi-t53-")), "notes");
+  mkdirSync(dir);
   git(dir, "init", "-q", "-b", "main");
   git(dir, "config", "user.email", "t@example.invalid");
   git(dir, "config", "user.name", "t");

@@ -397,10 +397,7 @@ export interface RunResult {
  * needed (WAITING_PO, BLOCKED); the Project Status then mirrors the workflow state (#99).
  * Spawns agent processes: this command spends tokens.
  */
-export function taskRun(
-  deps: TaskDeps & Pick<SliceDeps, "runAgent" | "fromSource">,
-  issue: number,
-): RunResult {
+export function taskRun(deps: TaskDeps & Pick<SliceDeps, "runAgent">, issue: number): RunResult {
   const gh = deps.gh ?? spawnGh;
   const { config } = repo(deps.cwd);
   // Plan first: a bad role label or a non-delivery type fails before any worktree exists.
@@ -425,7 +422,6 @@ export function taskRun(
           pluginRoot: PLUGIN_ROOT,
           evidenceDir,
           runAgent: deps.runAgent,
-          fromSource: deps.fromSource,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),
         },
         {
@@ -477,7 +473,7 @@ function planFor(config: OmiConfig, ticket: Ticket, gh: GhRunner): WorkflowPlan 
  * superseded (cancelled) by the new run. Spends tokens.
  */
 export function taskAnalyze(
-  deps: TaskDeps & Pick<SliceDeps, "runAgent" | "fromSource">,
+  deps: TaskDeps & Pick<SliceDeps, "runAgent">,
   issue: number,
 ): RunResult {
   const gh = deps.gh ?? spawnGh;
@@ -518,10 +514,15 @@ export function taskAnalyze(
           pluginRoot: PLUGIN_ROOT,
           evidenceDir: evidenceOf(run.id),
           runAgent: deps.runAgent,
-          fromSource: deps.fromSource,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),
         },
-        { run, worktree: root, baseSha: git(["rev-parse", "HEAD"], root), plan },
+        {
+          run,
+          worktree: root,
+          taskRoot: join(evidenceOf(run.id), "workspace"),
+          baseSha: git(["rev-parse", "HEAD"], root),
+          plan,
+        },
       );
       // Analysis done or an open question: either way the PO decides next.
       const status = setStatus(

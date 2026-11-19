@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import type { AgentLaunch } from "../../runtime/adapters/claude/launch.ts";
 import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { parseConfig } from "../../runtime/core/config.ts";
@@ -266,11 +267,12 @@ function setup(script: Script = {}, plan?: WorkflowPlan) {
     db,
     config,
     gh: gh.run,
-    pluginRoot: dir, // unused by stubs; must be absolute
+    pluginRoot: fileURLToPath(new URL("../../", import.meta.url)), // real agents/ for role files
     evidenceDir: mkdtempSync(join(tmpdir(), "omi-evidence-")),
     runAgent: agents.runAgent,
   };
-  const target = { run, worktree: dir, baseSha: base, plan };
+  const taskRoot = mkdtempSync(join(tmpdir(), "omi-task-"));
+  const target = { run, worktree: dir, taskRoot, baseSha: base, plan };
   return { db, gh, agents, deps, target };
 }
 
@@ -285,6 +287,11 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
   const ctx = runSlice(s.deps, s.target);
   assert.equal(ctx.state, "PR_PENDING");
   assert.deepEqual(s.agents.calls, ["backend-engineer:1", "code-reviewer:1"]);
+  // Each agent runs in the task workspace with its role files and its own config dir (#168).
+  const launch = s.agents.launches.at(-1) as AgentLaunch;
+  assert.equal(launch.cwd, s.target.taskRoot);
+  assert.equal(launch.env.CLAUDE_CONFIG_DIR, join(s.target.taskRoot, ".omi-home", "claude"));
+  assert.match(readFileSync(join(s.target.taskRoot, "AGENTS.md"), "utf8"), /role code-reviewer/);
   // Checks already passed on this HEAD: release validation reuses them, no Manual QA planned.
   assert.deepEqual(titles(s.gh.comments.map((c) => c.body)), [
     "implement:1",

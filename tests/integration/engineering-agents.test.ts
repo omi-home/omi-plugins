@@ -6,16 +6,17 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildAgentLaunch, observeRun } from "../../runtime/adapters/claude/launch.ts";
+import { observeRun } from "../../runtime/adapters/claude/launch.ts";
 import type { Finding, Role } from "../../runtime/core/contracts.ts";
 import {
   acceptStepResult,
   buildTaskPacket,
   packetPrompt,
 } from "../../runtime/core/handoff/packet.ts";
+import { prepareAgent, spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
 
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 const live = process.env.OMI_LIVE === "1" && spawnSync("claude", ["--version"]).status === 0;
@@ -26,7 +27,8 @@ const git = (cwd: string, ...args: string[]) =>
 
 /** Notes app: Node test runner, static UI, SQL migrations. */
 function fixture() {
-  const dir = mkdtempSync(join(tmpdir(), "omi-t52-"));
+  const dir = join(mkdtempSync(join(tmpdir(), "omi-t52-")), "notes");
+  mkdirSync(dir);
   git(dir, "init", "-q", "-b", "main");
   git(dir, "config", "user.email", "t@example.invalid");
   git(dir, "config", "user.name", "t");
@@ -93,13 +95,14 @@ function step(
     carriedFindings: [],
     readOnlyArtifacts: [],
   });
-  const l = buildAgentLaunch({
+  const l = prepareAgent({
     pluginRoot,
     role,
+    category: "implementation",
+    edits: true,
+    taskRoot: dirname(dir),
     worktree: dir,
     prompt: packetPrompt(packet),
-    fromSource: true,
-    acceptEdits: true,
     allowedTools: [
       "Bash(git status*)",
       "Bash(git diff*)",
@@ -109,18 +112,7 @@ function step(
       "Bash(npm test)",
     ],
   });
-  const r = spawnSync(
-    l.command,
-    [...l.args, "--setting-sources", "project,local", "--no-session-persistence"],
-    {
-      cwd: l.cwd,
-      input: l.stdin,
-      encoding: "utf8",
-      timeout: 900_000,
-    },
-  );
-  assert.equal(r.status, 0, r.stderr);
-  const result = acceptStepResult(packet, observeRun(r.stdout).result); // throws on out-of-scope claims
+  const result = acceptStepResult(packet, observeRun(spawnAgent(l)).result); // throws on out-of-scope claims
   assert.equal(result.status, "PASSED", result.blockerReason ?? result.summary);
   return result;
 }
