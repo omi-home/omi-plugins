@@ -116,6 +116,11 @@ Commands:
                          a task workspace of each role (\`/context\`, no tokens) and classify every
                          plugin, skill, MCP server and memory file as needed / unneeded / unknown;
                          keep list: context.keep in omi.config.yaml
+  context apply [--dry-run] [--remove] [--bundled]
+                         Switch the workspace's unneeded items off in its .claude/settings.json only
+                         (enabledPlugins incl. @synced, skillOverrides, disableClaudeAiConnectors,
+                         deniedMcpServers; disableBundledSkills only with --bundled). Re-run changes
+                         nothing; --remove takes back what OMI added; other keys untouched
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and

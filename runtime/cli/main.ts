@@ -24,7 +24,7 @@ import { CONFIG_FILE } from "../core/workspace.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { formatUsage, sumUsage } from "../reporting/render.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
-import { contextPlan, humanContextPlan } from "./context.ts";
+import { contextApply, contextPlan, humanContextPlan } from "./context.ts";
 import { type Check, doctor } from "./doctor.ts";
 import { type HookInput, preToolUse, sessionStart } from "./hook.ts";
 import { projectInit } from "./init.ts";
@@ -151,6 +151,11 @@ Commands:
                          a task workspace of each role (\`/context\`, no tokens) and classify every
                          plugin, skill, MCP server and memory file as needed / unneeded / unknown;
                          keep list: context.keep in omi.config.yaml
+  context apply [--dry-run] [--remove] [--bundled]
+                         Switch the workspace's unneeded items off in its .claude/settings.json only
+                         (enabledPlugins incl. @synced, skillOverrides, disableClaudeAiConnectors,
+                         deniedMcpServers; disableBundledSkills only with --bundled). Re-run changes
+                         nothing; --remove takes back what OMI added; other keys untouched
   cleanup scan           Inventory open runs, owned worktrees, merged-but-uncleaned tasks, unposted
                          reports, attempts left open by a crash, orphan and prunable worktrees
   cleanup apply --safe   Recover crashed attempts, post pending reports, finalize merged tasks and
@@ -237,6 +242,7 @@ const REPO_WIDE = new Set([
   "workspace init",
   "workspace migrate",
   "context plan",
+  "context apply",
   "hook pre-tool-use",
   "hook session-start",
 ]);
@@ -413,6 +419,19 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
       case "context plan": {
         const p = contextPlan({ cwd, role: values.role });
         return ok(p, lines(humanContextPlan(p)));
+      }
+      case "context apply": {
+        const r = contextApply({
+          cwd,
+          dryRun: values["dry-run"],
+          remove: values.remove,
+          bundled: values.bundled,
+        });
+        const verb = r.dryRun ? "would change" : r.changed ? "changed" : "unchanged";
+        return ok(
+          r,
+          lines([`settings  ${r.settingsPath} (${verb})`, ...r.diff.map((d) => `  ${d}`)]),
+        );
       }
       case "doctor": {
         const checks = doctor(cwd);
@@ -780,5 +799,7 @@ const parse = (args: string[]) =>
       name: { type: "string" },
       repo: { type: "string" },
       role: { type: "string" },
+      remove: { type: "boolean" },
+      bundled: { type: "boolean" },
     },
   });
