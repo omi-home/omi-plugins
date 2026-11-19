@@ -12,7 +12,7 @@ Script first: every step below is an `omi` command run through Bash. Do not repr
 3. `omi cleanup scan` — open runs, merged-but-uncleaned tasks, unposted reports, crashed attempts, orphan task workspaces. Do not run `cleanup apply` yourself: list what it would fix and let the PO decide.
 4. For every open run the scan lists (and the focus Issue, if one was given): `omi task status <n>`.
 5. For the next task (the focus Issue, else the one the handoff names): `omi ticket validate <n>` and `omi issue findings <n>`. Carried findings are part of that task's scope; list them.
-6. Propose the next step to the Product Owner in a few lines: which Issue (full title and number), why, and the command that starts it (`omi task start <n>` or `/omi-engineering:omi-task <n>`). Wait for the PO before starting anything.
+6. Propose the next step to the Product Owner in a few lines: which Issue (full title and number), why, and the command that starts it (`omi task start <n>` or `/omi-coordinator:omi-task <n>`). Wait for the PO before starting anything.
 
 At the end of a session, write the handoff with `omi handoff post --body-file <file>` (done, blocked, decisions needed, next); it lands on the active Milestone.
 

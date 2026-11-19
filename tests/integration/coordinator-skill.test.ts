@@ -1,4 +1,4 @@
-// T1.5 routing smoke: /omi-engineering:omi-task runs deterministic work through CLI tools and
+// T1.5 routing smoke: /omi-coordinator:omi-task runs deterministic work through CLI tools and
 // hands implementation off without touching files or role-rules. Costs tokens: OMI_LIVE=1.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -37,7 +37,7 @@ function runTask(request: string) {
     "claude",
     [
       "-p",
-      `/omi-engineering:omi-task ${request}`,
+      `/omi-coordinator:omi-task ${request}`,
       "--plugin-dir",
       pluginRoot,
       "--model",

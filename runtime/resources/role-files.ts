@@ -3,6 +3,7 @@
 // report template) and `.claude/settings.json`. Generated every time: never edit them by hand.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { AGENT_PACK } from "../adapters/claude/launch.ts";
 import type { ReportCategory, Role } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
 
@@ -19,7 +20,7 @@ export function writeRoleFiles(o: {
   /** The clone as the agent addresses it from the task workspace (e.g. `omi-plugins`). */
   repo: string;
 }): void {
-  const agent = readFileSync(join(o.pluginRoot, "agents", `${o.role}.md`), "utf8");
+  const agent = readFileSync(join(o.pluginRoot, AGENT_PACK, "agents", `${o.role}.md`), "utf8");
   const rules = [...agent.matchAll(RULE)].map((m) =>
     readFileSync(join(o.pluginRoot, m[1] as string), "utf8").trim(),
   );

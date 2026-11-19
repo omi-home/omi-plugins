@@ -1,10 +1,10 @@
 # Runbook vận hành OMI
 
-Dành cho người vận hành (PO, maintainer) một repo dùng plugin `omi-engineering`. Mọi lệnh là `omi <lệnh>`: trong repo này là `node bin/omi`, khi đã cài plugin thì Coordinator gọi qua skill. Thêm `--output json` để có kết quả máy đọc được. Mã thoát: `0` ok, `1` check fail hoặc lỗi, `2` sai cú pháp, `75` lỗi tạm thời (chạy lại). Chi tiết hành vi từng lệnh: `omi help`; phạm vi và quyết định: Issue trên [Project #2](https://github.com/orgs/omi-home/projects/2) và [ADR](../decisions/).
+Dành cho người vận hành (PO, maintainer) một repo dùng plugin `omi-coordinator`. Mọi lệnh là `omi <lệnh>`: trong repo này là `node bin/omi`, khi đã cài plugin thì Coordinator gọi qua skill. Thêm `--output json` để có kết quả máy đọc được. Mã thoát: `0` ok, `1` check fail hoặc lỗi, `2` sai cú pháp, `75` lỗi tạm thời (chạy lại). Chi tiết hành vi từng lệnh: `omi help`; phạm vi và quyết định: Issue trên [Project #2](https://github.com/orgs/omi-home/projects/2) và [ADR](../decisions/).
 
 ## 1. Đưa một repo vào OMI
 
-Skill `/omi-engineering:omi-start`, hoặc tay theo thứ tự:
+Skill `/omi-coordinator:omi-start`, hoặc tay theo thứ tự:
 
 0. `omi workspace init [--name <n>] [--repo <path|url>]` — dựng `<name>-workspace/` (`.claude/`, `.omi-plugins/`, `AGENTS.md` của Coordinator) và clone repo vào đó; chạy các bước sau trong workspace. Chạy lại an toàn.
    Repo đang dùng layout cũ (`.omi/config.yaml`, task worktree): theo [runbook chuyển đổi](./workspace-migration.md) (`omi workspace migrate`, gỡ file cũ qua task PR, kiểm bằng `omi doctor`, cách quay lại).
@@ -95,11 +95,11 @@ Lỗi tạm thời (`GITHUB_RATE_LIMITED`, `GITHUB_UNAVAILABLE`, `NETWORK`, `LOC
 
 ## 9. Release
 
-Skill `/omi-engineering:omi-release`:
+Skill `/omi-coordinator:omi-release`:
 
 1. Một DevTask đặt cùng version semver mới vào `.claude-plugin/plugin.json` và `package.json`, đổi `## [Unreleased]` trong `CHANGELOG.md` thành `## [<version>] - <ngày>`; merge vào `develop`.
 2. Release Issue (`omi issue create --type release --parent <Milestone> …`), rồi `omi release check <n>` tới khi mọi dòng PASS.
 3. `omi pr create <n>` mở PR `develop → main`; **PO merge**.
-4. `omi release tag <n>`: tag `omi-engineering--v<version>` trên merge commit, push, đóng Release Issue.
+4. `omi release tag <n>`: tag `<plugin>--v<version>` (`omi-coordinator--v…`) trên merge commit, push, đóng Release Issue.
 
 Người dùng cài/update/rollback theo tag: [README](../../README.md#cài-plugin). Trước khi update, sao lưu `state.sqlite`: migration chỉ đi tiến và bản cũ từ chối DB mới hơn; rollback qua một migration thì khôi phục bản sao lưu.

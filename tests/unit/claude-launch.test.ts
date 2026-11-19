@@ -35,7 +35,7 @@ test("launch: named agent, cwd = task workspace, plugin dir, project settings, p
   assert.ok(!l.args.includes("do x"));
   const at = (flag: string) => l.args[l.args.indexOf(flag) + 1];
   assert.equal(at("--agent"), "omi-engineering:backend-engineer");
-  assert.equal(at("--plugin-dir"), root);
+  assert.equal(at("--plugin-dir"), join(root, "agent-pack"));
   assert.equal(at("--setting-sources"), "project,local");
   assert.ok(!l.args.includes("--add-dir"), "the clone is inside the task workspace");
   assert.ok(!l.args.includes("--allowedTools"), "no grant on plugin resources any more");

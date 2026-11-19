@@ -6,6 +6,8 @@ import type { Role, TokenUsage } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 
 export const PLUGIN_NAME = "omi-engineering";
+/** Agent pack inside the plugin root (ADR-0003 D3): the only plugin an agent run loads. */
+export const AGENT_PACK = "agent-pack";
 /** Subscription token (`claude setup-token`); a profile supplies it later (Feature-0021 #137). */
 export const AUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN";
 
@@ -104,7 +106,7 @@ export function buildAgentLaunch(o: {
       "--agent",
       `${PLUGIN_NAME}:${o.role}`,
       "--plugin-dir",
-      o.pluginRoot,
+      join(o.pluginRoot, AGENT_PACK),
       "--setting-sources",
       "project,local",
       ...(outside ? ["--add-dir", o.worktree] : []),

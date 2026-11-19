@@ -1,0 +1,10 @@
+{
+  "name": "omi-engineering",
+  "version": "0.1.0",
+  "description": "OMI role agents (engineers, reviewers, QA, analysts). Loaded only by the omi CLI with --plugin-dir for agent runs; never installed on its own.",
+  "author": {
+    "name": "omi-home",
+    "url": "https://github.com/omi-home"
+  },
+  "license": "MIT"
+}

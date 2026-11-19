@@ -8,7 +8,7 @@ import { OLD_LAYOUT } from "../../runtime/cli/workspace.ts";
 const ALLOWED_ROOT_DIRS = new Set([
   ".claude-plugin",
   ".github",
-  "agents",
+  "agent-pack",
   "bin",
   "config",
   "docs",
@@ -20,7 +20,6 @@ const ALLOWED_ROOT_DIRS = new Set([
   "skills",
   "templates",
   "tests",
-  "workflows",
 ]);
 
 const repoRoot = new URL("../../", import.meta.url);
