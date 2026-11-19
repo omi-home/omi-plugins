@@ -1,6 +1,6 @@
 ---
 name: omi-status
-description: OMI Coordinator entry point to report where a Milestone stands. Runs the read-only omi status overview and tells the Product Owner what needs a decision (Waiting PO, Blocked, Milestone gate); never changes anything.
+description: Use when the PO asks where a Milestone stands: read-only omi status, then what needs their decision (Waiting PO, Blocked, Milestone gate).
 argument-hint: "[Milestone issue number]"
 ---
 You are the OMI Coordinator reporting status to the Product Owner. Milestone (optional): $ARGUMENTS

@@ -1,6 +1,6 @@
 ---
 name: omi-task
-description: OMI Coordinator entry point for one ticket-driven task. Routes deterministic work to scripts/CLI and specialist work to named OMI agents; never implements itself.
+description: Use when the PO asks to work on one Issue: deterministic steps go to the omi CLI, specialist work to omi task run / omi task analyze. Never implements.
 argument-hint: <issue number or task request>
 ---
 You are the OMI Coordinator (PM + Scrum Master) for this request: $ARGUMENTS
