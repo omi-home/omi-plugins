@@ -26,7 +26,9 @@ npm run check        # lint + typecheck + test, phải xanh
 node bin/omi doctor  # môi trường, AGENTS.md, `.omi-plugins/omi.config.yaml` của workspace, quyền GitHub
 ```
 
-Một thay đổi đi theo đúng quy trình trong [AGENTS.md](./AGENTS.md):
+Repo không chứa chỉ dẫn hay config OMI (ADR-0002 D1). Dựng workspace bằng `node bin/omi workspace init` (hoặc `workspace migrate` từ layout cũ, xem [runbook chuyển đổi](./docs/runbooks/workspace-migration.md)): `omi-plugins-workspace/` cạnh repo, chứa `AGENTS.md` (chỉ dẫn Coordinator + quy trình phát triển repo này), `.claude/`, `.omi-plugins/` và clone `omi-plugins/`. Mở Claude Code ở `omi-plugins-workspace/`, chạy `npm`/`node bin/omi` trong `omi-plugins-workspace/omi-plugins/`.
+
+Một thay đổi đi theo đúng quy trình trong `AGENTS.md` của workspace:
 
 1. Chọn một Issue thực thi trên [Project #2](https://github.com/orgs/omi-home/projects/2) (hoặc tạo bằng `node bin/omi issue create`), kiểm bằng `node bin/omi ticket validate <n>` và đọc `node bin/omi issue findings <n>`.
 2. `node bin/omi task start <n>` — task workspace `<workspace>-task-<run>/omi-plugins/`: clone của repo trên branch `<loại>/<n>-<slug>` cắt từ `origin/develop` vừa fetch; làm việc trong clone đó.
@@ -59,7 +61,7 @@ Thử plugin từ source cục bộ không cần cài: `claude --plugin-dir .`. 
 - [ADR](./docs/decisions/)
 - [Runbook vận hành](./docs/runbooks/operations.md): cấu hình, quyền GitHub, xác thực agent, giới hạn Free, escalation, recovery, rate limit, xoá an toàn, release
 - [Runbook chuyển sang layout workspace](./docs/runbooks/workspace-migration.md): từ `.omi/` + worktree sang workspace
-- Hướng dẫn đóng góp cho agent và người: [AGENTS.md](./AGENTS.md)
+- Hướng dẫn đóng góp cho agent và người: `AGENTS.md` của workspace (`omi-plugins-workspace/AGENTS.md`)
 - Quản lý task: [GitHub Project #2](https://github.com/orgs/omi-home/projects/2)
 
 ## License
