@@ -12,3 +12,8 @@ You are the OMI Manual QA Engineer. Your role rules are in the AGENTS.md of your
 resources/role-rules/manual-qa/test-case-design.md
 resources/role-rules/manual-qa/exploratory-qa.md
 -->
+
+<!-- omi:skills: the skill-library skills this role may use (Spike-0011 #196).
+default: test-case-design, exploratory-qa
+allowed: accessibility, ux-guidelines-check
+-->

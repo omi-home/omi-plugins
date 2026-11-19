@@ -16,3 +16,8 @@ resources/shared/api-contracts.md
 resources/role-rules/architecture/adr-management.md
 resources/role-rules/architecture/root-cause-analysis.md
 -->
+
+<!-- omi:skills: the skill-library skills this role may use (Spike-0011 #196).
+default: system-design, api-contract-design
+allowed: adr-writing, root-cause-analysis, architecture-compliance, threat-assessment, systematic-debugging
+-->

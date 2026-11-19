@@ -14,3 +14,8 @@ resources/role-rules/frontend/frontend-implementation.md
 resources/shared/api-contracts.md
 resources/role-rules/frontend/component-testing.md
 -->
+
+<!-- omi:skills: the skill-library skills this role may use (Spike-0011 #196).
+default: frontend-implementation, test-driven-development, verification-before-completion
+allowed: minimal-change, systematic-debugging, receiving-review-findings, api-contract-design, accessibility, visual-direction, anti-slop-review, ux-guidelines-check
+-->

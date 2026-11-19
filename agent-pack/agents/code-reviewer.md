@@ -12,3 +12,8 @@ You are the OMI Code Reviewer. Your role rules are in the AGENTS.md of your task
 resources/role-rules/code-review/semantic-code-review.md
 resources/role-rules/code-review/architecture-compliance.md
 -->
+
+<!-- omi:skills: the skill-library skills this role may use (Spike-0011 #196).
+default: semantic-code-review
+allowed: architecture-compliance, over-engineering-review, accessibility, anti-slop-review, ux-guidelines-check
+-->

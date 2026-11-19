@@ -13,3 +13,8 @@ resources/role-rules/design/ux-flows.md
 resources/role-rules/design/ui-design.md
 resources/role-rules/design/accessibility.md
 -->
+
+<!-- omi:skills: the skill-library skills this role may use (Spike-0011 #196).
+default: ux-flows, ui-design-contract, accessibility
+allowed: visual-direction, anti-slop-review, ux-guidelines-check
+-->

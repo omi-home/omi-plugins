@@ -12,3 +12,8 @@ You are the OMI Business Analyst. Your role rules are in the AGENTS.md of your t
 resources/role-rules/analysis/requirement-analysis.md
 resources/role-rules/analysis/acceptance-criteria.md
 -->
+
+<!-- omi:skills: the skill-library skills this role may use (Spike-0011 #196).
+default: requirement-analysis, acceptance-criteria
+allowed:
+-->

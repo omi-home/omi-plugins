@@ -12,3 +12,8 @@ You are the OMI Automation QA Engineer. Your role rules are in the AGENTS.md of 
 resources/role-rules/automation-qa/automated-test-authoring.md
 resources/role-rules/automation-qa/test-maintenance.md
 -->
+
+<!-- omi:skills: the skill-library skills this role may use (Spike-0011 #196).
+default: automated-test-authoring, verification-before-completion
+allowed: test-maintenance, test-driven-development, systematic-debugging, minimal-change, receiving-review-findings
+-->

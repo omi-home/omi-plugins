@@ -14,3 +14,8 @@ resources/role-rules/backend/backend-implementation.md
 resources/shared/api-contracts.md
 resources/role-rules/backend/unit-test-design.md
 -->
+
+<!-- omi:skills: the skill-library skills this role may use (Spike-0011 #196).
+default: backend-implementation, test-driven-development, verification-before-completion
+allowed: minimal-change, systematic-debugging, receiving-review-findings, api-contract-design
+-->
