@@ -116,6 +116,13 @@ export const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE step_attempt ADD COLUMN usage TEXT;
   `,
+  // 5 — execution choice of each attempt (profile/model/effort/reason, DevTask-0074 #217); null = routing
+  `
+  ALTER TABLE step_attempt ADD COLUMN profile TEXT;
+  ALTER TABLE step_attempt ADD COLUMN requested_model TEXT;
+  ALTER TABLE step_attempt ADD COLUMN requested_effort TEXT;
+  ALTER TABLE step_attempt ADD COLUMN reason TEXT;
+  `,
 ];
 
 export function migrate(db: DatabaseSync, migrations: readonly string[] = MIGRATIONS): number {

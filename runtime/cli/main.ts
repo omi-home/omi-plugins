@@ -30,7 +30,7 @@ import { type Check, doctor } from "./doctor.ts";
 import { type HookInput, preToolUse, sessionStart } from "./hook.ts";
 import { projectInit } from "./init.ts";
 import { releaseCheck, releaseTag } from "./release.ts";
-import { NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "./status.ts";
+import { NO_PROFILE, NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "./status.ts";
 import {
   prCreate,
   prMerge,
@@ -81,6 +81,9 @@ Commands:
   task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
                          write their sections into the Issue body, then Waiting PO. No worktree.
                          Runs agents: spends tokens.
+                         task run / task analyze: --profile <name> [--model <id>] [--effort <level>]
+                         --reason <text> runs every agent step on that profile (\`profile list\`);
+                         model/effort default to the profile's first; none: agents.routing
   task unblock <n>       Clear a BLOCKED run of Issue #n (a person decided): resume it through the FSM,
                          post one report (who, --reason <text>); the next \`task run\` re-runs the step
                          that reported BLOCKED
@@ -290,6 +293,13 @@ const describeRepo = (a: RepoAction) =>
             .join(", ")}`
         : `${a.what}: ${a.reason}`;
 
+const pickFlags = (v: { profile?: string; model?: string; effort?: string; reason?: string }) => ({
+  profile: v.profile,
+  model: v.model,
+  effort: v.effort,
+  reason: v.reason,
+});
+
 const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
 
 const humanChecks = (checks: Check[]) =>
@@ -402,10 +412,13 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
             );
           }),
           ...(r.usage.ok
-            ? r.usage.value.map(
-                (u) =>
-                  `usage     #${u.issue} ${u.runId} (${u.models.join(",")}): ${formatUsage(u.usage)}`,
-              )
+            ? r.usage.value.flatMap((u) => [
+                `usage     #${u.issue} ${u.runId} (${u.models.join(",")}): ${formatUsage(u.usage)}`,
+                // Per profile once a run used one (`routing` = no profile chosen).
+                ...(u.byProfile.some((b) => b.profile !== NO_PROFILE)
+                  ? u.byProfile.map((b) => `            ${b.profile}: ${formatUsage(b.usage)}`)
+                  : []),
+              ])
             : [`usage     ${fail(r.usage)}`]),
           ...(r.cleanup.ok
             ? humanScan(r.cleanup.value).map((l) => `run       ${l}`)
@@ -495,7 +508,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
               ...st.transitions.map((t) => `  ${t.from ?? "-"} → ${t.to} (${t.event})`),
               ...st.usage.map(
                 (u) =>
-                  `usage     ${u.stepId} r${u.round} a${u.attempt} ${u.role} (${u.actualModel ?? "unknown"}): ${formatUsage(u.usage)}`,
+                  `usage     ${u.stepId} r${u.round} a${u.attempt} ${u.role} (${u.profile ? `${u.profile} ` : ""}${u.actualModel ?? "unknown"}): ${formatUsage(u.usage)}`,
               ),
               ...(st.usage.length > 1
                 ? [
@@ -507,7 +520,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         return ok(st, lines(human));
       }
       case "task run": {
-        const r = taskRun({ cwd }, issue);
+        const r = taskRun({ cwd, pick: pickFlags(values) }, issue);
         const human = [
           `run       ${r.run.id} (${r.state}, round ${r.round})`,
           ...(r.status
@@ -518,7 +531,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         return ok(r, lines(human));
       }
       case "task analyze": {
-        const r = taskAnalyze({ cwd }, issue);
+        const r = taskAnalyze({ cwd, pick: pickFlags(values) }, issue);
         const human = [
           `run       ${r.run.id} (${r.state})`,
           ...(r.status
@@ -810,6 +823,9 @@ const parse = (args: string[]) =>
       "dry-run": { type: "boolean" },
       safe: { type: "boolean" },
       reason: { type: "string" },
+      profile: { type: "string" },
+      model: { type: "string" },
+      effort: { type: "string" },
       type: { type: "string" },
       parent: { type: "string" },
       on: { type: "string" },

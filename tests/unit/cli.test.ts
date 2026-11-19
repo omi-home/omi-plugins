@@ -45,6 +45,9 @@ Commands:
   task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
                          write their sections into the Issue body, then Waiting PO. No worktree.
                          Runs agents: spends tokens.
+                         task run / task analyze: --profile <name> [--model <id>] [--effort <level>]
+                         --reason <text> runs every agent step on that profile (\`profile list\`);
+                         model/effort default to the profile's first; none: agents.routing
   task unblock <n>       Clear a BLOCKED run of Issue #n (a person decided): resume it through the FSM,
                          post one report (who, --reason <text>); the next \`task run\` re-runs the step
                          that reported BLOCKED

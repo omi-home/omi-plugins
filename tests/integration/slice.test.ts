@@ -718,3 +718,57 @@ test("Manual QA that leaves the worktree dirty blocks the run, with the reason k
   assert.equal(err?.code, "POLICY_VIOLATION");
   assert.match(err?.message ?? "", /qa-scratch\.txt/);
 });
+
+test("profile chosen (#217): every agent runs on it; state and report record the choice", () => {
+  const s = setup();
+  const selection = {
+    profile: {
+      name: "cc-gw",
+      harness: "claudecode" as const,
+      disabled: false,
+      auth: {
+        type: "gateway" as const,
+        baseUrl: "https://gw.example.com",
+        scheme: "x-api-key" as const,
+        keyEnv: "OMI_GW",
+      },
+      models: ["claude-opus-5-5"],
+      efforts: ["high" as const],
+    },
+    model: "claude-opus-5-5",
+    effort: "high" as const,
+    reason: "hard review",
+  };
+  const ctx = runSlice({ ...s.deps, selection, hostEnv: { PATH: "/bin", OMI_GW: "k" } }, s.target);
+  assert.equal(ctx.state, "PR_PENDING");
+  for (const l of s.agents.launches) {
+    assert.deepEqual(l.args.slice(l.args.indexOf("--model"), l.args.indexOf("--model") + 4), [
+      "--model",
+      "claude-opus-5-5",
+      "--effort",
+      "high",
+    ]);
+    assert.equal(l.env.ANTHROPIC_API_KEY, "k");
+  }
+  assert.match(
+    s.gh.comments[0]?.body ?? "",
+    /profile cc-gw \(hard review\) · requested claude-opus-5-5 · actual claude-sonnet-5-5 \(observed\)/,
+  );
+  assert.match(s.gh.comments[0]?.body ?? "", /requested high · actual unknown \(not observable\)/);
+  assert.deepEqual(
+    repo.runUsage(s.db, "run").map((r) => r.profile),
+    ["cc-gw", "cc-gw"],
+  );
+  const a = s.db
+    .prepare("SELECT profile, requested_model, requested_effort, reason FROM step_attempt LIMIT 1")
+    .get();
+  assert.deepEqual(
+    { ...a },
+    {
+      profile: "cc-gw",
+      requested_model: "claude-opus-5-5",
+      requested_effort: "high",
+      reason: "hard review",
+    },
+  );
+});

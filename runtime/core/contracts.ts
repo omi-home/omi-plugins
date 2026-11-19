@@ -474,6 +474,11 @@ export const StepComment = z
     actualModel: z.string().nullable(), // observed, or "unknown"; null only for omi-cli
     requestedEffort: z.string().nullable(),
     actualEffort: z.literal("unknown").nullable(), // not observable (ADR-0001 D2)
+    /** Execution profile the Coordinator chose and why (Feature-0021 #137); absent = routing. */
+    profile: z.string().max(40).optional(),
+    selectionReason: text(500).optional(),
+    /** A thinking block was seen in the transcript: the observable trace of effort. */
+    thinkingObserved: z.boolean().optional(),
     commitSha: sha.optional(),
     status: StepOutcome,
     summary: text(2000),

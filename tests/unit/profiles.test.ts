@@ -7,7 +7,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { profilesCheck } from "../../runtime/cli/doctor.ts";
 import { main } from "../../runtime/cli/main.ts";
-import { listProfiles, loadProfiles } from "../../runtime/core/config.ts";
+import { usageByProfile } from "../../runtime/cli/status.ts";
+import { listProfiles, loadProfiles, selectProfile } from "../../runtime/core/config.ts";
 import { ProfilesFile } from "../../runtime/core/contracts.ts";
 import { OmiError } from "../../runtime/core/errors/errors.ts";
 
@@ -130,4 +131,57 @@ test("workspace template matches the contract", () => {
     new URL("../../templates/workspace/.omi-plugins/omi.config.json", import.meta.url),
   );
   assert.ok(ProfilesFile.safeParse(JSON.parse(readFileSync(tpl, "utf8"))).success);
+});
+
+test("selectProfile (#217): validated choice, defaults to the profile's first model/effort", () => {
+  const ps = loadProfiles(workspace({ profiles: [sub, { ...gw, disabled: true }] }));
+  assert.equal(selectProfile(ps, {}), undefined);
+  const env = { OMI_T_SUB: SECRET };
+  const pick = selectProfile(ps, { profile: "cc-sub", reason: "simple docs task" }, env);
+  assert.deepEqual(
+    [pick?.profile.name, pick?.model, pick?.effort, pick?.reason],
+    ["cc-sub", "claude-opus-5-5", "high", "simple docs task"],
+  );
+  assert.equal(
+    selectProfile(
+      ps,
+      {
+        profile: "cc-sub",
+        model: "claude-sonnet-5-5",
+        effort: "medium",
+        reason: "r",
+      },
+      env,
+    )?.model,
+    "claude-sonnet-5-5",
+  );
+  const usage = (o: Parameters<typeof selectProfile>[1], msg: RegExp) =>
+    assert.throws(() => selectProfile(ps, o, env), { code: "USAGE_INVALID", message: msg });
+  usage({ model: "claude-opus-5-5" }, /need --profile/);
+  usage({ profile: "nope", reason: "r" }, /no profile nope/);
+  usage({ profile: "cc-gw", reason: "r" }, /disabled/);
+  usage({ profile: "cc-sub", model: "claude-haiku-5-5", reason: "r" }, /offers models/);
+  usage({ profile: "cc-sub", effort: "low", reason: "r" }, /offers efforts/);
+  usage({ profile: "cc-sub", effort: "bogus", reason: "r" }, /offers efforts/);
+  usage({ profile: "cc-sub", reason: "  " }, /--reason is required/);
+  // Nothing starts that cannot authenticate; the message names the variable, never a value.
+  assert.throws(() => selectProfile(ps, { profile: "cc-sub", reason: "r" }, {}), {
+    code: "CONFIG_INVALID",
+    message: /OMI_T_SUB is not set/,
+  });
+});
+
+test("usageByProfile (#217): usage summed per profile, no profile = routing", () => {
+  const u = (n: number) => ({ inputTokens: n, outputTokens: 1 });
+  assert.deepEqual(
+    usageByProfile([
+      { profile: null, usage: u(1) },
+      { profile: "cc-sub", usage: u(10) },
+      { profile: "cc-sub", usage: u(5) },
+    ]).map((b) => [b.profile, b.usage.inputTokens, b.usage.outputTokens]),
+    [
+      ["routing", 1, 1],
+      ["cc-sub", 15, 2],
+    ],
+  );
 });

@@ -33,7 +33,7 @@ import {
   setStatus,
 } from "../adapters/github/project.ts";
 import { fetchTicket, type Ticket, validateTicket } from "../adapters/github/ticket.ts";
-import { loadConfig, type OmiConfig } from "../core/config.ts";
+import { loadConfig, loadProfiles, type OmiConfig, selectProfile } from "../core/config.ts";
 import {
   type Check,
   type CleanupResult,
@@ -397,14 +397,27 @@ export interface RunResult {
   error?: { code: string; message: string; file: string };
 }
 
+/** `--profile/--model/--effort/--reason` of `task run`/`task analyze` (#217). */
+export interface PickFlags {
+  profile?: string;
+  model?: string;
+  effort?: string;
+  reason?: string;
+}
+
 /**
  * `omi task run <n>`: start (idempotent) then drive review and QA until PR_PENDING or a person is
  * needed (WAITING_PO, BLOCKED); the Project Status then mirrors the workflow state (#99).
  * Spawns agent processes: this command spends tokens.
  */
-export function taskRun(deps: TaskDeps & Pick<SliceDeps, "runAgent">, issue: number): RunResult {
+export function taskRun(
+  deps: TaskDeps & Pick<SliceDeps, "runAgent" | "hostEnv"> & { pick?: PickFlags },
+  issue: number,
+): RunResult {
   const gh = deps.gh ?? spawnGh;
-  const { config } = repo(deps.cwd);
+  const { workspace, config } = repo(deps.cwd);
+  // A bad choice is refused before anything starts.
+  const selection = selectProfile(loadProfiles(workspace), deps.pick ?? {}, deps.hostEnv);
   // Plan first: a bad role label or a non-delivery type fails before any worktree exists.
   const plan = planFor(config, fetchTicket(config, issue, gh), gh);
   if (plan.kind !== "delivery") {
@@ -427,6 +440,8 @@ export function taskRun(deps: TaskDeps & Pick<SliceDeps, "runAgent">, issue: num
           pluginRoot: PLUGIN_ROOT,
           evidenceDir,
           runAgent: deps.runAgent,
+          hostEnv: deps.hostEnv,
+          selection,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),
         },
         {
@@ -478,11 +493,12 @@ function planFor(config: OmiConfig, ticket: Ticket, gh: GhRunner): WorkflowPlan 
  * superseded (cancelled) by the new run. Spends tokens.
  */
 export function taskAnalyze(
-  deps: TaskDeps & Pick<SliceDeps, "runAgent">,
+  deps: TaskDeps & Pick<SliceDeps, "runAgent" | "hostEnv"> & { pick?: PickFlags },
   issue: number,
 ): RunResult {
   const gh = deps.gh ?? spawnGh;
-  const { root, config } = repo(deps.cwd);
+  const { root, workspace, config } = repo(deps.cwd);
+  const selection = selectProfile(loadProfiles(workspace), deps.pick ?? {}, deps.hostEnv);
   const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
   const ticket = fetchTicket(config, issue, gh);
   const bad = validateTicket(ticket, config).find((c) => c.status === "fail");
@@ -519,6 +535,8 @@ export function taskAnalyze(
           pluginRoot: PLUGIN_ROOT,
           evidenceDir: evidenceOf(run.id),
           runAgent: deps.runAgent,
+          hostEnv: deps.hostEnv,
+          selection,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),
         },
         {
