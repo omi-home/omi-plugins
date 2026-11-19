@@ -85,7 +85,6 @@ Dữ liệu và phiên làm việc của OMI nằm ngoài repo đích (ADR-0002 
 
 ```text
 omi-plugins/
-├── AGENTS.md                           # Contributor/development instructions for OMI itself
 ├── README.md
 ├── package.json                        # TypeScript/Node runtime
 ├── tsconfig.json
