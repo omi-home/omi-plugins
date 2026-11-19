@@ -7,7 +7,7 @@ Dành cho người vận hành (PO, maintainer) một repo dùng plugin `omi-eng
 Skill `/omi-engineering:omi-start`, hoặc tay theo thứ tự:
 
 0. `omi workspace init [--name <n>] [--repo <path|url>]` — dựng `<name>-workspace/` (`.claude/`, `.omi-plugins/`, `AGENTS.md` của Coordinator) và clone repo vào đó; chạy các bước sau trong workspace. Chạy lại an toàn.
-   Repo đang dùng layout cũ (`.omi/config.yaml`, worktree `../.omi-worktrees/`): chạy `omi workspace migrate --dry-run` rồi `omi workspace migrate` trong repo — dựng workspace, copy config và state sang `.omi-plugins/`; từ chối khi còn run mở hoặc worktree chưa dọn; không xoá gì trong repo, chỉ liệt kê file cũ (`.omi/`, `AGENTS.md`, `.claude/`, `CLAUDE.md`) để gỡ qua một task PR. `omi doctor` báo `layout`/`profiles-file`/`legacy-runs` cho tới khi sạch.
+   Repo đang dùng layout cũ (`.omi/config.yaml`, task worktree): theo [runbook chuyển đổi](./workspace-migration.md) (`omi workspace migrate`, gỡ file cũ qua task PR, kiểm bằng `omi doctor`, cách quay lại).
 1. `omi doctor` — Node, git, gh, Claude Code, AGENTS.md, config, quyền GitHub. `omi.config.yaml` chưa có section `github` là bình thường trước bước 2.
 2. `omi github project init [--title <text>]` — tìm/tạo Project, link repo, ghi section `github` vào `.omi-plugins/omi.config.yaml`, cài Issue Forms + PR template vào `.github/` (không ghi đè file có sẵn).
 3. `omi github repo plan --output json > plan.json` → PO duyệt → `omi github repo apply --approved-plan plan.json` (label, bảo vệ `main`/`develop`, merge method; chỉ thêm và siết, không bao giờ xoá hay nới).
@@ -43,12 +43,13 @@ checks:
 
 Policy mặc định của plugin: `config/github/*.yaml` (hierarchy, field/view, status, governance) và `config/risk-policy.yaml`.
 
-## 3. Quyền GitHub
+## 3. Quyền GitHub và xác thực agent
 
 - `gh auth login`, token có scope `repo` và `project` (thêm scope: `gh auth refresh -s project`). Thiếu scope `project`: `omi doctor` báo `github-auth` FAIL (INSUFFICIENT_SCOPES); `github-project` FAIL nghĩa là Project không tồn tại, không truy cập được hoặc đã đóng.
 - Quyền repo `write` trở lên (branch, comment, PR). `admin` chỉ cần cho `github repo apply`; `pr validate`/`pr merge` cảnh báo token admin vì nó có thể vượt bảo vệ branch (doctor chỉ in quyền `admin`, không cảnh báo).
 - Project: quyền write trên Project để đổi Status, admin để `project apply` tạo field/view.
 - Marketplace từ máy không có SSH key GitHub: `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`, và `gh auth setup-git`.
+- Agent (`task run`, `task analyze`) chạy với `CLAUDE_CONFIG_DIR` riêng và env dựng từ allowlist, nên không thấy login của host, `ANTHROPIC_API_KEY` hay token GitHub. Cần đặt `CLAUDE_CODE_OAUTH_TOKEN` (lấy bằng `claude setup-token`) trong env của lệnh `omi`; thiếu biến này thì bước agent dừng `CONFIG_INVALID`, run sang BLOCKED. Profile thực thi (Feature-0021 #137) sẽ cấp token theo profile.
 
 ## 4. Giới hạn GitHub Free (ADR-0001 D5)
 
