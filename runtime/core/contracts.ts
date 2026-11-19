@@ -154,6 +154,8 @@ export const WorkflowEventType = z.enum([
   "QA_PASSED",
   "QA_FAILED",
   "MERGE_VERIFIED",
+  /** No PR to merge (Spike, Issue-only task): no commit, no remote branch, Issue closed. */
+  "NO_CODE_VERIFIED",
   "CLEANUP_STARTED",
   "CLEANUP_SUCCEEDED",
   "CLEANUP_ERROR",
@@ -468,6 +470,8 @@ export const CleanupResult = z
         headSha: sha,
       })
       .nullable(),
+    /** Task without code: no PR, no remote branch, no commit (stands in for the merge). */
+    noCode: z.literal(true).optional(),
     steps: z
       .array(
         z.strictObject({
@@ -479,8 +483,8 @@ export const CleanupResult = z
       .min(1),
     state: WorkflowState.extract(["COMPLETED", "CLEANUP_FAILED"]),
   })
-  .refine((r) => r.state !== "COMPLETED" || r.pr?.merged, {
-    message: "COMPLETED requires a verified merge",
+  .refine((r) => r.state !== "COMPLETED" || r.pr?.merged || r.noCode, {
+    message: "COMPLETED requires a verified merge (or a verified task without code)",
     path: ["pr", "merged"],
   })
   .refine((r) => (r.state === "COMPLETED") === r.steps.every((s) => s.status !== "failed"), {

@@ -178,6 +178,9 @@ function fakeGh(f: Fake): GhRunner {
         },
       });
     }
+    if (query.includes("{state}")) {
+      return ok({ repository: { issue: { state: f.open.has(n) ? "OPEN" : "CLOSED" } } });
+    }
     // project item + parent of one issue
     const parent = f.parents[n];
     return ok({
@@ -208,8 +211,11 @@ const rest = (c: { id: number; body: string }) => ({
   author_association: "MEMBER",
 });
 
-/** Task #5 (Feature #3 → Milestone #2) with a pushed commit, PR #9 squash-merged. */
-function merged() {
+/**
+ * Task #5 (Feature #3 → Milestone #2) with a pushed commit, PR #9 squash-merged; `code: false`
+ * is a closed task that never committed (Spike): no PR, no remote branch.
+ */
+function merged({ code = true } = {}) {
   const base = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-fin-")));
   git(base, "init", "-q", "--bare", "-b", "main", "origin.git");
   git(base, "clone", "-q", "origin.git", "repo");
@@ -242,12 +248,14 @@ function merged() {
   });
   advanceRun(db, runId, { type: "WORKSPACE_CREATED" });
   db.close();
-  writeFileSync(join(ws.path, "a.txt"), "a\n");
-  git(ws.path, "add", "a.txt");
-  git(ws.path, "commit", "-q", "-m", "a");
-  git(ws.path, "push", "-q", "origin", "feature/5-x");
+  if (code) {
+    writeFileSync(join(ws.path, "a.txt"), "a\n");
+    git(ws.path, "add", "a.txt");
+    git(ws.path, "commit", "-q", "-m", "a");
+    git(ws.path, "push", "-q", "origin", "feature/5-x");
+  }
   const f: Fake = {
-    merged: true,
+    merged: code,
     tip: git(ws.path, "rev-parse", "HEAD"),
     branch: "feature/5-x",
     status: { 5: "In Review", 3: "In Progress", 2: "In Progress" },
@@ -333,6 +341,50 @@ test("PR not merged: refused before any change", () => {
   assert.throws(() => taskFinalize({ cwd: s.repo, gh: s.gh }, 5), { code: "POLICY_VIOLATION" });
   assert.equal(state(s.repo), "WORKSPACE_READY");
   assert.equal(existsSync(s.wt), true);
+});
+
+test("no code (Spike): closed Issue, no PR, no remote branch → cleaned, report, Done", () => {
+  const s = merged({ code: false });
+  const dry = taskFinalize({ cwd: s.repo, gh: s.gh, dryRun: true }, 5);
+  assert.equal(dry.cleanup?.steps[0]?.status, "done");
+  assert.equal(existsSync(s.wt), true);
+  const r = taskFinalize({ cwd: s.repo, gh: s.gh }, 5);
+  assert.equal(r.run.state, "COMPLETED");
+  assert.equal(r.receipt, null);
+  assert.equal(existsSync(s.wt), false);
+  assert.match(
+    s.f.comments[0]?.body ?? "",
+    /No PR: task without code[\s\S]*verify-merge: done — no code/,
+  );
+  assert.equal(s.f.status[5], "Done");
+  const events = taskStatus({ cwd: s.repo }, 5).transitions.map((t) => t.event);
+  assert.ok(events.includes("NO_CODE_VERIFIED"));
+});
+
+test("no code, task workspace already removed by hand: run closed", () => {
+  const s = merged({ code: false });
+  rmSync(dirname(s.wt), { recursive: true, force: true });
+  assert.equal(taskFinalize({ cwd: s.repo, gh: s.gh }, 5).run.state, "COMPLETED");
+});
+
+test("no PR refused: Issue open, branch on origin, or a local commit", () => {
+  const open = merged({ code: false });
+  open.f.open.add(5);
+  assert.throws(() => taskFinalize({ cwd: open.repo, gh: open.gh }, 5), /still open/);
+  assert.equal(state(open.repo), "WORKSPACE_READY");
+
+  const pushed = merged({ code: false });
+  git(pushed.wt, "push", "-q", "origin", "feature/5-x");
+  assert.throws(() => taskFinalize({ cwd: pushed.repo, gh: pushed.gh }, 5), /exists on origin/);
+
+  const local = merged({ code: false });
+  writeFileSync(join(local.wt, "a.txt"), "a\n");
+  git(local.wt, "add", "a.txt");
+  git(local.wt, "commit", "-q", "-m", "a");
+  const r = taskFinalize({ cwd: local.repo, gh: local.gh }, 5);
+  assert.equal(r.cleanup?.state, "CLEANUP_FAILED");
+  assert.match(r.cleanup?.steps[0]?.detail ?? "", /holds 1 commit/);
+  assert.equal(existsSync(local.wt), true);
 });
 
 test("legacy PR without marker: GitHub closing link to the task is accepted, any other is refused", () => {
