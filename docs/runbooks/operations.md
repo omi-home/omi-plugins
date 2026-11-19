@@ -40,6 +40,7 @@ checks:
 | `checks.<format\|lint\|build\|test\|scan>` | không có | `{ run, timeoutSec }` (timeout mặc định 600 s); tên khác bị từ chối. Không khai báo = không có gate xác định |
 | `cleanup.deleteRemoteBranch` | `false` | Dự phòng: cleanup hiện không xoá branch remote dù đặt `true` |
 | `cleanup.logRetentionDays` | `14` | Evidence cục bộ |
+| `context.keep` | `[]` | Mục context PO muốn giữ (tên plugin/skill/MCP server, đường dẫn memory file); `omi context plan` coi là cần |
 
 Policy mặc định của plugin: `config/github/*.yaml` (hierarchy, field/view, status, governance) và `config/risk-policy.yaml`.
 

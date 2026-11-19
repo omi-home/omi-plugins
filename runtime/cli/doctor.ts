@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import { loadConfig, type OmiConfig } from "../core/config.ts";
+import { parseContext } from "../core/context-usage.ts";
 import type { Check } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
 import { CONFIG_FILE, locate, STATE_FILE, WORKSPACE_DIR } from "../core/workspace.ts";
@@ -89,7 +90,7 @@ export const agentsMdInContext = (contextText: string) =>
  * `claude -p` is a local command (no model call, no tokens). The prompt goes through stdin: a Git
  * Bash shell would rewrite a `/context` argument into a Windows path.
  */
-function agentsMdLoaded(repoRoot: string): Check {
+function agentsMdLoaded(repoRoot: string): Check[] {
   const r = spawnSync("claude", ["-p"], {
     cwd: repoRoot,
     input: "/context",
@@ -98,20 +99,39 @@ function agentsMdLoaded(repoRoot: string): Check {
     windowsHide: true,
   });
   if (r.status !== 0) {
-    return {
-      name: "agents-md",
-      status: "warn",
-      detail: "could not run `claude -p /context` to verify",
-    };
-  }
-  return agentsMdInContext(r.stdout ?? "")
-    ? { name: "agents-md", status: "pass", detail: "Claude Code loads AGENTS.md" }
-    : {
+    return [
+      {
         name: "agents-md",
         status: "warn",
-        detail:
-          "AGENTS.md is not in Claude Code's memory files: is builtin cc-plugin-agents-md off?",
-      };
+        detail: "could not run `claude -p /context` to verify",
+      },
+    ];
+  }
+  return [
+    agentsMdInContext(r.stdout ?? "")
+      ? { name: "agents-md", status: "pass", detail: "Claude Code loads AGENTS.md" }
+      : {
+          name: "agents-md",
+          status: "warn",
+          detail:
+            "AGENTS.md is not in Claude Code's memory files: is builtin cc-plugin-agents-md off?",
+        },
+    contextSummary(r.stdout ?? ""),
+  ];
+}
+
+/** Start-of-session context here (DevTask-0066 #201): a number and a pointer, never a target. */
+export function contextSummary(contextText: string): Check {
+  try {
+    const { total } = parseContext(contextText);
+    return {
+      name: "context",
+      status: "pass",
+      detail: `${(total / 1000).toFixed(1)}k tokens at session start: \`omi context plan\` classifies them`,
+    };
+  } catch {
+    return { name: "context", status: "warn", detail: "could not read `/context` output" };
+  }
 }
 
 const inside = (dir: string, root: string) => {
@@ -425,7 +445,7 @@ export function doctor(cwd: string): Check[] {
   const home = loc?.workspace ?? repoRoot;
   const instr = instructions(home);
   checks.push({ name: "repository", status: "pass", detail: repoRoot }, instr);
-  if (instr.status === "pass") checks.push(agentsMdLoaded(home));
+  if (instr.status === "pass") checks.push(...agentsMdLoaded(home));
 
   let config: OmiConfig | undefined;
   try {
