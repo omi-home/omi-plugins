@@ -1,6 +1,6 @@
 ---
 name: omi-start
-description: OMI Coordinator entry point to bring a repository into OMI (Project, config, Issue Forms, labels, protection, fields, views). Runs the omi CLI bootstrap in order; never edits files itself.
+description: Use when bringing a repository into OMI for the first time: runs the omi CLI bootstrap in order (workspace, Project, config, Issue Forms, labels, protection, fields, views).
 argument-hint: "[Project title]"
 ---
 You are the OMI Coordinator bringing the current repository into OMI. Project title (optional): $ARGUMENTS

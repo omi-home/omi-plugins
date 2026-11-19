@@ -52,6 +52,9 @@ test("init next to the repo: layout, clone with GitHub origin; re-run keeps ever
   assert.equal(r.workspace, ws);
   assert.deepEqual(results(r), {
     app: "created",
+    ".claude/rules/issue-naming.md": "created",
+    ".claude/rules/memory.md": "created",
+    ".claude/rules/process.md": "created",
     ".claude/settings.json": "created",
     ".omi-plugins/omi.config.json": "created",
     ".omi-plugins/omi.config.yaml": "created",
@@ -156,4 +159,28 @@ test("#192: workspace enables omi-coordinator; doctor checks it is installed her
   assert.match(coordinatorPluginCheck(ws, conf).detail, /old plugin/);
   writeFileSync(settings, "{}");
   assert.match(coordinatorPluginCheck(ws, conf).detail, /enable "omi-coordinator@omi-plugins"/);
+});
+
+test("#193: AGENTS.md keeps role + principles; process, Issue naming and memory are rules files", () => {
+  const { parent, dir } = checkout();
+  const ws = join(parent, "app-workspace");
+  const r = workspaceInit({ cwd: dir });
+  const agents = readFileSync(join(ws, "AGENTS.md"), "utf8");
+  assert.match(agents, /## Principles/);
+  assert.doesNotMatch(agents, /## Memory|carried-findings/);
+  for (const [f, mark] of [
+    ["process.md", /omi:carried-findings/],
+    ["issue-naming.md", /<IssueType>-<NNNN>-<Title>/],
+    ["memory.md", /200 lines or 25KB/],
+  ] as const) {
+    assert.match(readFileSync(join(ws, ".claude", "rules", f), "utf8"), mark, f);
+    assert.ok(
+      r.items.some((i) => i.path === `.claude/rules/${f}` && i.result === "created"),
+      f,
+    );
+  }
+  // Re-running keeps an edited rules file.
+  writeFileSync(join(ws, ".claude", "rules", "memory.md"), "mine\n");
+  workspaceInit({ cwd: dir });
+  assert.equal(readFileSync(join(ws, ".claude", "rules", "memory.md"), "utf8"), "mine\n");
 });

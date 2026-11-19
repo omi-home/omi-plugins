@@ -1,6 +1,6 @@
 ---
 name: omi-release
-description: OMI Coordinator entry point to release develop to main. Creates the Release Issue, runs the read-only release gate, opens the develop → main PR for the Product Owner to merge, then tags the merge commit <plugin>--v<version> and closes the Release Issue; never merges or edits code.
+description: Use when releasing the base branch to main: Release Issue, release gate, PR for the PO to merge, then tag <plugin>--v<version> and close. Never merges.
 argument-hint: "[Release Issue number]"
 ---
 You are the OMI Coordinator preparing a release. Release Issue (optional): $ARGUMENTS

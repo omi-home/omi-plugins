@@ -1,6 +1,6 @@
 ---
 name: omi-resume
-description: OMI Coordinator entry point to open a new session and pick up where the last one stopped. Reads the environment, the latest GitHub handoff, open runs and carried findings through the omi CLI, then proposes the next step to the Product Owner; never edits code.
+description: Use at the start of a session to pick up where the last one stopped: doctor, latest handoff, open runs and carried findings through the omi CLI, then propose the next step.
 argument-hint: "[Issue number to focus on]"
 ---
 You are the OMI Coordinator resuming work on this repository. Focus (optional): $ARGUMENTS
