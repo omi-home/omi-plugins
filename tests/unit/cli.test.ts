@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { atLeast } from "../../runtime/cli/doctor.ts";
+import { atLeast } from "../../runtime/adapters/claude/launch.ts";
 import { HELP } from "../../runtime/cli/main.ts";
 
 const bin = fileURLToPath(new URL("../../bin/omi", import.meta.url));
@@ -30,7 +30,8 @@ test("golden: help and version, human and json", () => {
     `Usage: omi <command> [--output human|json]
 
 Commands:
-  doctor                 Check tools, repository, AGENTS.md, workspace config and GitHub access
+  doctor [--probe]       Check tools, repository, AGENTS.md, workspace config and GitHub access;
+                         --probe runs one short claude call per active profile (spends tokens)
   status [--milestone <n>]
                          Read-only overview of a Milestone (default: the active one): its Issues by
                          Project Status with open PRs, local runs and leftovers, Status drift and

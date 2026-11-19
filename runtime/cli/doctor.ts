@@ -1,11 +1,26 @@
 // `omi doctor`: deterministic environment/repository checks (spec §15, ADR-0001 D4/D5, T0.4).
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
+import {
+  agentEnv,
+  atLeast,
+  detectQuota,
+  HARNESSES,
+  observeRun,
+  selectionEnv,
+  versionRefusal,
+} from "../adapters/claude/launch.ts";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
-import { loadConfig, loadProfiles, type OmiConfig, secretEnv } from "../core/config.ts";
+import {
+  loadConfig,
+  loadProfiles,
+  type OmiConfig,
+  type Selection,
+  secretEnv,
+} from "../core/config.ts";
 import { parseContext } from "../core/context-usage.ts";
 import type { Check } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
@@ -18,14 +33,13 @@ import {
 } from "../core/workspace.ts";
 import { openState } from "../persistence/db.ts";
 import { openRuns, ownedRefs } from "../persistence/repository.ts";
+import { redact } from "../reporting/redact.ts";
 import { same } from "../resources/worktree.ts";
 import { memoryDir, OLD_LAYOUT, SETTINGS } from "./workspace.ts";
 
 export type { Check };
 
 const MIN_NODE = "22.18.0";
-/** First Claude Code release that reads AGENTS.md natively (T0.4). */
-const MIN_CLAUDE = "2.1.277";
 
 function run(cmd: string, args: string[], cwd: string) {
   const r = spawnSync(cmd, args, { cwd, encoding: "utf8", timeout: 30_000 });
@@ -34,13 +48,14 @@ function run(cmd: string, args: string[], cwd: string) {
 
 const semver = (s: string) => /(\d+)\.(\d+)\.(\d+)/.exec(s)?.slice(1).map(Number);
 
-export function atLeast(version: string, min: string): boolean {
-  const [a, b] = [semver(version), semver(min)];
-  if (!a || !b) return false;
-  for (let i = 0; i < 3; i++) {
-    if (a[i] !== b[i]) return (a[i] as number) > (b[i] as number);
-  }
-  return true;
+/** Claude Code inside the range the harness registry verified (#219); `omi task run` refuses others. */
+export function harnessCheck(t: Check): Check {
+  if (t.status === "fail") return t;
+  const why = versionRefusal(t.detail);
+  const { min, below } = HARNESSES.claudecode;
+  return why
+    ? { ...t, status: "fail", detail: why }
+    : { ...t, detail: `${t.detail} (verified >=${min} <${below})` };
 }
 
 function toolVersion(name: string, cmd: string, min: string | undefined, cwd: string): Check {
@@ -453,7 +468,7 @@ export function profilesCheck(workspace: string, env: NodeJS.ProcessEnv = proces
       },
     ];
   }
-  return active.map((p) =>
+  return active.flatMap((p): Check[] => [
     env[secretEnv(p)]
       ? { name: `profile ${p.name}`, status: "pass", detail: `${p.auth.type}, ${secretEnv(p)} set` }
       : {
@@ -461,7 +476,171 @@ export function profilesCheck(workspace: string, env: NodeJS.ProcessEnv = proces
           status: "fail",
           detail: `${secretEnv(p)} is not set (or mark the profile disabled)`,
         },
-  );
+    ...(p.auth.type === "gateway"
+      ? [
+          {
+            name: `gateway ${p.name}`,
+            status: "warn" as const,
+            detail: [
+              `${p.auth.baseUrl} is a third party: it sees the code and prompts and may alter model output (zero-width watermark, Spike-0009); OMI blocks zero-width characters`,
+              ...(p.auth.scheme === "bearer" ? ["scheme bearer is not verified yet"] : []),
+            ].join("; "),
+          },
+        ]
+      : []),
+  ]);
+}
+
+/** One HTTP GET: status and body (0 = no response). */
+export type HttpGet = (
+  url: string,
+  headers: Record<string, string>,
+) => { status: number; body: string };
+
+/**
+ * A synchronous GET through a child `node` (the CLI is synchronous); headers travel in the
+ * child's env, never on its command line.
+ */
+const httpGet: HttpGet = (url, headers) => {
+  const script =
+    "fetch(process.env.OMI_URL,{headers:JSON.parse(process.env.OMI_HEADERS)}).then(async r=>process.stdout.write(JSON.stringify({status:r.status,body:await r.text()}))).catch(e=>process.stdout.write(JSON.stringify({status:0,body:String(e)})))";
+  const r = spawnSync(process.execPath, ["-e", script], {
+    env: { ...agentEnv(process.env), OMI_URL: url, OMI_HEADERS: JSON.stringify(headers) },
+    encoding: "utf8",
+    timeout: 30_000,
+    windowsHide: true,
+  });
+  try {
+    return JSON.parse(r.stdout) as { status: number; body: string };
+  } catch {
+    return { status: 0, body: r.stderr || "no response" };
+  }
+};
+
+/** Runs `claude` with these args/env/stdin in `cwd` and returns its stream-json stdout. */
+export type ClaudeRun = (o: {
+  args: string[];
+  env: Record<string, string>;
+  cwd: string;
+  stdin: string;
+}) => string;
+
+const claudeRun: ClaudeRun = (o) =>
+  spawnSync(HARNESSES.claudecode.command, o.args, {
+    cwd: o.cwd,
+    env: o.env,
+    input: o.stdin,
+    encoding: "utf8",
+    timeout: 120_000,
+    windowsHide: true,
+  }).stdout ?? "";
+
+/**
+ * `omi doctor --probe` (#219), spends tokens: every profile not `disabled` gets one short
+ * `claude -p` run on its first model and effort, in an empty dir with a fresh config dir, checking
+ * auth and the `message.model` the host saw. A gateway first lists its models with
+ * `GET /v1/models` (free); a missing model or an error stops there. Details are redacted.
+ */
+export function probeProfiles(
+  workspace: string,
+  env: NodeJS.ProcessEnv = process.env,
+  io: { http?: HttpGet; claude?: ClaudeRun } = {},
+): Check[] {
+  const checks: Check[] = [];
+  for (const p of loadProfiles(workspace).filter((x) => !x.disabled)) {
+    const name = `probe ${p.name}`;
+    const secret = env[secretEnv(p)];
+    // A gateway may echo the key back in an error body: drop the known value, then the patterns.
+    const fail = (detail: string) =>
+      checks.push({
+        name,
+        status: "fail",
+        detail: redact(secret ? detail.replaceAll(secret, "[REDACTED]") : detail),
+      });
+    if (!secret) {
+      fail(`${secretEnv(p)} is not set`);
+      continue;
+    }
+    const [model, effort] = [p.models[0] as string, p.efforts[0] as Selection["effort"]];
+    if (p.auth.type === "gateway") {
+      const auth: Record<string, string> =
+        p.auth.scheme === "x-api-key"
+          ? { "x-api-key": secret }
+          : { authorization: `Bearer ${secret}` };
+      const r = (io.http ?? httpGet)(`${p.auth.baseUrl.replace(/\/+$/, "")}/v1/models`, {
+        ...auth,
+        "anthropic-version": "2023-06-01",
+      });
+      if (r.status !== 200) {
+        fail(
+          `GET /v1/models → ${r.status || "no response"}${r.status === 402 ? " (out of credit)" : ""}: ${r.body.slice(0, 200)}`,
+        );
+        continue;
+      }
+      let ids: string[] = [];
+      try {
+        ids =
+          (JSON.parse(r.body) as { data?: { id?: string }[] }).data?.map((m) => String(m.id)) ?? [];
+      } catch {
+        // an unreadable list is reported as missing models below
+      }
+      const missing = p.models.filter((m) => !ids.includes(m));
+      if (missing.length) {
+        fail(`gateway does not list ${missing.join(", ")}`);
+        continue;
+      }
+    }
+    const dir = mkdtempSync(join(tmpdir(), "omi-probe-"));
+    try {
+      const sel: Selection = { profile: p, model, effort, reason: "omi doctor --probe" };
+      const out = (io.claude ?? claudeRun)({
+        args: [
+          "-p",
+          "--model",
+          model,
+          "--effort",
+          effort,
+          "--no-session-persistence",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+        ],
+        env: { ...selectionEnv(sel, env), CLAUDE_CONFIG_DIR: join(dir, "config") },
+        cwd: dir,
+        stdin: "Reply with OK only.",
+      });
+      const quota = detectQuota(out);
+      if (quota) {
+        fail(`out of quota (${quota.signal})`);
+        continue;
+      }
+      let obs: ReturnType<typeof observeRun>;
+      try {
+        obs = observeRun(out);
+      } catch {
+        fail("claude produced no result: is it installed and in the verified range?");
+        continue;
+      }
+      if (obs.isError) {
+        fail(`run failed: ${obs.result.slice(0, 200)}`);
+        continue;
+      }
+      if (obs.actualModel !== model) {
+        fail(`asked ${model}, the host saw ${obs.actualModel}`);
+        continue;
+      }
+      checks.push({
+        name,
+        status: "pass",
+        detail: `auth ok, message.model ${model}, effort ${effort} ${obs.thinkingObserved ? "(thinking seen)" : "(no thinking block)"}`,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  return checks.length
+    ? checks
+    : [{ name: "probe", status: "pass", detail: `no active profile in ${PROFILES_FILE}` }];
 }
 
 export function doctor(cwd: string): Check[] {
@@ -471,7 +650,7 @@ export function doctor(cwd: string): Check[] {
       : { name: "node", status: "fail", detail: `${process.versions.node} < required ${MIN_NODE}` },
     toolVersion("git", "git", undefined, cwd),
     toolVersion("gh", "gh", undefined, cwd),
-    toolVersion("claude", "claude", MIN_CLAUDE, cwd),
+    harnessCheck(toolVersion("claude", "claude", undefined, cwd)),
   ];
 
   let loc: { workspace: string; root: string } | undefined;
