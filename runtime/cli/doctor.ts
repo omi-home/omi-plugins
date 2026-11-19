@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import { loadConfig, type OmiConfig } from "../core/config.ts";
@@ -11,7 +11,7 @@ import { OmiError } from "../core/errors/errors.ts";
 import { CONFIG_FILE, locate, STATE_FILE, WORKSPACE_DIR } from "../core/workspace.ts";
 import { openState } from "../persistence/db.ts";
 import { openRuns, ownedRefs } from "../persistence/repository.ts";
-import { OLD_LAYOUT } from "./workspace.ts";
+import { memoryDir, OLD_LAYOUT, SETTINGS } from "./workspace.ts";
 
 export type { Check };
 
@@ -189,6 +189,45 @@ export function layout(workspace: string, repoRoot: string): Check[] {
         : { name: "legacy-runs", status: "pass", detail: "no old-layout state or runs" },
   );
   return checks;
+}
+
+/** Claude Code loads only the first 200 lines / 25KB of MEMORY.md: warn with a margin (#180). */
+const MEMORY_MAX_LINES = 150;
+const MEMORY_MAX_BYTES = 15 * 1024;
+
+/**
+ * `memory-dir` (DevTask-0058 #180): the Coordinator's auto memory lives in the workspace, set by
+ * `autoMemoryDirectory` in its `.claude/settings.json`, and its MEMORY.md index stays loadable.
+ */
+export function memoryDirCheck(workspace: string): Check {
+  let dir: unknown;
+  try {
+    dir = JSON.parse(readFileSync(join(workspace, SETTINGS), "utf8")).autoMemoryDirectory;
+  } catch {
+    // Missing or unreadable settings: not set.
+  }
+  if (typeof dir !== "string" || !isAbsolute(dir) || !inside(resolve(dir), workspace)) {
+    return {
+      name: "memory-dir",
+      status: "warn",
+      detail: `set "autoMemoryDirectory": ${JSON.stringify(memoryDir(workspace))} in ${join(workspace, SETTINGS)}`,
+    };
+  }
+  let index = "";
+  try {
+    index = readFileSync(join(dir, "MEMORY.md"), "utf8");
+  } catch {
+    // No memory yet.
+  }
+  const lines = index ? index.replace(/\r?\n$/, "").split(/\r?\n/).length : 0;
+  const bytes = Buffer.byteLength(index);
+  return lines > MEMORY_MAX_LINES || bytes > MEMORY_MAX_BYTES
+    ? {
+        name: "memory-dir",
+        status: "warn",
+        detail: `MEMORY.md has ${lines} lines / ${bytes} bytes (keep ≤ ${MEMORY_MAX_LINES} lines and ≤ ${MEMORY_MAX_BYTES} bytes): merge or prune memories`,
+      }
+    : { name: "memory-dir", status: "pass", detail: dir };
 }
 
 function workflows(): Check {
@@ -382,7 +421,7 @@ export function doctor(cwd: string): Check[] {
       detail: [err.message, ...(issues ?? []).map((i) => `${i.path}: ${i.message}`)].join("; "),
     });
   }
-  if (loc) checks.push(...layout(loc.workspace, repoRoot));
+  if (loc) checks.push(...layout(loc.workspace, repoRoot), memoryDirCheck(loc.workspace));
 
   checks.push(...github(config));
   return checks;
