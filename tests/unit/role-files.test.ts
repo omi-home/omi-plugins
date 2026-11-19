@@ -36,9 +36,13 @@ test("every role gets AGENTS.md, REPORT.md, settings and its default skills; rew
     category: "implementation",
     edits: true,
     repo: "app",
+    checks: ["npm run lint", "npm test"],
   });
   const agents = readFileSync(join(taskRoot, "AGENTS.md"), "utf8");
-  assert.ok(agents.includes("`git -C app <command>`") && agents.includes("`cd app && <command>`"));
+  assert.ok(agents.includes("`git -C app <command>`"));
+  // #252: the rules name exactly the granted checks, never a generic `cd app && <command>`.
+  assert.ok(agents.includes("`cd app && npm run lint`, `cd app && npm test`"));
+  assert.ok(!agents.includes("`cd app && <command>`"));
   assert.equal(
     readFileSync(join(taskRoot, "REPORT.md"), "utf8"),
     readFileSync(join(pluginRoot, "templates/reports/implementation.md"), "utf8"),

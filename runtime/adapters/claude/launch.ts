@@ -206,7 +206,7 @@ export interface AgentObservation {
   thinkingObserved: boolean;
   isError: boolean;
   result: string;
-  /** `<tool>:<file_path?>` for every permission the run was denied. */
+  /** `<tool>:<command | file_path | "">` for every permission the run was denied. */
   permissionDenials: string[];
   /** Host-reported token usage of the run (result event `usage`), when present. */
   usage?: TokenUsage;
@@ -279,9 +279,10 @@ export function observeRun(streamJson: string): AgentObservation {
     ),
     isError: Boolean(result.is_error),
     result: String(result.result ?? ""),
+    // A Bash denial carries its command, not a path: without it a BLOCKED step is undiagnosable (#252).
     permissionDenials: (result.permission_denials ?? []).map(
-      (d: { tool_name: string; tool_input?: { file_path?: string } }) =>
-        `${d.tool_name}:${d.tool_input?.file_path ?? ""}`,
+      (d: { tool_name: string; tool_input?: { file_path?: string; command?: string } }) =>
+        `${d.tool_name}:${d.tool_input?.command ?? d.tool_input?.file_path ?? ""}`,
     ),
     ...(input !== undefined && output !== undefined
       ? {

@@ -106,10 +106,17 @@ export function writeRoleFiles(o: {
   repo: string;
   /** Skills installed for this run; default: the role's defaults. */
   skills?: string[];
+  /** Check commands this role may run (the repo's configured `checks`); none for read-only roles. */
+  checks?: string[];
 }): void {
   const part = (name: string) =>
     readFileSync(join(o.pluginRoot, AGENT_PACK, "agents-md", `${name}.md`), "utf8").trim();
-  const repoLine = `The product repository is \`${o.repo}/\`. Every Bash call starts in this workspace, so run git as \`git -C ${o.repo} <command>\` and the repository's own commands as \`cd ${o.repo} && <command>\` in one call: other forms are not permitted. Paths in your result are relative to the repository (\`src/x.ts\`, not \`${o.repo}/src/x.ts\`).`;
+  // Must name exactly what prepareAgent grants: an instruction outside allowedTools blocks the step (#252).
+  const checks = o.checks ?? [];
+  const checkLine = checks.length
+    ? ` The repository's check commands are ${checks.map((c) => `\`cd ${o.repo} && ${c}\``).join(", ")}; each may take extra arguments (e.g. one test file). No other command is permitted, including the repository's own aggregate scripts.`
+    : "";
+  const repoLine = `The product repository is \`${o.repo}/\`. Every Bash call starts in this workspace, so run git as \`git -C ${o.repo} <command>\` (never \`cd\` before git: it is refused).${checkLine} Paths in your result are relative to the repository (\`src/x.ts\`, not \`${o.repo}/src/x.ts\`).`;
   const sections = [
     part("core"),
     part(READ_ONLY_ROLES.includes(o.role) ? "read-only" : "editing"),
