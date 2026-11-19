@@ -184,7 +184,7 @@ export function observeRun(streamJson: string): AgentObservation {
             outputTokens: output,
             cacheReadTokens: nonNeg(u.cache_read_input_tokens),
             cacheCreationTokens: nonNeg(u.cache_creation_input_tokens),
-            thinkingTokens: nonNeg(u.thinking_tokens),
+            thinkingTokens: nonNeg(u.output_tokens_details?.thinking_tokens ?? u.thinking_tokens),
             costUsd:
               typeof result.total_cost_usd === "number" && result.total_cost_usd >= 0
                 ? result.total_cost_usd

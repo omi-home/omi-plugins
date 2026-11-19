@@ -243,7 +243,7 @@ function stubAgents(script: Script) {
           input_tokens: 100,
           output_tokens: 20,
           cache_read_input_tokens: 5,
-          thinking_tokens: 7,
+          output_tokens_details: { thinking_tokens: 7 },
         },
         total_cost_usd: 0.0123,
         num_turns: 3,
