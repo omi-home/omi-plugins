@@ -170,3 +170,17 @@ test("observeRun: model from assistant messages, not modelUsage; effort unknown;
   assert.equal(observeRun(line({ type: "result", result: "" })).actualModel, "unknown");
   assert.throws(() => observeRun(""), /no result event/);
 });
+
+test("observeRun: thinking tokens from usage.output_tokens_details (Spike-0010), flat field as fallback (#214)", () => {
+  const think = (usage: object) =>
+    observeRun(
+      JSON.stringify({
+        type: "result",
+        result: "ok",
+        usage: { input_tokens: 1, output_tokens: 2, ...usage },
+      }),
+    ).usage?.thinkingTokens;
+  assert.equal(think({ output_tokens_details: { thinking_tokens: 9 } }), 9);
+  assert.equal(think({ thinking_tokens: 4 }), 4);
+  assert.equal(think({}), undefined);
+});
