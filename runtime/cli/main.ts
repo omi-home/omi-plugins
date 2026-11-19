@@ -17,11 +17,12 @@ import {
   type StatusDrift,
 } from "../adapters/github/project-fields.ts";
 import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/github/repo.ts";
-import { IssueType, ProjectStatus } from "../core/contracts.ts";
+import { IssueType, ProjectStatus, type TokenUsage } from "../core/contracts.ts";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import type { RepoAction } from "../core/repo-config.ts";
 import { CONFIG_FILE } from "../core/workspace.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
+import { formatUsage, sumUsage } from "../reporting/render.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { type Check, doctor } from "./doctor.ts";
 import { type HookInput, preToolUse, sessionStart } from "./hook.ts";
@@ -382,6 +383,12 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
                 `${(n ? "" : k).padEnd(12)} ${"  ".repeat(i.depth - 1)}#${i.number} ${i.title}${i.state === "CLOSED" ? " (closed)" : ""}${i.prs.map((p) => ` PR #${p.number}${p.draft ? " (draft)" : ""}`).join("")}`,
             );
           }),
+          ...(r.usage.ok
+            ? r.usage.value.map(
+                (u) =>
+                  `usage     #${u.issue} ${u.runId} (${u.models.join(",")}): ${formatUsage(u.usage)}`,
+              )
+            : [`usage     ${fail(r.usage)}`]),
           ...(r.cleanup.ok
             ? humanScan(r.cleanup.value).map((l) => `run       ${l}`)
             : [`runs      ${fail(r.cleanup)}`]),
@@ -437,6 +444,15 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
               `worktree  ${st.worktree ? `${st.worktree.path}${st.worktree.exists ? "" : " (missing)"}` : "none"}`,
               `branch    ${st.branch ?? "none"}`,
               ...st.transitions.map((t) => `  ${t.from ?? "-"} → ${t.to} (${t.event})`),
+              ...st.usage.map(
+                (u) =>
+                  `usage     ${u.stepId} r${u.round} a${u.attempt} ${u.role} (${u.actualModel ?? "unknown"}): ${formatUsage(u.usage)}`,
+              ),
+              ...(st.usage.length > 1
+                ? [
+                    `usage     total: ${formatUsage(sumUsage(st.usage.map((u) => u.usage)) as TokenUsage)}`,
+                  ]
+                : []),
             ]
           : [`no run for issue #${issue}`];
         return ok(st, lines(human));

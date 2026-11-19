@@ -239,7 +239,15 @@ function stubAgents(script: Script) {
         type: "result",
         is_error: false,
         result: JSON.stringify(result),
-        usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 5 },
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cache_read_input_tokens: 5,
+          thinking_tokens: 7,
+        },
+        total_cost_usd: 0.0123,
+        num_turns: 3,
+        duration_ms: 4200,
         permission_denials: [],
       }),
     ].join("\n");
@@ -300,10 +308,10 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
     "release-validation:1",
   ]);
   assert.match(s.gh.comments[3]?.body ?? "", /1 commit\(s\) over base · checks passed on/);
-  // Cost row: host-observed tokens and wall time, never estimated (spec §14).
+  // Cost row: host-observed tokens, cache hit, list-price cost and host duration (spec §14).
   assert.match(
     s.gh.comments[0]?.body ?? "",
-    /\| Cost \| 100 in \/ 20 out tokens \(5 cache read\) · \d+\.\d s wall \|/,
+    /\| Cost \| 100 in \/ 20 out tokens · 7 thinking · 5 cache read \(5% hit\) · 3 turns · ≈ \$0\.0123 \(list-price estimate\) · 4\.2 s wall \|/,
   );
   assert.match(
     s.gh.comments[1]?.body ?? "",
@@ -331,11 +339,25 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
   );
   assert.deepEqual(repo.pendingReports(s.db, "run"), []);
   const stored = s.db.prepare("SELECT result FROM step_run WHERE step_id = 'implement'").get();
-  assert.deepEqual(JSON.parse(String(stored?.result)).usage, {
+  const usage = {
     inputTokens: 100,
     outputTokens: 20,
     cacheReadTokens: 5,
-  });
+    thinkingTokens: 7,
+    costUsd: 0.0123,
+    numTurns: 3,
+  };
+  assert.deepEqual(JSON.parse(String(stored?.result)).usage, usage);
+  // Every finished agent attempt keeps its usage in step_attempt (migration 4).
+  const rows = repo.runUsage(s.db, "run");
+  assert.deepEqual(
+    rows.map((r) => [r.stepId, r.round, r.attempt, r.role, r.actualModel]),
+    [
+      ["implement", 1, 1, "backend-engineer", "claude-sonnet-5-5"],
+      ["code-review", 1, 1, "code-reviewer", "claude-sonnet-5-5"],
+    ],
+  );
+  assert.deepEqual(rows[0]?.usage, usage);
 });
 
 test("2 + Architect + 2: every round reported, delta findings, no fifth Dev, one Architect", () => {

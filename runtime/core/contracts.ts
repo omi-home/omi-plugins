@@ -348,6 +348,10 @@ export const TokenUsage = z.strictObject({
   outputTokens: z.int().min(0),
   cacheReadTokens: z.int().min(0).optional(),
   cacheCreationTokens: z.int().min(0).optional(),
+  thinkingTokens: z.int().min(0).optional(),
+  /** Host `total_cost_usd`: computed from list prices, an estimate behind a gateway. */
+  costUsd: z.number().min(0).optional(),
+  numTurns: z.int().min(0).optional(),
 });
 
 /** Proposed rewrite of one `<!-- omi:section=… -->` of the Issue body; only the CLI writes it. */

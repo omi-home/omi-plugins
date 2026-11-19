@@ -289,8 +289,8 @@ function agentStep(
           hostEnv: d.hostEnv,
         }),
       );
-      const durationMs = Date.now() - started;
       const obs = observeRun(stdout);
+      const durationMs = obs.durationMs ?? Date.now() - started;
       if (obs.isError) throw new OmiError("INTERNAL", `${spec.role} run ended in an error`);
       // Token usage is what the host observed, never what the agent claims.
       const { usage: _claimed, ...claimed } = acceptStepResult(packet, obs.result);

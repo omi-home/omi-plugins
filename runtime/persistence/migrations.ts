@@ -112,6 +112,10 @@ export const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE workflow_run ADD COLUMN context TEXT;
   `,
+  // 4 — host-observed usage (TokenUsage JSON) of each finished attempt (DevTask-0068 #203)
+  `
+  ALTER TABLE step_attempt ADD COLUMN usage TEXT;
+  `,
 ];
 
 export function migrate(db: DatabaseSync, migrations: readonly string[] = MIGRATIONS): number {

@@ -7,8 +7,11 @@ import type { GhRunner } from "../adapters/github/client.ts";
 import { activeMilestone } from "../adapters/github/handoff.ts";
 import { type StatusDrift, statusDrift } from "../adapters/github/project-fields.ts";
 import { repoValidate } from "../adapters/github/repo.ts";
-import { type Check, ProjectStatus } from "../core/contracts.ts";
+import { type Check, ProjectStatus, type TokenUsage } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
+import { openState, statePath } from "../persistence/db.ts";
+import { latestRun, runUsage } from "../persistence/repository.ts";
+import { sumUsage } from "../reporting/render.ts";
 import { cleanupScan, type ScanResult } from "./cleanup.ts";
 import { repo } from "./task.ts";
 
@@ -31,6 +34,33 @@ export interface StatusResult {
   drift: Section<StatusDrift[]>;
   /** Governance checks that did not pass. */
   governance: Section<Check[]>;
+  /** Host-observed usage of the latest local run of each Issue in the tree that has some. */
+  usage: Section<IssueUsage[]>;
+}
+
+export interface IssueUsage {
+  issue: number;
+  runId: string;
+  /** Observed models of its agent attempts (profiles arrive with Feature-0021 #137). */
+  models: string[];
+  usage: TokenUsage;
+}
+
+/** Local state only: per Issue, the summed usage of its latest run. */
+export function issueUsage(cwd: string, repository: string, issues: number[]): IssueUsage[] {
+  const db = openState(statePath(cwd));
+  try {
+    return issues.flatMap((number) => {
+      const run = latestRun(db, { repository, number });
+      const rows = run ? runUsage(db, run.id) : [];
+      const usage = sumUsage(rows.map((r) => r.usage));
+      if (!run || !usage) return [];
+      const models = [...new Set(rows.map((r) => r.actualModel ?? "unknown"))];
+      return [{ issue: number, runId: run.id, models, usage }];
+    });
+  } finally {
+    db.close();
+  }
 }
 
 export const NOT_IN_PROJECT = "not in Project";
@@ -62,5 +92,12 @@ export function status(deps: { cwd: string; milestone?: number; gh?: GhRunner })
       statusDrift(config, deps.gh).filter((d) => inTree.has(d.issue.toLowerCase())),
     ),
     governance: section(() => repoValidate(config, deps.gh).filter((c) => c.status !== "pass")),
+    usage: section(() =>
+      issueUsage(
+        deps.cwd,
+        `${config.github.owner}/${config.github.repo}`,
+        rest.map((i) => i.number),
+      ),
+    ),
   };
 }

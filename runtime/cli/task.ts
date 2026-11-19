@@ -66,6 +66,7 @@ import {
 import { locate } from "../core/workspace.ts";
 import { type Db, openState, statePath } from "../persistence/db.ts";
 import {
+  type AttemptUsage,
   acquireLease,
   addArtifact,
   adoptResources,
@@ -80,6 +81,7 @@ import {
   type RunRow,
   releaseLease,
   runContext,
+  runUsage,
   transitions,
   upsertReport,
 } from "../persistence/repository.ts";
@@ -275,6 +277,8 @@ export interface TaskStatus {
   worktree: { path: string; exists: boolean } | null;
   branch: string | null;
   transitions: ReturnType<typeof transitions>;
+  /** Host-observed usage of each finished agent attempt (DevTask-0068 #203). */
+  usage: AttemptUsage[];
 }
 
 /** Local state only: no GitHub call. */
@@ -286,13 +290,14 @@ export function taskStatus(deps: TaskDeps, issue: number): TaskStatus {
       repository: `${config.github.owner}/${config.github.repo}`,
       number: issue,
     });
-    if (!run) return { run: null, worktree: null, branch: null, transitions: [] };
+    if (!run) return { run: null, worktree: null, branch: null, transitions: [], usage: [] };
     const path = ownedRefs(db, run.id, "worktree")[0];
     return {
       run,
       worktree: path ? { path, exists: existsSync(path) } : null,
       branch: ownedRefs(db, run.id, "branch")[0] ?? null,
       transitions: transitions(db, run.id),
+      usage: runUsage(db, run.id),
     };
   } finally {
     db.close();
