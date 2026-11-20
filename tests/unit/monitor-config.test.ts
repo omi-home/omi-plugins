@@ -20,11 +20,7 @@ import {
   MONITOR_SCHEMAS,
   renderSchema,
 } from "../../runtime/monitor/protocol.ts";
-import { schemaFile, writeSchemas } from "../../runtime/monitor/schemas.ts";
-
-// Regenerate with `npm test -- --test-update-snapshots tests/unit/monitor-config.test.ts`.
-const UPDATE =
-  process.env.OMI_UPDATE_SCHEMAS === "1" || process.execArgv.includes("--test-update-snapshots");
+import { schemaFile } from "../../runtime/monitor/schemas.ts";
 
 const bin = fileURLToPath(new URL("../../bin/omi", import.meta.url));
 
@@ -168,21 +164,42 @@ test("config set: --body-file input and output redaction", () => {
   writeFileSync(body, JSON.stringify({ changes: [{ path: "git.baseBranch", value: "dev" }] }));
   const r = main(["config", "set", "--body-file", body, "--output", "json"], ws);
   assert.equal(r.code, 0, r.stdout);
-  const g = main(["config", "get", "checks.test", "--output", "json"], ws);
-  assert.ok(!g.stdout.includes("C:\\Users\\"));
+  const tok = `ghp_${"a1B2".repeat(8)}`;
+  const s = main(
+    ["config", "set", "--body-file", body, "--confirm-commands", "--output", "json"],
+    ws,
+  );
+  assert.equal(s.code, 0);
+  writeFileSync(file(ws), YAML.replace("npm test", `curl http://h/${tok}`));
+  for (const args of [["--output", "json"], []]) {
+    const g = main(["config", "get", "checks.test", ...args], ws);
+    assert.ok(!g.stdout.includes(tok), g.stdout);
+    assert.match(g.stdout, /REDACTED/);
+  }
+});
+
+test("config set: unset under a missing parent is a no-op; a path through a scalar is CONFIG_INVALID", () => {
+  const ws = workspace();
+  const unset = set(ws, { changes: [{ path: "git.baseBranch", unset: true }] });
+  assert.equal(unset.code, 0, JSON.stringify(unset.out));
+  assert.equal(unset.out.data.changed, false);
+  assert.equal(readFileSync(file(ws), "utf8"), YAML);
+  const scalar = set(ws, { changes: [{ path: "github.owner.x", value: 1 }] });
+  assert.equal(scalar.code, 1);
+  assert.equal(scalar.out.error.code, "CONFIG_INVALID");
+  assert.equal(readFileSync(file(ws), "utf8"), YAML);
 });
 
 test("committed monitor schemas match the zod contracts", () => {
-  if (UPDATE) writeSchemas();
   for (const name of Object.keys(MONITOR_SCHEMAS)) {
     assert.ok(
       existsSync(schemaFile(name)),
-      `schemas/monitor/${name}.schema.json missing: run OMI_UPDATE_SCHEMAS=1 npm test`,
+      `schemas/monitor/${name}.schema.json missing: run npm run schemas:monitor`,
     );
     assert.equal(
       readFileSync(schemaFile(name), "utf8").replace(/\r\n/g, "\n"),
       renderSchema(name),
-      `${name} schema drifted: regenerate with OMI_UPDATE_SCHEMAS=1 npm test`,
+      `${name} schema drifted: regenerate with npm run schemas:monitor`,
     );
   }
 });

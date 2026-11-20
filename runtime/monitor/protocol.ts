@@ -14,7 +14,7 @@ import { ERROR_CODES } from "../core/errors/errors.ts";
  * - Also bump when an enum gains a value or a field is added to a strict input contract
  *   (ConfigSetInput, ProfileWrite, ProfileEdit): an older client cannot send or switch on it.
  * - Do not bump for an optional output field, a new command, or a new error code.
- * - A bump regenerates `schemas/monitor/*.schema.json` (`OMI_UPDATE_SCHEMAS=1 npm test`) in the same PR
+ * - A bump regenerates `schemas/monitor/*.schema.json` (`npm run schemas:monitor`) in the same PR
  *   and pairs with the omi-monitor release pinned in `config/web.json`.
  */
 export const MONITOR_PROTOCOL_VERSION = 1;

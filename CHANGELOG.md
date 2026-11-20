@@ -7,7 +7,7 @@ Mọi thay đổi đáng kể của plugin `omi-coordinator` (trước 0.2.0: `o
 ### Added
 
 - `omi config get|set`: validated, comment-preserving, atomic edits of `omi.config.yaml` (`--if-match`, `--confirm-commands` for `checks`/`setup`; errors `CONFIG_INVALID`, `CONFIG_CONFLICT`, `POLICY_VIOLATION`) — DevTask-0095 #284.
-- `--output json` envelope carries `protocolVersion` (`MONITOR_PROTOCOL_VERSION`, bump rules in `runtime/monitor/protocol.ts`); JSON Schemas for omi-monitor in `schemas/monitor/` (a test fails on drift; regenerate by running the schema writer in `runtime/monitor/schemas.ts`).
+- `--output json` envelope carries `protocolVersion` (`MONITOR_PROTOCOL_VERSION`, bump rules in `runtime/monitor/protocol.ts`); JSON Schemas for omi-monitor in `schemas/monitor/` (a test fails on drift; regenerate with `npm run schemas:monitor`).
 
 ## [0.2.0] - 2026-11-19
 

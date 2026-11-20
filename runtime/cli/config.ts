@@ -3,7 +3,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { isMap, parseDocument } from "yaml";
+import { isCollection, isMap, parseDocument } from "yaml";
 import { type OmiConfig, parseConfig } from "../core/config.ts";
 import { parseContract } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
@@ -91,9 +91,23 @@ export function configSet(workspace: string, o: ConfigSetOptions) {
   for (const change of input.changes) {
     const path = segments(change.path);
     touched.add(path[0] as string);
-    if ("unset" in change) doc.deleteIn(path);
-    // A plain scalar overwrites the old node's value in place, so its comments survive.
-    else doc.setIn(path, isPlain(change.value) ? change.value : doc.createNode(change.value));
+    // A path that runs into a scalar can never name a setting.
+    for (let i = 1; i < path.length; i++) {
+      if (doc.hasIn(path.slice(0, i)) && !isCollection(doc.getIn(path.slice(0, i), true))) {
+        throw new OmiError("CONFIG_INVALID", `config path ${change.path} runs into a plain value`);
+      }
+    }
+    try {
+      if ("unset" in change) {
+        // Unsetting something that is absent (or whose parent is) is a no-op.
+        if (doc.hasIn(path)) doc.deleteIn(path);
+      } else {
+        // A plain scalar overwrites the old node's value in place, so its comments survive.
+        doc.setIn(path, isPlain(change.value) ? change.value : doc.createNode(change.value));
+      }
+    } catch {
+      throw new OmiError("CONFIG_INVALID", `cannot apply the change at ${change.path}`);
+    }
   }
 
   // Validate the result as a whole; the file is only written when it parses.
