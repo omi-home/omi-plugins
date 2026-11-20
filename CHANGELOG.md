@@ -2,6 +2,13 @@
 
 Mọi thay đổi đáng kể của plugin `omi-coordinator` (trước 0.2.0: `omi-engineering`) ghi ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version theo [Semantic Versioning](https://semver.org/). Mỗi release là tag `omi-coordinator--v<version>` trên `main` (`omi release tag`; bản 0.1.0: `omi-engineering--v0.1.0`); chi tiết từng thay đổi nằm trong Issue/PR được link.
 
+## [Unreleased]
+
+### Added
+
+- `omi config get|set`: validated, comment-preserving, atomic edits of `omi.config.yaml` (`--if-match`, `--confirm-commands` for `checks`/`setup`; errors `CONFIG_INVALID`, `CONFIG_CONFLICT`, `POLICY_VIOLATION`) — DevTask-0095 #284.
+- `--output json` envelope carries `protocolVersion` (`MONITOR_PROTOCOL_VERSION`, bump rules in `runtime/monitor/protocol.ts`); JSON Schemas for omi-monitor in `schemas/monitor/` (a test fails on drift; regenerate with `npm run schemas:monitor`).
+
 ## [0.2.0] - 2026-11-19
 
 Gồm Milestone-0009 #136 và Milestone-0010 #182 trên [Project #2](https://github.com/orgs/omi-home/projects/2). **Breaking:** đổi tên plugin, layout workspace mới, bỏ rule pack (xem Changed/Removed); repo dùng 0.1.0 chuyển theo [runbook chuyển đổi](./docs/runbooks/workspace-migration.md).

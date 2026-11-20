@@ -1,0 +1,95 @@
+{
+  "title": "ProfileEdit",
+  "protocolVersion": 1,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+    },
+    "disabled": {
+      "type": "boolean"
+    },
+    "auth": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "subscription"
+            },
+            "tokenEnv": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            }
+          },
+          "required": [
+            "type",
+            "tokenEnv"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "gateway"
+            },
+            "baseUrl": {
+              "type": "string",
+              "format": "uri"
+            },
+            "scheme": {
+              "type": "string",
+              "enum": [
+                "x-api-key",
+                "bearer"
+              ]
+            },
+            "keyEnv": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            }
+          },
+          "required": [
+            "type",
+            "baseUrl",
+            "scheme",
+            "keyEnv"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "models": {
+      "minItems": 1,
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[\\w.:[\\]-]{1,100}$"
+      }
+    },
+    "efforts": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      }
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "additionalProperties": false
+}

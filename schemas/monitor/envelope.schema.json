@@ -1,0 +1,77 @@
+{
+  "title": "envelope",
+  "protocolVersion": 1,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "command": {
+      "type": "string"
+    },
+    "protocolVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "data": {},
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "USAGE_INVALID",
+            "CONFIG_INVALID",
+            "CONFIG_CONFLICT",
+            "CONTRACT_INVALID",
+            "SCHEMA_VERSION_UNSUPPORTED",
+            "TICKET_INVALID",
+            "TICKET_NOT_IN_PROJECT",
+            "DEPENDENCY_BLOCKED",
+            "POLICY_VIOLATION",
+            "INVALID_TRANSITION",
+            "OWNERSHIP_MISMATCH",
+            "WORKTREE_DIRTY",
+            "SETUP_FAILED",
+            "CLEANUP_UNSAFE",
+            "GITHUB_AUTH",
+            "GITHUB_RATE_LIMITED",
+            "GITHUB_UNAVAILABLE",
+            "NETWORK",
+            "LOCK_HELD",
+            "REPORT_NOT_POSTED",
+            "CRASH_RECOVERED",
+            "QUOTA_EXHAUSTED",
+            "SECRET_KEY_MISSING",
+            "SECRET_KEY_INVALID",
+            "SECRET_KEY_MISMATCH",
+            "SECRET_DECRYPT_FAILED",
+            "SECRET_KEY_EXISTS",
+            "SECRET_TOKEN_MISSING",
+            "INTERNAL"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "transient": {
+          "type": "boolean"
+        },
+        "details": {}
+      },
+      "required": [
+        "code",
+        "message",
+        "transient"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "ok",
+    "command",
+    "protocolVersion"
+  ],
+  "additionalProperties": false
+}

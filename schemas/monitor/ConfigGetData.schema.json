@@ -1,0 +1,24 @@
+{
+  "title": "ConfigGetData",
+  "protocolVersion": 1,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "value": {},
+    "etag": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "value",
+    "etag"
+  ],
+  "additionalProperties": false
+}
