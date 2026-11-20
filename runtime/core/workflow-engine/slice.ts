@@ -224,6 +224,8 @@ export function prepareAgent(o: {
   prompt: string;
   hostEnv?: NodeJS.ProcessEnv;
   selection?: Selection;
+  /** `agents.routing[role]`, passed to claude when there is no profile selection. */
+  route?: { model: string; effort: string };
   /** Skills installed into the task workspace for this run (#199). */
   skills?: string[];
 }): AgentLaunch {
@@ -310,8 +312,11 @@ function agentStep(
     const sel = d.selection;
     const skills = stepSkills(d.pluginRoot, { ...planned, round: ctx.round }, d.skills);
     const reason = sel?.reason ?? d.skills?.reason;
+    const route = config.agents.routing[spec.role];
     const attempt = beginAttempt(db, step.id, {
-      ...(sel ? { profile: sel.profile.name, model: sel.model, effort: sel.effort } : {}),
+      ...(sel
+        ? { profile: sel.profile.name, model: sel.model, effort: sel.effort }
+        : { model: route.model, effort: route.effort }),
       ...(reason ? { reason } : {}),
       skills,
     });
@@ -354,6 +359,7 @@ function agentStep(
           prompt: packetPrompt(packet),
           hostEnv: d.hostEnv,
           selection: sel,
+          route,
           skills,
         }),
       );
@@ -400,7 +406,6 @@ function agentStep(
           ? { ...rest, commitSha: sha }
           : { ...rest, summary: cut(`${rest.summary}\nRuntime: no changes to commit.`, 2000) };
       }
-      const route = config.agents.routing[spec.role];
       const comment = parseContract(
         StepComment,
         {
@@ -475,7 +480,6 @@ function agentStep(
       addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "log", path: file });
       if (err.code === "QUOTA_EXHAUSTED") {
         // The Issue shows why the step stopped, with the host's own signal (#218).
-        const route = config.agents.routing[spec.role];
         const comment = parseContract(
           StepComment,
           {

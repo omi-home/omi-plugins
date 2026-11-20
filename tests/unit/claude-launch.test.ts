@@ -257,6 +257,26 @@ test("profile (#217): model/effort passed; auth env from the profile only, host 
   assert.ok(!buildAgentLaunch(base).args.includes("--model"));
 });
 
+test("routing (#250): no profile → --model/--effort from agents.routing[role]", () => {
+  const base = {
+    pluginRoot: root,
+    role: "backend-engineer" as const,
+    taskRoot: task,
+    worktree: repo,
+    prompt: "",
+    hostEnv: host,
+  };
+  const l = buildAgentLaunch({ ...base, route: { model: "haiku", effort: "low" } });
+  const i = l.args.indexOf("--model");
+  assert.deepEqual(l.args.slice(i, i + 4), ["--model", "haiku", "--effort", "low"]);
+  const r = buildAgentLaunch({
+    ...base,
+    role: "code-reviewer",
+    route: { model: "opus", effort: "high" },
+  });
+  assert.equal(r.args[r.args.indexOf("--model") + 1], "opus");
+});
+
 test("observeRun: a thinking block is the observable trace of effort", () => {
   const think = (type: string) =>
     observeRun(

@@ -156,6 +156,8 @@ export function buildAgentLaunch(o: {
   hostEnv?: NodeJS.ProcessEnv;
   /** Profile, model and effort the Coordinator chose; none keeps the agent's own defaults. */
   selection?: Selection;
+  /** `agents.routing[role]`: passed as `--model`/`--effort` when there is no profile selection. */
+  route?: { model: string; effort: string };
 }): AgentLaunch {
   for (const [name, p] of [
     ["pluginRoot", o.pluginRoot],
@@ -169,6 +171,7 @@ export function buildAgentLaunch(o: {
   const configDir = join(o.taskRoot, ".omi-home", "claude");
   const host = o.hostEnv ?? process.env;
   const sel = o.selection;
+  const chosen = sel ?? o.route;
   return {
     command: "claude",
     args: [
@@ -182,7 +185,7 @@ export function buildAgentLaunch(o: {
       ...(outside ? ["--add-dir", o.worktree] : []),
       ...(o.allowedTools?.length ? ["--allowedTools", ...o.allowedTools] : []),
       ...(o.acceptEdits ? ["--permission-mode", "acceptEdits"] : []),
-      ...(sel ? ["--model", sel.model, "--effort", sel.effort] : []),
+      ...(chosen ? ["--model", chosen.model, "--effort", chosen.effort] : []),
       "--no-session-persistence",
       "--output-format",
       "stream-json",
