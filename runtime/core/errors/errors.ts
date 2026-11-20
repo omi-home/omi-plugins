@@ -7,6 +7,8 @@ import { redact, redactDeep } from "../../reporting/redact.ts";
 export const ERROR_CODES = {
   USAGE_INVALID: { transient: false },
   CONFIG_INVALID: { transient: false },
+  // `omi config set --if-match <etag>` found the file changed since the caller read it.
+  CONFIG_CONFLICT: { transient: false },
   CONTRACT_INVALID: { transient: false },
   SCHEMA_VERSION_UNSUPPORTED: { transient: false },
   TICKET_INVALID: { transient: false },

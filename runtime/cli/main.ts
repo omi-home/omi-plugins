@@ -22,10 +22,12 @@ import { IssueType, ProjectStatus, Role, type TokenUsage } from "../core/contrac
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import type { RepoAction } from "../core/repo-config.ts";
 import { CONFIG_FILE, locate } from "../core/workspace.ts";
+import { MONITOR_PROTOCOL_VERSION } from "../monitor/protocol.ts";
 import { redact, redactDeep } from "../reporting/redact.ts";
 import { formatUsage, sumUsage } from "../reporting/render.ts";
 import { skillList } from "../resources/role-files.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
+import { configGet, configSet } from "./config.ts";
 import { contextApply, contextPlan, humanContextPlan } from "./context.ts";
 import { type Check, doctor, probeProfiles } from "./doctor.ts";
 import { agentPreToolUse, type HookInput, preToolUse, sessionStart } from "./hook.ts";
@@ -159,6 +161,14 @@ Commands:
   profile list           Read-only: execution profiles not disabled in .omi-plugins/omi.config.json
                          (harness, auth type, models, efforts) and whether each secret env is set;
                          never prints a secret
+  config get [path]      Read-only: the validated settings of .omi-plugins/omi.config.yaml (defaults
+                         applied), or one value by dotted path (checks.test.run); data has an etag
+  config set [--body-file <path>] [--if-match <etag>] [--confirm-commands]
+                         Edit omi.config.yaml from JSON {"changes":[{"path":"git.baseBranch","value":"dev"},
+                         {"path":"setup","unset":true}]} (stdin, or --body-file). Validated as a whole,
+                         comments kept, written atomically; unknown fields or wrong types: CONFIG_INVALID
+                         and the file stays; stale --if-match: CONFIG_CONFLICT; changing checks or setup
+                         (shell commands) needs --confirm-commands: POLICY_VIOLATION
   skill list [--role <role>]
                          Read-only: each role's default and allowed skills (agent-pack) and what each
                          skill is for; the input for \`task run --skills\`
@@ -263,6 +273,8 @@ const REPO_WIDE = new Set([
   "context plan",
   "context apply",
   "profile list",
+  "config get",
+  "config set",
   "skill list",
   "hook pre-tool-use",
   "hook session-start",
@@ -335,7 +347,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
   );
   let command = "";
   const envelope = (body: object) =>
-    `${JSON.stringify(redactDeep({ ok: false, command, ...body }))}\n`;
+    `${JSON.stringify(redactDeep({ ok: false, command, protocolVersion: MONITOR_PROTOCOL_VERSION, ...body }))}\n`;
   const ok = (data: unknown, human: string, code: number = EXIT.ok): CliResult => ({
     code,
     stdout: json ? envelope({ ok: code === EXIT.ok, data }) : redact(human),
@@ -390,6 +402,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         "release",
         "workspace",
         "hook",
+        "config",
       ].includes(command)
     ) {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
@@ -406,6 +419,7 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         throw new OmiError("USAGE_INVALID", `cannot read --body-file ${file}`);
       }
     };
+    const configPath = command === "config get" ? rest.shift() : undefined;
     if (rest.length) throw new OmiError("USAGE_INVALID", `unexpected argument: ${rest[0]}`);
 
     switch (command) {
@@ -484,6 +498,21 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
                 )
               : ["profiles  none active: steps use agents.routing"],
           ),
+        );
+      }
+      case "config get": {
+        const r = configGet(locate(cwd).workspace, configPath);
+        return ok(r, `${JSON.stringify(r.value, null, 2)}\n`);
+      }
+      case "config set": {
+        const r = configSet(locate(cwd).workspace, {
+          input: values["body-file"] ? bodyFile() : readFileSync(0, "utf8"),
+          ifMatch: values["if-match"],
+          confirmCommands: values["confirm-commands"],
+        });
+        return ok(
+          r,
+          lines([`config    ${r.changed ? "updated" : "unchanged"} (etag ${r.etag.slice(0, 12)})`]),
         );
       }
       case "skill list": {
@@ -880,5 +909,7 @@ const parse = (args: string[]) =>
       remove: { type: "boolean" },
       bundled: { type: "boolean" },
       probe: { type: "boolean" },
+      "if-match": { type: "string" },
+      "confirm-commands": { type: "boolean" },
     },
   });

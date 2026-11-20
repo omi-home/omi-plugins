@@ -22,7 +22,7 @@ test("golden: help and version, human and json", () => {
   assert.deepEqual(omi(["version"]), { code: 0, stdout: `omi ${VERSION}\n`, stderr: "" });
   assert.deepEqual(omi(["version", "--output", "json"]), {
     code: 0,
-    stdout: `{"ok":true,"command":"version","data":{"omi":"${VERSION}"}}\n`,
+    stdout: `{"ok":true,"command":"version","protocolVersion":1,"data":{"omi":"${VERSION}"}}\n`,
     stderr: "",
   });
   assert.equal(
@@ -120,6 +120,14 @@ Commands:
   profile list           Read-only: execution profiles not disabled in .omi-plugins/omi.config.json
                          (harness, auth type, models, efforts) and whether each secret env is set;
                          never prints a secret
+  config get [path]      Read-only: the validated settings of .omi-plugins/omi.config.yaml (defaults
+                         applied), or one value by dotted path (checks.test.run); data has an etag
+  config set [--body-file <path>] [--if-match <etag>] [--confirm-commands]
+                         Edit omi.config.yaml from JSON {"changes":[{"path":"git.baseBranch","value":"dev"},
+                         {"path":"setup","unset":true}]} (stdin, or --body-file). Validated as a whole,
+                         comments kept, written atomically; unknown fields or wrong types: CONFIG_INVALID
+                         and the file stays; stale --if-match: CONFIG_CONFLICT; changing checks or setup
+                         (shell commands) needs --confirm-commands: POLICY_VIOLATION
   skill list [--role <role>]
                          Read-only: each role's default and allowed skills (agent-pack) and what each
                          skill is for; the input for \`task run --skills\`
