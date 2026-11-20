@@ -1001,6 +1001,58 @@ test("zeroWidthIn: untracked files and commit messages of an editing step", () =
   assert.deepEqual(zeroWidthIn(s.target, false, ["clean"]), []);
 });
 
+test("no profile (#250): each role launches with its agents.routing; state and report match", () => {
+  const s = setup();
+  const config = parseConfig({
+    github: { owner: "o", repo: "r", projectNumber: 1 },
+    checks: { test: { run: `node -e "process.exit(0)"` } },
+    agents: {
+      routing: {
+        "backend-engineer": { model: "haiku", effort: "low" },
+        "code-reviewer": { model: "opus", effort: "high" },
+      },
+    },
+  });
+  const ctx = runSlice({ ...s.deps, config }, s.target);
+  assert.equal(ctx.state, "PR_PENDING");
+  const routes: Record<string, [string, string]> = {
+    "backend-engineer": ["haiku", "low"],
+    "code-reviewer": ["opus", "high"],
+  };
+  assert.equal(s.agents.launches.length, 2);
+  s.agents.launches.forEach((l, i) => {
+    const role = i === 0 ? "backend-engineer" : "code-reviewer";
+    const at = l.args.indexOf("--model");
+    assert.deepEqual(l.args.slice(at, at + 4), [
+      "--model",
+      routes[role]?.[0],
+      "--effort",
+      routes[role]?.[1],
+    ]);
+  });
+  const rows = s.db
+    .prepare(
+      "SELECT s.role, a.profile, a.requested_model, a.requested_effort FROM step_attempt a JOIN step_run s ON s.id = a.step_run_id ORDER BY s.id",
+    )
+    .all()
+    .map((r) => ({ ...r }));
+  assert.deepEqual(rows, [
+    {
+      role: "backend-engineer",
+      profile: null,
+      requested_model: "haiku",
+      requested_effort: "low",
+    },
+    { role: "code-reviewer", profile: null, requested_model: "opus", requested_effort: "high" },
+  ]);
+  const body = (step: string) =>
+    s.gh.comments.find((c) => c.body.includes(`step=${step};`))?.body ?? "";
+  assert.match(body("implement"), /requested haiku · actual claude-sonnet-5-5 \(observed\)/);
+  assert.match(body("implement"), /requested low · actual unknown \(not observable\)/);
+  assert.match(body("code-review"), /requested opus · actual claude-sonnet-5-5 \(observed\)/);
+  assert.match(body("code-review"), /requested high · actual unknown \(not observable\)/);
+});
+
 test("profile chosen (#217): every agent runs on it; state and report record the choice", () => {
   const s = setup();
   const selection = {
