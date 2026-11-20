@@ -67,7 +67,7 @@ export function packetPrompt(packet: TaskPacket): string {
     RESULT_SCHEMA,
     "",
     `Copy workflowRunId, issue, stepId, round, attempt and role exactly from the packet; schemaVersion is ${SCHEMA_VERSION}.`,
-    "List repo-relative paths only. Your nextAction is advice; the OMI runtime decides what happens next.",
+    "The runtime computes `changedFiles` from git itself; leave it empty and do not run git to list files. Your nextAction is advice; the OMI runtime decides what happens next.",
   ].join("\n");
 }
 
@@ -210,20 +210,26 @@ export function acceptStepResult(packet: TaskPacket, raw: string): StepResult {
       });
     }
   }
+  // The runtime owns `changedFiles`: git's view since baseSha, never the agent's claim (#272).
+  // Read-only roles change nothing by definition, whatever the worktree already holds.
+  const changedFiles = READ_ONLY_ROLES.includes(r.role)
+    ? []
+    : [...changedSince(packet.worktree, packet.baseSha)].sort();
   const needs = r.status === "PASSED" ? PASSED_REQUIRES[r.role] : undefined;
-  if (needs === "files" && !r.changedFiles.length) {
+  if (needs === "files" && !changedFiles.length) {
     issues.push({ path: "changedFiles", message: `${r.role} PASSED without changing a file` });
   }
   if (needs === "section" && !r.sectionUpdates.some((u) => u.section === ROLE_SECTION[r.role])) {
     issues.push({ path: "sectionUpdates", message: `${r.role} PASSED without its section` });
   }
-  const changed = changedSince(packet.worktree, packet.baseSha);
-  for (const f of r.changedFiles) {
-    if (!changed.has(norm(f))) issues.push({ path: f, message: "not changed in the worktree" });
-    else if (packet.scope.length && !packet.scope.some((s) => inScope(norm(f), norm(s)))) {
+  for (const f of changedFiles) {
+    if (packet.scope.length && !packet.scope.some((s) => inScope(norm(f), norm(s)))) {
       issues.push({ path: f, message: "outside packet scope" });
     }
   }
+  // A claim is only compared: a listed file that did not change is noted, not fatal.
+  const real = new Set(changedFiles);
+  const unchanged = r.changedFiles.filter((f) => !real.has(norm(f)));
   for (const p of r.evidencePaths) {
     if (!existsSync(join(packet.worktree, p))) issues.push({ path: p, message: "does not exist" });
   }
@@ -235,5 +241,12 @@ export function acceptStepResult(packet: TaskPacket, raw: string): StepResult {
       issues,
     });
   }
-  return r;
+  if (!unchanged.length || READ_ONLY_ROLES.includes(r.role)) return { ...r, changedFiles };
+  const note = ` [runtime: claimed but not changed since baseSha: ${unchanged.join(", ")}]`;
+  const room = 2000 - note.length;
+  const summary =
+    room > 0
+      ? r.summary.slice(0, room) + note
+      : `${r.summary.slice(0, 1900)} [runtime: ${unchanged.length} claimed file(s) not changed]`;
+  return { ...r, changedFiles, summary: summary.slice(0, 2000) };
 }

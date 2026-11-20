@@ -478,16 +478,14 @@ test("transient GitHub error is a new attempt of the same step, not a round", ()
   assert.equal(repo.reviewRounds(s.db, "run"), 1);
 });
 
-test("a fake changed-file claim blocks the run; nothing is reported for it", () => {
+test("a fake changed-file claim no longer blocks the run: the runtime lists git's files (#272)", () => {
   const s = setup({ fakeClaim: true });
   const ctx = runSlice(s.deps, s.target);
-  assert.deepEqual([ctx.state, ctx.resumeFrom], ["BLOCKED", "RUNNING"]);
-  assert.equal(s.gh.comments.length, 0);
-  // The reason is kept for the CLI (G6-002, #121), not only the error code.
-  const err = lastStepError(s.deps.evidenceDir);
-  assert.equal(err?.code, "CONTRACT_INVALID");
-  assert.match(err?.message ?? "", /claims do not match the worktree/);
-  assert.match(readFileSync(err?.file ?? "", "utf8"), /src\/never\.txt/);
+  assert.equal(ctx.state, "PR_PENDING");
+  // The step report lists what git saw; the claim survives only as a note in the summary.
+  const report = s.gh.comments[0]?.body ?? "";
+  assert.match(report, /### Changed files\s+- `src\/implement-r1\.txt`\s+###/);
+  assert.match(report, /claimed but not changed since baseSha: src\/never\.txt/);
 });
 
 test("unparseable agent output: redacted raw output kept beside the error, path in details (#269)", () => {
