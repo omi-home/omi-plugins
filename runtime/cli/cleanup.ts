@@ -8,6 +8,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { type GhRunner, spawnGh } from "../adapters/github/client.ts";
 import { prFacts, receiptOf } from "../adapters/github/merge.ts";
+import { attemptLiveness, CRASHED_HINT } from "../core/attempt-liveness.ts";
 import { OmiError } from "../core/errors/errors.ts";
 import { openState, statePath } from "../persistence/db.ts";
 import {
@@ -35,6 +36,12 @@ export interface ScanRun {
   mergedPr: number | null;
   pendingReports: number;
   openAttempts: number;
+  /** Open attempts whose omi process is gone (PID dead): crashed, no need to wait for the lease. */
+  crashedAttempts: number;
+  /** Open attempts without a usable PID (older state): not judged. */
+  unknownAttempts: number;
+  /** `omi cleanup apply --safe` when crashedAttempts > 0. */
+  hint: string | null;
   /** A live `omi task run` holds the run lease: hands off. */
   leased: boolean;
 }
@@ -55,6 +62,9 @@ export function cleanupScan(deps: { cwd: string; gh?: GhRunner }): ScanResult {
   const db = openState(statePath(deps.cwd));
   try {
     const runs = openRuns(db).map((run): ScanRun => {
+      const open = openAttempts(db, run.id);
+      const live = open.map((a) => attemptLiveness(a));
+      const crashed = live.filter((l) => l === "crashed").length;
       const branch = claimedRefs(db, run.id, "branch")[0] ?? null;
       const path = ownedRefs(db, run.id, "worktree")[0];
       const pr = branch
@@ -72,8 +82,13 @@ export function cleanupScan(deps: { cwd: string; gh?: GhRunner }): ScanResult {
         worktree: path ? { path, exists: existsSync(path) } : null,
         mergedPr: pr && pr.baseRef === config.git.baseBranch ? pr.number : null,
         pendingReports: pendingCount(db, run.id),
-        openAttempts: openAttempts(db, run.id).length,
-        leased: leaseActive(db, runLease(run)),
+        openAttempts: open.length,
+        crashedAttempts: crashed,
+        unknownAttempts: live.filter((l) => l === "unknown").length,
+        hint: crashed ? CRASHED_HINT : null,
+        // A run whose open attempts all have a dead process is not driven by anyone, whatever
+        // the (6 h) lease still says.
+        leased: leaseActive(db, runLease(run)) && !(open.length > 0 && crashed === open.length),
       };
     });
     // Task workspaces are `<workspace>-task-<runId>/` siblings of the workspace.
@@ -128,6 +143,7 @@ export function cleanupApply(deps: { cwd: string; gh?: GhRunner; safe?: boolean 
           const n = recoverAttempts(db, {
             runId: r.runId,
             leaseKey: runLease(r),
+            isDead: (a) => attemptLiveness({ pid: a.pid }) === "crashed",
           });
           if (n) out.actions.push(`recovered ${n} open attempt(s)`);
         } finally {

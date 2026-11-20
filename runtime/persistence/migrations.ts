@@ -127,6 +127,10 @@ export const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE step_attempt ADD COLUMN skills TEXT;
   `,
+  // 7 — PID of the omi process that runs the attempt (DevTask-0086 #264); null = attempt predates it
+  `
+  ALTER TABLE step_attempt ADD COLUMN pid INTEGER;
+  `,
 ];
 
 export function migrate(db: DatabaseSync, migrations: readonly string[] = MIGRATIONS): number {

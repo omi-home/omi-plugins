@@ -287,7 +287,7 @@ export function beginAttempt(
       ) + 1;
     const now = iso();
     db.prepare(
-      "INSERT INTO step_attempt (step_run_id, attempt, started_at, profile, requested_model, requested_effort, reason, skills) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO step_attempt (step_run_id, attempt, started_at, profile, requested_model, requested_effort, reason, skills, pid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(
       stepRunId,
       next,
@@ -297,6 +297,7 @@ export function beginAttempt(
       choice?.effort ?? null,
       choice?.reason ?? null,
       choice?.skills ? JSON.stringify(choice.skills) : null,
+      process.pid,
     );
     setStepState(db, stepRunId, ["PENDING", "RUNNING"], "RUNNING", now);
     return next;
@@ -616,14 +617,21 @@ export const pendingCount = (db: Db, runId: string): number =>
 export const leaseActive = (db: Db, key: string, now = Date.now()): boolean =>
   db.prepare("SELECT 1 FROM lease WHERE key = ? AND expires_at > ?").get(key, now) !== undefined;
 
-/** Open attempts of a run's steps (a crash leaves them open). */
-export const openAttempts = (db: Db, runId: string): { stepRunId: number; attempt: number }[] =>
+/** Open attempts of a run's steps (a crash leaves them open); `pid` is null for pre-#264 attempts. */
+export const openAttempts = (
+  db: Db,
+  runId: string,
+): { stepRunId: number; attempt: number; pid: number | null }[] =>
   db
     .prepare(
-      "SELECT a.step_run_id, a.attempt FROM step_attempt a JOIN step_run s ON s.id = a.step_run_id WHERE s.run_id = ? AND a.finished_at IS NULL",
+      "SELECT a.step_run_id, a.attempt, a.pid FROM step_attempt a JOIN step_run s ON s.id = a.step_run_id WHERE s.run_id = ? AND a.finished_at IS NULL",
     )
     .all(runId)
-    .map((r) => ({ stepRunId: Number(r.step_run_id), attempt: Number(r.attempt) }));
+    .map((r) => ({
+      stepRunId: Number(r.step_run_id),
+      attempt: Number(r.attempt),
+      pid: r.pid === null || r.pid === undefined ? null : Number(r.pid),
+    }));
 
 /**
  * Crash recovery (#24 CR-003): closes the run's open attempts with CRASH_RECOVERED and puts their
@@ -633,11 +641,21 @@ export const openAttempts = (db: Db, runId: string): { stepRunId: number; attemp
  */
 export function recoverAttempts(
   db: Db,
-  o: { runId: string; leaseKey: string; now?: number },
+  o: {
+    runId: string;
+    leaseKey: string;
+    now?: number;
+    /** An active lease is ignored (and dropped) when every open attempt satisfies this: its omi process is dead. */
+    isDead?: (a: { pid: number | null }) => boolean;
+  },
 ): number {
   return tx(db, "recover attempts", () => {
-    if (leaseActive(db, o.leaseKey, o.now)) return 0;
     const open = openAttempts(db, o.runId);
+    if (leaseActive(db, o.leaseKey, o.now)) {
+      const isDead = o.isDead;
+      if (!isDead || open.length === 0 || !open.every((a) => isDead(a))) return 0;
+      db.prepare("DELETE FROM lease WHERE key = ?").run(o.leaseKey);
+    }
     const at = iso();
     for (const a of open) {
       db.prepare(
