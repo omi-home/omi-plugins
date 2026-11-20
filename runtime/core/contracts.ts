@@ -301,6 +301,52 @@ export const ProfilesFile = z.strictObject({
 });
 export type ProfilesFile = z.infer<typeof ProfilesFile>;
 
+/** The pre-ADR-0004 `omi.config.json` (and a YAML `profiles` section): read once by `omi profile import`. */
+export const LegacyProfilesFile = ProfilesFile;
+export type LegacyProfilesFile = ProfilesFile;
+
+/** A profile row of `state.sqlite`: the contract fields plus the metadata of its sealed token. */
+export const StoredProfile = z.strictObject({
+  profile: Profile,
+  /** The sealed token exists; its ciphertext never leaves the persistence layer's callers. */
+  hasToken: z.boolean(),
+  keyFingerprint: z.string().nullable(),
+  updatedAt: z.iso.datetime(),
+});
+export type StoredProfile = z.infer<typeof StoredProfile>;
+
+/** What `omi profile list --output json` and the web show: no token, no ciphertext, no key. */
+export const ProfileView = z.strictObject({
+  name: z.string(),
+  harness: Harness,
+  disabled: z.boolean(),
+  auth: ProfileAuth,
+  models: z.array(z.string()),
+  efforts: z.array(ProfileEffort),
+  hasToken: z.boolean(),
+  keyFingerprint: z.string().nullable(),
+  updatedAt: z.iso.datetime(),
+});
+export type ProfileView = z.infer<typeof ProfileView>;
+
+/** `omi profile add`: a whole profile; the token only ever arrives on stdin. */
+export const ProfileWrite = Profile;
+export type ProfileWrite = z.infer<typeof ProfileWrite>;
+
+/** `omi profile edit`: any subset of the mutable fields. The name is immutable (ARC-006). */
+export const ProfileEdit = z.strictObject({
+  disabled: z.boolean().optional(),
+  auth: ProfileAuth.optional(),
+  models: z
+    .array(z.string().regex(/^[\w.:[\]-]{1,100}$/, "expected a model id"))
+    .min(1)
+    .max(20)
+    .refine(unique, "duplicate model")
+    .optional(),
+  efforts: z.array(ProfileEffort).min(1).refine(unique, "duplicate effort").optional(),
+});
+export type ProfileEdit = z.infer<typeof ProfileEdit>;
+
 /**
  * How a harness run said its profile is out of quota (#218, Spike-0009 Q4): a subscription sends
  * `rate_limit_event` with `status=rejected` and/or fails with 429; a gateway only fails with 402.
