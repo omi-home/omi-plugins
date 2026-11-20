@@ -125,7 +125,6 @@ test("acceptStepResult: real changes, evidence and commit accepted, also from a 
   const { dir, base } = repo();
   const p = buildTaskPacket(input(dir, base));
   execFileSync("git", ["-C", dir, "checkout", "-qb", "work"]);
-  writeFileSync(join(dir, "src.txt"), "x"); // outside scope, unclaimed: fine
   mkdirSync(join(dir, "src"));
   writeFileSync(join(dir, "src", "new.ts"), "n");
   git(dir, "add", "src/new.ts");
@@ -139,26 +138,71 @@ test("acceptStepResult: real changes, evidence and commit accepted, also from a 
     usage: { inputTokens: 10, outputTokens: 5 },
     sectionUpdates: [{ section: "as-built", markdown: "x" }],
   });
-  assert.equal(acceptStepResult(p, raw).usage?.outputTokens, 5);
+  const accepted = acceptStepResult(p, raw);
+  assert.equal(accepted.usage?.outputTokens, 5);
+  assert.deepEqual(accepted.changedFiles, ["src/new.ts", "src/untracked.ts"]);
   assert.equal(acceptStepResult(p, `Done.\n\`\`\`json\n${raw}\n\`\`\`\n`).status, "PASSED");
 });
 
-test("acceptStepResult: fake paths, foreign commit, out-of-scope file rejected", () => {
+test("acceptStepResult: changedFiles come from git, not from the agent's claim (#272)", () => {
+  const { dir, base } = repo();
+  const p = buildTaskPacket(input(dir, base));
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "src", "a.ts"), "a");
+  writeFileSync(join(dir, "src", "b.ts"), "b");
+  // Claims nothing: runtime lists both.
+  assert.deepEqual(acceptStepResult(p, result()).changedFiles, ["src/a.ts", "src/b.ts"]);
+  // Claims too few: still both.
+  assert.deepEqual(acceptStepResult(p, result({ changedFiles: ["src/a.ts"] })).changedFiles, [
+    "src/a.ts",
+    "src/b.ts",
+  ]);
+  // Claims too many: accepted, extra file is dropped and noted in the summary.
+  const extra = acceptStepResult(p, result({ changedFiles: ["src/a.ts", "src/ghost.ts"] }));
+  assert.deepEqual(extra.changedFiles, ["src/a.ts", "src/b.ts"]);
+  assert.match(extra.summary, /src\/ghost\.ts/);
+  assert.doesNotMatch(
+    acceptStepResult(p, result({ changedFiles: ["src/a.ts"] })).summary,
+    /runtime/,
+  );
+});
+
+test("acceptStepResult: rework after a commit in round 1 needs no new file change (#272)", () => {
+  const { dir, base } = repo();
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "src", "r1.ts"), "r1");
+  git(dir, "add", ".");
+  git(dir, "commit", "-qm", "round 1");
+  const r2 = buildTaskPacket({ ...input(dir, base), round: 2 });
+  const out = acceptStepResult(r2, result({ round: 2 }));
+  assert.deepEqual(out.changedFiles, ["src/r1.ts"]);
+});
+
+test("acceptStepResult: reviewer is not affected by files the engineer changed (#272)", () => {
+  const { dir, base } = repo();
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "src", "x.ts"), "x");
+  const p = buildTaskPacket({ ...input(dir, base), role: "code-reviewer", scope: [] });
+  assert.deepEqual(acceptStepResult(p, result({ role: "code-reviewer" })).changedFiles, []);
+});
+
+test("acceptStepResult: foreign commit, missing evidence, no change, out-of-scope change rejected", () => {
   const { dir, base } = repo();
   const p = buildTaskPacket(input(dir, base));
   const bad = (extra: Record<string, unknown>) => codeOf(() => acceptStepResult(p, result(extra)));
-  assert.equal(bad({ changedFiles: ["src/never-touched.ts"] }), "CONTRACT_INVALID");
+  // A claimed file that never changed is only noted, not fatal (#272).
+  assert.equal(bad({ changedFiles: ["src/never-touched.ts"] }), "no-throw");
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "src", "ok.ts"), "ok");
+  assert.equal(bad({}), "no-throw");
   assert.equal(bad({ evidencePaths: ["reports/missing.md"] }), "CONTRACT_INVALID");
   assert.equal(bad({ evidencePaths: ["../outside.md"] }), "CONTRACT_INVALID");
   assert.equal(bad({ commitSha: "deadbeefdeadbeef" }), "CONTRACT_INVALID");
   writeFileSync(join(dir, "a.txt"), "changed");
-  assert.equal(bad({ changedFiles: ["a.txt"] }), "CONTRACT_INVALID"); // scope is src/
+  assert.equal(bad({}), "CONTRACT_INVALID"); // a.txt really changed, scope is src/
+  writeFileSync(join(dir, "a.txt"), "a");
   writeFileSync(join(dir, "srcX.ts"), "x");
-  const narrow = buildTaskPacket({ ...input(dir, base), scope: ["src"] });
-  assert.equal(
-    codeOf(() => acceptStepResult(narrow, result({ changedFiles: ["srcX.ts"] }))),
-    "CONTRACT_INVALID",
-  );
+  assert.equal(bad({}), "CONTRACT_INVALID"); // srcX.ts is not under src/
 });
 
 test("acceptStepResult: read-only roles change no files; owned sections only by their owner", () => {
@@ -222,6 +266,11 @@ test("acceptStepResult: review lenses, verdicts, security escalation, QA must pr
   );
   // Automation QA authors tests: PASSED without a changed file is "just ran the tests".
   assert.equal(as("automation-qa-engineer", {}), "CONTRACT_INVALID");
+  // A claim cannot stand in for a real change: git decides (#272).
+  assert.equal(
+    as("automation-qa-engineer", { changedFiles: ["tests/x.test.ts"] }),
+    "CONTRACT_INVALID",
+  );
   // Manual QA reports through its `qa` section, never by editing.
   assert.equal(as("manual-qa-engineer", {}), "CONTRACT_INVALID");
   assert.equal(
