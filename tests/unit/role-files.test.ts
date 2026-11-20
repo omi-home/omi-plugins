@@ -46,6 +46,13 @@ test("every role gets AGENTS.md, REPORT.md, settings and its default skills; rew
   // #275: one check per command, and the bare form once the cwd is already in the repo.
   assert.ok(agents.includes("no `;`, no pipes"));
   assert.ok(agents.includes("run the bare check (e.g. `npm run lint`)"));
+  // CR-001: no claim that every Bash call starts in the workspace; bare read-only git once inside the repo.
+  assert.ok(!agents.includes("Every Bash call starts in this workspace"));
+  assert.ok(
+    agents.includes(
+      "run read-only git bare there (`git status`, `git diff`, `git log`, `git show`)",
+    ),
+  );
   assert.equal(
     readFileSync(join(taskRoot, "REPORT.md"), "utf8"),
     readFileSync(join(pluginRoot, "templates/reports/implementation.md"), "utf8"),

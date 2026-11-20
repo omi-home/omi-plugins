@@ -79,7 +79,7 @@ Dữ liệu và phiên làm việc của OMI nằm ngoài repo đích (ADR-0002 
 ```
 
 - Task workspace: `git fetch origin` trong checkout chính, clone local, `remote set-url origin <github>`, rồi tạo branch từ `origin/<base>`. Push và PR do CLI làm từ clone.
-- Agent có cwd = task workspace. Git chạy dạng `git -C <repo> …`, check chạy dạng `cd <repo> && <lệnh>`. Chỉ những dạng này được cấp quyền.
+- Agent có cwd = task workspace. Khi cwd ở task workspace: git chạy dạng `git -C <repo> …`, check chạy dạng `cd <repo> && <lệnh>`. Sau lệnh `cd <repo> && …` đầu tiên, Claude Code giữ cwd trong repo: khi đó git chạy trần (`git status|diff|log|show`, chỉ đọc) và check chạy trần `<lệnh>`. Mỗi check là một lệnh riêng (không `;`, pipe), có hoặc không có tham số. Chỉ những dạng này được cấp quyền.
 - Dọn chỉ khi receipt merge của GitHub khớp tip của clone và task workspace chỉ chứa repo cùng các file OMI sinh ra. Không `--force`, không xoá branch remote.
 
 ## Layout đầy đủ (spec §5)

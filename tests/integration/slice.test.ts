@@ -814,6 +814,12 @@ test("Manual QA may run the repo's check commands; reviewers may not (PO #124)",
     assert.ok(args("manual-qa-engineer").includes(bare));
     assert.ok(!args("code-reviewer").includes(bare));
   }
+  // CR-001: read-only git also bare (cwd inside the repo), never a bare write.
+  for (const sub of ["status", "diff", "log", "show"]) {
+    assert.ok(args("backend-engineer").includes(`Bash(git ${sub}*)`));
+    assert.ok(args("code-reviewer").includes(`Bash(git ${sub}*)`));
+  }
+  assert.ok(!args("backend-engineer").some((t) => /^Bash\(git (add|commit|push)/.test(t)));
 });
 
 test("refused commands are kept in evidence and listed in the step report (#252)", () => {
