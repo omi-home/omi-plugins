@@ -45,6 +45,12 @@ interface Script {
   qaDirties?: boolean;
   /** Engineer leaves an uncommitted file after its first step (release validation). */
   leavesDirt?: boolean;
+  /** Engineer leaves a `.env` file: the runtime refuses to commit it (#262). */
+  writesSecret?: boolean;
+  /** Engineer still reports a SHA of its own: the runtime's commit replaces it (#262). */
+  claimsSha?: boolean;
+  /** From this round the engineer changes nothing (nothing for the runtime to commit). */
+  noopFromRound?: number;
   /** Commands the host refused the engineer (permission_denials of its implement step, #252). */
   denies?: string[];
 }
@@ -165,9 +171,11 @@ function stubAgents(script: Script) {
       };
     } else if (role.endsWith("-engineer")) {
       const wt = packet.worktree;
-      const file = `src/${packet.stepId}-r${packet.round}.txt`;
+      // `noopFromRound`: from that round on the engineer changes nothing and claims its first file.
+      const noop = script.noopFromRound !== undefined && packet.round >= script.noopFromRound;
+      const file = noop ? "src/implement-r1.txt" : `src/${packet.stepId}-r${packet.round}.txt`;
       mkdirSync(join(wt, "src"), { recursive: true });
-      writeFileSync(join(wt, file), "work\n");
+      if (!noop) writeFileSync(join(wt, file), "work\n");
       const files = [file];
       if (script.addsTestFrom && packet.stepId >= script.addsTestFrom) {
         mkdirSync(join(wt, "tests"), { recursive: true });
@@ -177,15 +185,15 @@ function stubAgents(script: Script) {
       const breaking = script.breakChecksInRound === packet.round && packet.stepId === "implement";
       if (breaking) writeFileSync(join(wt, "broken"), "");
       else rmSync(join(wt, "broken"), { force: true });
-      git(wt, "add", "-A");
-      git(wt, "commit", "-qm", file);
+      // The agent never commits (#262): the runtime does after the step.
       if (script.leavesDirt && packet.stepId === "implement") writeFileSync(join(wt, "dirt"), "");
+      if (script.writesSecret) writeFileSync(join(wt, ".env"), "TOKEN=abc\n");
       result = {
         ...base,
         status: "PASSED",
         summary: `implemented ${packet.stepId} r${packet.round}`,
         changedFiles: script.fakeClaim ? ["src/never.txt"] : files,
-        commitSha: git(wt, "rev-parse", "HEAD"),
+        ...(script.claimsSha ? { commitSha: git(wt, "rev-parse", "HEAD") } : {}),
       };
     } else if (role === "code-reviewer") {
       const v = script.review?.(packet.round) ?? "PASSED";
@@ -702,16 +710,48 @@ test("Manual QA FAILED: same-round rework under new step ids, then QA passes →
   );
 });
 
-test("release validation: uncommitted work is a QA failure the engineer fixes", () => {
-  const s = setup({ leavesDirt: true }, delivery());
+test("runtime commits after implement: deterministic message, SHA from the runtime (#262)", () => {
+  const s = setup({ leavesDirt: true, claimsSha: true }, delivery());
   assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
-  const rel = s.gh.comments.map((c) => c.body).filter((b) => /step=release-validation/.test(b));
-  assert.match(rel[0] ?? "", /\| Status \| FAILED \|[\s\S]*REL-001/);
-  assert.match(rel[1] ?? "", /\| Status \| PASSED \|/);
-  assert.equal(
-    s.agents.packets.find((p) => p.stepId === "implement-qa1")?.openFindings[0]?.id,
-    "REL-001",
+  const wt = s.target.worktree;
+  assert.equal(git(wt, "status", "--porcelain"), "", "everything committed, dirt included");
+  const msg = git(wt, "log", "-1", "--format=%B");
+  assert.match(
+    msg,
+    /^feat\(backend\): #9 \(#9\)\n\nOMI step implement, round 1, attempt 1\.\n\nCo-Authored-By: claude-sonnet-5-5 </,
   );
+  const dev = s.gh.comments.find((c) => c.body.includes("step=implement;")) ?? { body: "" };
+  assert.ok(dev.body.includes(git(wt, "rev-parse", "HEAD").slice(0, 7)), "report shows the SHA");
+  assert.equal(git(wt, "rev-list", "--count", `${s.target.baseSha}..HEAD`), "1");
+  // The agent has no git write grant.
+  const args = s.agents.launches[0]?.args ?? [];
+  assert.ok(!args.some((t) => /git -C .+ (add|commit)/.test(t)));
+});
+
+test("a file the runtime must not commit blocks the step; nothing is staged (#262)", () => {
+  const s = setup({ writesSecret: true }, delivery());
+  assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
+  assert.equal(lastStepError(s.deps.evidenceDir)?.code, "POLICY_VIOLATION");
+  assert.match(lastStepError(s.deps.evidenceDir)?.message ?? "", /\.env/);
+  assert.equal(git(s.target.worktree, "rev-parse", "HEAD"), s.target.baseSha);
+  assert.equal(git(s.target.worktree, "diff", "--cached", "--name-only"), "");
+});
+
+test("rework round 2: a new commit; a no-change step makes none and the report says so (#262)", () => {
+  const s = setup({ review: (r) => (r === 1 ? "FAILED" : "PASSED"), noopFromRound: 2 }, delivery());
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const wt = s.target.worktree;
+  assert.equal(git(wt, "rev-list", "--count", `${s.target.baseSha}..HEAD`), "1");
+  const dev2 = s.gh.comments.find((c) => /step=implement;round=2/.test(c.body)) ?? { body: "" };
+  assert.match(dev2.body, /no changes to commit/);
+});
+
+test("rework round 2 with changes: second commit names round 2 (#262)", () => {
+  const s = setup({ review: (r) => (r === 1 ? "FAILED" : "PASSED") }, delivery());
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const wt = s.target.worktree;
+  assert.equal(git(wt, "rev-list", "--count", `${s.target.baseSha}..HEAD`), "2");
+  assert.match(git(wt, "log", "-1", "--format=%B"), /round 2, attempt 1/);
 });
 
 test("Manual QA BLOCKED stops for a person", () => {
@@ -751,16 +791,21 @@ test("Manual QA technical failure: unblocked run resumes in QA and still gets ch
 test("Manual QA may run the repo's check commands; reviewers may not (PO #124)", () => {
   const s = setup({}, delivery({ manualQa: true }));
   assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
-  const check = `Bash(${s.deps.config.checks.test?.run})`;
+  const repoRel = (
+    s.agents.launches[0]?.args.find((t) => t.startsWith("Bash(git -C ")) ?? ""
+  ).replace(/^Bash\(git -C (.+?) status\*\)$/, "$1");
+  const check = `Bash(cd ${repoRel} && ${s.deps.config.checks.test?.run})`;
   const args = (role: string) =>
     s.agents.launches.find((l) => l.stdin.includes(`"role": "${role}"`))?.args ?? [];
   assert.ok(args("manual-qa-engineer").includes(check));
-  const commit = (role: string) => args(role).some((t) => /^Bash\(git -C .+ commit\*\)$/.test(t));
-  assert.ok(commit("backend-engineer"), "engineers commit through git -C <repo>");
+  const commit = (role: string) =>
+    args(role).some((t) => /^Bash\(git -C .+ (commit|add)\*\)$/.test(t));
+  assert.ok(!commit("backend-engineer"), "the runtime commits, not the engineer (#262)");
   assert.ok(!commit("manual-qa-engineer"));
   assert.ok(!args("code-reviewer").includes(check));
+  assert.ok(args("backend-engineer").includes(check));
   // #252: a check may take arguments (one test file); reviewers still get none of it.
-  const withArgs = `Bash(${s.deps.config.checks.test?.run} *)`;
+  const withArgs = `Bash(cd ${repoRel} && ${s.deps.config.checks.test?.run} *)`;
   assert.ok(args("backend-engineer").includes(withArgs));
   assert.ok(args("manual-qa-engineer").includes(withArgs));
   assert.ok(!args("code-reviewer").includes(withArgs));
