@@ -55,6 +55,8 @@ const humanScan = (s: ScanResult) => [
         r.worktree ? `worktree${r.worktree.exists ? "" : " (missing)"}` : "no worktree",
         r.pendingReports ? `${r.pendingReports} pending report(s)` : "",
         r.openAttempts ? `${r.openAttempts} open attempt(s)` : "",
+        r.crashedAttempts ? `${r.crashedAttempts} crashed (process gone): ${r.hint}` : "",
+        r.unknownAttempts ? `${r.unknownAttempts} unknown (no PID)` : "",
         r.leased ? "leased (running)" : "",
       ]
         .filter(Boolean)
