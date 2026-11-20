@@ -791,7 +791,7 @@ test("Manual QA may run the repo's check commands; reviewers may not (PO #124)",
   assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
   const repoRel = (
     s.agents.launches[0]?.args.find((t) => t.startsWith("Bash(git -C ")) ?? ""
-  ).replace(/^Bash\(git -C (.+?) status\*\)$/, "$1");
+  ).replace(/^Bash\(git -C (.+?) status\)$/, "$1");
   const check = `Bash(cd ${repoRel} && ${s.deps.config.checks.test?.run})`;
   const args = (role: string) =>
     s.agents.launches.find((l) => l.stdin.includes(`"role": "${role}"`))?.args ?? [];
@@ -816,8 +816,22 @@ test("Manual QA may run the repo's check commands; reviewers may not (PO #124)",
   }
   // CR-001: read-only git also bare (cwd inside the repo), never a bare write.
   for (const sub of ["status", "diff", "log", "show"]) {
-    assert.ok(args("backend-engineer").includes(`Bash(git ${sub}*)`));
-    assert.ok(args("code-reviewer").includes(`Bash(git ${sub}*)`));
+    for (const role of ["backend-engineer", "code-reviewer"]) {
+      for (const form of [
+        `Bash(git -C ${repoRel} ${sub})`,
+        `Bash(git -C ${repoRel} ${sub} *)`,
+        `Bash(git ${sub})`,
+        `Bash(git ${sub} *)`,
+      ]) {
+        assert.ok(args(role).includes(form), `${role}: ${form}`);
+      }
+    }
+  }
+  for (const l of s.agents.launches) {
+    assert.ok(
+      !l.args.some((t) => /^Bash\(git .*\b(status|diff|log|show)\*\)$/.test(t)),
+      "no prefix `*` without a space (git difftool)",
+    );
   }
   assert.ok(!args("backend-engineer").some((t) => /^Bash\(git (add|commit|push)/.test(t)));
 });

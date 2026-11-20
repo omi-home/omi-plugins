@@ -121,6 +121,14 @@ export function agentPreToolUse(
     if (/^git(?:\.exe)?(?:\s+-[Cc]\s+(?:"[^"]*"|'[^']*'|\S+))*\s+push\b/.test(s)) {
       return "OMI: agents never push. Commit in the clone; the OMI CLI pushes (omi pr create).";
     }
+    const gitHead = /^git(?:\.exe)?(?:\s+-[Cc]\s+(?:"[^"]*"|'[^']*'|\S+))*\s+/.exec(s);
+    if (
+      gitHead &&
+      (/^difftool\b/.test(s.slice(gitHead[0].length)) ||
+        /(?:^|\s)--(?:ext-diff|extcmd|output)(?:[=\s]|$)/.test(s))
+    ) {
+      return "OMI: agents run git read-only; difftool, --ext-diff, --extcmd/-x and --output are refused.";
+    }
   }
   return null;
 }

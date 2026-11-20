@@ -230,12 +230,14 @@ export function prepareAgent(o: {
   const rel = relative(o.taskRoot, o.worktree);
   // ponytail: outside the task workspace (analysis) the absolute path must be typed verbatim.
   const repo = rel.startsWith("..") || isAbsolute(rel) ? o.worktree : rel.replaceAll("\\", "/");
-  const git = (sub: string[]) => sub.map((c) => `Bash(git -C ${repo} ${c}*)`);
+  // Word boundary (`<sub>` and `<sub> *`), never a bare prefix `*`: `git diff*` would match `git difftool`.
   // Read-only git also bare, for when a check's `cd <repo>` left the shell inside the repo (#275).
-  const read = [
-    ...git(["status", "diff", "log", "show"]),
-    ...["status", "diff", "log", "show"].map((c) => `Bash(git ${c}*)`),
-  ];
+  const read = ["status", "diff", "log", "show"].flatMap((c) => [
+    `Bash(git -C ${repo} ${c})`,
+    `Bash(git -C ${repo} ${c} *)`,
+    `Bash(git ${c})`,
+    `Bash(git ${c} *)`,
+  ]);
   // Two forms, with or without arguments (`npm test -- <file>`): `cd <repo> && <check>` from the task
   // workspace, and the bare `<check>` once a previous `cd` left the shell inside the repo (#252, #262, #275).
   const checks = o.checks.flatMap((c) => [
