@@ -107,6 +107,11 @@ test("agent hook: git stays read-only (no difftool, --ext-diff, --extcmd, --outp
     "git log --output=x",
     "git show --output x",
     "git diff --extcmd=y",
+    'git diff "--output=x"',
+    "git log '--output=x'",
+    "git show \\--output=x",
+    'git diff "--ext-diff"',
+    'git -C "a b" difftool',
   ]) {
     assert.match(call("Bash", { command: c }) ?? "", /read-only/, c);
   }
