@@ -18,6 +18,7 @@ import type { Role } from "../../runtime/core/contracts.ts";
 import {
   acceptStepResult,
   buildTaskPacket,
+  extractJson,
   MAX_RESULT_CHARS,
   packetPrompt,
   type TaskPacketInput,
@@ -242,6 +243,22 @@ test("acceptStepResult: invalid status, wrong identity, junk and oversized outpu
   assert.equal(code(result({ extra: true })), "CONTRACT_INVALID");
   assert.equal(code("I think it went well"), "CONTRACT_INVALID");
   assert.equal(code(result({ summary: "x".repeat(MAX_RESULT_CHARS) })), "CONTRACT_INVALID");
+});
+
+test("extractJson: fixed order, objects only, braces in strings ignored", () => {
+  const a = { a: 1 };
+  const b = { b: "x } {" };
+  const j = JSON.stringify;
+  assert.deepEqual(extractJson(j(a)), a);
+  assert.deepEqual(extractJson(`Done.\n\`\`\`json\n${j(a)}\n\`\`\`\n`), a);
+  assert.deepEqual(extractJson(`Done.\n\`\`\`\n${j(a)}\n\`\`\`\n`), a);
+  assert.deepEqual(extractJson(`Here is it: ${j(a)}\nThanks!`), a);
+  assert.deepEqual(extractJson(`first ${j(a)} then ${j(b)} end`), b);
+  assert.deepEqual(extractJson(`note {not json} then ${j(b)}`), b);
+  assert.deepEqual(extractJson(`\`\`\`json\n${j(a)}\n\`\`\`\n\`\`\`json\n${j(b)}\n\`\`\``), b);
+  assert.deepEqual(extractJson(`\`\`\`\nls\n\`\`\`\n\`\`\`\n${j(a)}\n\`\`\``), a);
+  assert.throws(() => extractJson("no json here"), { code: "CONTRACT_INVALID" });
+  assert.throws(() => extractJson("[1,2]"), { code: "CONTRACT_INVALID" });
 });
 
 const config = parseConfig({ github: { owner: "o", repo: "r", projectNumber: 2 } });

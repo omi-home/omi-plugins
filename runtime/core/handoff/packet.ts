@@ -71,15 +71,60 @@ export function packetPrompt(packet: TaskPacket): string {
   ].join("\n");
 }
 
-/** The whole output as JSON, or the last ```json fenced block in it. */
-function extractJson(raw: string): unknown {
-  const text = raw.trim();
-  const fenced = [...text.matchAll(/```json\s*\n([\s\S]*?)```/g)].at(-1)?.[1];
+/** Parses `s` as JSON; only a plain object counts. */
+function parseObject(s: string): unknown {
   try {
-    return JSON.parse(text.startsWith("{") ? text : (fenced ?? ""));
+    const v: unknown = JSON.parse(s);
+    return v !== null && typeof v === "object" && !Array.isArray(v) ? v : undefined;
   } catch {
-    throw new OmiError("CONTRACT_INVALID", "step result: output is not a JSON object");
+    return undefined;
   }
+}
+
+/** End index (exclusive) of the brace-balanced object starting at `start`; strings are skipped. */
+function balancedEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === "\\") i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return i + 1;
+  }
+  return -1;
+}
+
+/**
+ * The agent's JSON object, tried in a fixed order: the whole output; the last ```json block; the
+ * last bare ``` block whose content is an object; the last top-level brace-balanced object in
+ * the text (braces inside strings ignored). Only objects are accepted.
+ */
+export function extractJson(raw: string): unknown {
+  const text = raw.trim();
+  const whole = parseObject(text);
+  if (whole) return whole;
+  const lastBlock = (re: RegExp) =>
+    [...text.matchAll(re)]
+      .map((m) => parseObject(m[1] ?? ""))
+      .filter(Boolean)
+      .at(-1);
+  const found =
+    lastBlock(/```json[ \t]*\r?\n([\s\S]*?)```/g) ?? lastBlock(/```[ \t]*\r?\n([\s\S]*?)```/g);
+  if (found) return found;
+  let last: unknown;
+  for (let i = text.indexOf("{"); i !== -1; i = text.indexOf("{", i + 1)) {
+    const end = balancedEnd(text, i);
+    const obj = end === -1 ? undefined : parseObject(text.slice(i, end));
+    if (obj) {
+      last = obj;
+      i = end - 1;
+    }
+  }
+  if (last) return last;
+  throw new OmiError("CONTRACT_INVALID", "step result: output is not a JSON object");
 }
 
 const git = (cwd: string, args: string[]) =>
