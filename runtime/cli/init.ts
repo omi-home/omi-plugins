@@ -105,7 +105,7 @@ github:
   owner: ${JSON.stringify(owner)}
   repo: ${JSON.stringify(repo)}
   projectNumber: ${project.number}
-${template}`,
+${existsSync(join(root, "package-lock.json")) ? "setup: { run: npm ci }\n" : ""}${template}`,
     );
   }
 

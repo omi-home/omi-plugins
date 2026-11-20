@@ -377,3 +377,36 @@ test("Definition of Ready: real parent chain checked, wrong pair / title / Objec
   assert.equal(taskStart({ cwd: root, gh: gh.run }, 5).workspace.branch, "feature/5-t");
   assert.equal(taskStart({ cwd: root, gh: gh.run }, 11).workspace.branch, "bugfix/11-repro-b");
 });
+
+test("setup runs in the new clone, is skipped on reuse, reruns when the lockfile changes (#261)", () => {
+  const { root } = repo();
+  const count = 'node -e "require(\\"fs\\").appendFileSync(\\"ran.txt\\",\\"x\\")"';
+  writeFileSync(
+    join(root, ".omi-plugins", "omi.config.yaml"),
+    `github:\n  owner: o\n  repo: repo\n  projectNumber: 2\nsetup: { run: '${count}' }\n`,
+  );
+  const gh = fakeGh(tree());
+  const first = taskStart({ cwd: root, gh: gh.run }, 5);
+  const ran = () => readFileSync(join(first.workspace.path, "ran.txt"), "utf8").length;
+  assert.equal(ran(), 1);
+  taskStart({ cwd: root, gh: gh.run }, 5);
+  assert.equal(ran(), 1);
+  writeFileSync(join(first.workspace.path, "package-lock.json"), "{}");
+  taskStart({ cwd: root, gh: gh.run }, 5);
+  assert.equal(ran(), 2);
+});
+
+test("failing setup stops task start with SETUP_FAILED and no READY state (#261)", () => {
+  const { root } = repo();
+  writeFileSync(
+    join(root, ".omi-plugins", "omi.config.yaml"),
+    `github:\n  owner: o\n  repo: repo\n  projectNumber: 2\nsetup: { run: 'node -e "process.exit(2)"' }\n`,
+  );
+  const gh = fakeGh(tree());
+  assert.equal(
+    code(() => taskStart({ cwd: root, gh: gh.run }, 5)),
+    "SETUP_FAILED",
+  );
+  assert.deepEqual(gh.mutations, []);
+  assert.notEqual(taskStatus({ cwd: root }, 5).run?.state, "WORKSPACE_READY");
+});

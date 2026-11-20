@@ -76,6 +76,8 @@ export const OmiConfig = z.strictObject({
       routing: ModelRouting.prefault({}),
     })
     .prefault({}),
+  /** Optional dependency install run in a task clone, e.g. `npm ci`, before agent and checks. */
+  setup: GateCommand.optional(),
   /** Unset checks are skipped; a repo with none configured has no deterministic gate. */
   checks: GateChecks.prefault({}),
   context: z

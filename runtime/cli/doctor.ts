@@ -677,6 +677,13 @@ export function doctor(cwd: string): Check[] {
     if (!loc) throw locErr;
     config = loadConfig(loc.workspace);
     checks.push({ name: "config", status: "pass", detail: join(loc.workspace, CONFIG_FILE) });
+    checks.push({
+      name: "setup",
+      status: "pass",
+      detail: config.setup
+        ? `${config.setup.run} (timeout ${config.setup.timeoutSec}s)`
+        : "not configured: task clones get no dependency install",
+    });
   } catch (e) {
     const err = e instanceof OmiError ? e : new OmiError("INTERNAL", "config check crashed");
     const issues = (err.details as { issues?: { path: string; message: string }[] })?.issues;

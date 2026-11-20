@@ -1,6 +1,8 @@
 # OMI policy for this workspace (ADR-0002 D1); replaces <repo>/.omi/config.yaml.
-# `omi github project init` adds the github section (owner, repo, projectNumber).
+# `omi github project init` adds the github section (owner, repo, projectNumber) and, for a Node
+# repo with a package-lock.json, `setup: { run: npm ci }`.
 # Then add the repo's checks, e.g.:
+# setup: { run: npm ci }   # runs in each new task clone, again when a lockfile changes
 # checks:
 #   lint: { run: npm run lint }
 #   build: { run: npm run typecheck }
