@@ -807,6 +807,13 @@ test("Manual QA may run the repo's check commands; reviewers may not (PO #124)",
   assert.ok(args("backend-engineer").includes(withArgs));
   assert.ok(args("manual-qa-engineer").includes(withArgs));
   assert.ok(!args("code-reviewer").includes(withArgs));
+  // #275: bare forms for when a previous `cd` left the shell inside the repo.
+  const run = s.deps.config.checks.test?.run;
+  for (const bare of [`Bash(${run})`, `Bash(${run} *)`]) {
+    assert.ok(args("backend-engineer").includes(bare));
+    assert.ok(args("manual-qa-engineer").includes(bare));
+    assert.ok(!args("code-reviewer").includes(bare));
+  }
 });
 
 test("refused commands are kept in evidence and listed in the step report (#252)", () => {

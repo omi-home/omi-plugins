@@ -43,6 +43,9 @@ test("every role gets AGENTS.md, REPORT.md, settings and its default skills; rew
   // #252: the rules name exactly the granted checks, never a generic `cd app && <command>`.
   assert.ok(agents.includes("`cd app && npm run lint`, `cd app && npm test`"));
   assert.ok(!agents.includes("`cd app && <command>`"));
+  // #275: one check per command, and the bare form once the cwd is already in the repo.
+  assert.ok(agents.includes("no `;`, no pipes"));
+  assert.ok(agents.includes("run the bare check (e.g. `npm run lint`)"));
   assert.equal(
     readFileSync(join(taskRoot, "REPORT.md"), "utf8"),
     readFileSync(join(pluginRoot, "templates/reports/implementation.md"), "utf8"),

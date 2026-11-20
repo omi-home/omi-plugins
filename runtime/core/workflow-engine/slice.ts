@@ -230,11 +230,13 @@ export function prepareAgent(o: {
   const repo = rel.startsWith("..") || isAbsolute(rel) ? o.worktree : rel.replaceAll("\\", "/");
   const git = (sub: string[]) => sub.map((c) => `Bash(git -C ${repo} ${c}*)`);
   const read = git(["status", "diff", "log", "show"]);
-  // One form, the one the rules tell the agent to type: `cd <repo> && <check>`, with or without
-  // arguments (`npm test -- <file>`) (#252, #262).
+  // Two forms, with or without arguments (`npm test -- <file>`): `cd <repo> && <check>` from the task
+  // workspace, and the bare `<check>` once a previous `cd` left the shell inside the repo (#252, #262, #275).
   const checks = o.checks.flatMap((c) => [
     `Bash(cd ${repo} && ${c})`,
     `Bash(cd ${repo} && ${c} *)`,
+    `Bash(${c})`,
+    `Bash(${c} *)`,
   ]);
   const runsChecks = o.edits || o.runsChecks === true;
   // Git stays read-only for everyone: the runtime commits an implementing step's work (#262).
