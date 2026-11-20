@@ -57,6 +57,7 @@ import {
 import { OmiError } from "../errors/errors.ts";
 import { acceptStepResult, buildTaskPacket, packetPrompt } from "../handoff/packet.ts";
 import { runChecks } from "./checks.ts";
+import { commitWork } from "./commit.ts";
 import { policyFrom, type WorkflowEvent } from "./fsm.ts";
 import type { AnalysisPlan, DeliveryPlan, WorkflowPlan } from "./plan.ts";
 
@@ -201,7 +202,7 @@ export const spawnAgent = (l: AgentLaunch): string => {
  * Writes the role files of the task workspace, then the launch of its agent (ADR-0002 D2/D4).
  * Every Bash call starts in the task workspace: git is granted as `git -C <repo> …` (a `cd` before
  * git is refused by Claude Code) and check commands run as `cd <repo> && <check>`.
- * Read-only git for everyone; implementers may also commit and run the repo's checks.
+ * Read-only git for everyone (the runtime commits); implementers may also run the repo's checks.
  */
 export function prepareAgent(o: {
   pluginRoot: string;
@@ -226,14 +227,15 @@ export function prepareAgent(o: {
   const repo = rel.startsWith("..") || isAbsolute(rel) ? o.worktree : rel.replaceAll("\\", "/");
   const git = (sub: string[]) => sub.map((c) => `Bash(git -C ${repo} ${c}*)`);
   const read = git(["status", "diff", "log", "show"]);
-  // A check may take arguments (`npm test -- <file>`); the bare command alone is not enough (#252).
-  const checks = o.checks.flatMap((c) => [`Bash(${c})`, `Bash(${c} *)`]);
+  // One form, the one the rules tell the agent to type: `cd <repo> && <check>`, with or without
+  // arguments (`npm test -- <file>`) (#252, #262).
+  const checks = o.checks.flatMap((c) => [
+    `Bash(cd ${repo} && ${c})`,
+    `Bash(cd ${repo} && ${c} *)`,
+  ]);
   const runsChecks = o.edits || o.runsChecks === true;
-  const allowedTools = o.edits
-    ? [...read, ...git(["add", "commit"]), ...checks]
-    : runsChecks
-      ? [...read, ...checks]
-      : read;
+  // Git stays read-only for everyone: the runtime commits an implementing step's work (#262).
+  const allowedTools = runsChecks ? [...read, ...checks] : read;
   writeRoleFiles({ ...o, repo, checks: runsChecks ? o.checks : [] });
   return buildAgentLaunch({ ...o, allowedTools, acceptEdits: o.edits });
 }
@@ -302,6 +304,7 @@ function agentStep(
     });
     let report: { result: StepResult; actualModel: string; marker: string; body: string };
     try {
+      const fetched = fetchIssueContext(config, t.run.issue, d.gh);
       const packet = buildTaskPacket({
         workflowRunId: t.run.id,
         issue,
@@ -312,7 +315,7 @@ function agentStep(
         scope: [],
         worktree: t.worktree,
         baseSha: t.baseSha,
-        ...fetchIssueContext(config, t.run.issue, d.gh),
+        ...fetched,
         openFindings,
         readOnlyArtifacts: [],
         checkResults,
@@ -361,7 +364,25 @@ function agentStep(
       if (obs.isError) throw new OmiError("INTERNAL", `${spec.role} run ended in an error`);
       // Token usage is what the host observed, never what the agent claims.
       const { usage: _claimed, ...claimed } = acceptStepResult(packet, obs.result);
-      const result: StepResult = obs.usage ? { ...claimed, usage: obs.usage } : claimed;
+      let result: StepResult = obs.usage ? { ...claimed, usage: obs.usage } : claimed;
+      if (spec.edits && result.status === "PASSED") {
+        // The runtime commits, not the agent (#262): its own claim of a SHA is dropped.
+        const { commitSha: _sha, ...rest } = result;
+        const head = fetched.issueContext[0];
+        const sha = commitWork(t.worktree, {
+          type: head?.type ?? "dev-task",
+          title: head?.title ?? `Issue ${t.run.issue}`,
+          issue: t.run.issue,
+          round: ctx.round,
+          attempt,
+          stepId: spec.stepId,
+          scope: spec.role.replace(/-engineer$/, ""),
+          model: obs.actualModel,
+        });
+        result = sha
+          ? { ...rest, commitSha: sha }
+          : { ...rest, summary: cut(`${rest.summary}\nRuntime: no changes to commit.`, 2000) };
+      }
       const route = config.agents.routing[spec.role];
       const comment = parseContract(
         StepComment,
