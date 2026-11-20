@@ -80,7 +80,7 @@ Finding hoãn sang task khác: comment `<!-- omi:carried-findings=<ID> -->` trê
 | Agent/check báo BLOCKED, hoặc hết `maxAttempts` lỗi tạm thời | Status Blocked, `omi task status <n>` = BLOCKED, report BLOCKED trên Issue | Người quyết định, rồi `omi task unblock <n> --reason <text>` và `omi task run <n>` |
 | Hết 4 round review hoặc Architect báo đổi phạm vi | Status Waiting PO, comment escalation | PO quyết định; task workspace được giữ. Không có lệnh resume: PO tạo work item mới (Change Request / DevTask) hoặc đóng Issue. Không chạy round thứ 5 |
 | PR đã merge nhưng cleanup lỗi | `task finalize` exit 1, run CLEANUP_FAILED, Status Blocked | Đọc report cleanup trên Issue; sửa nguyên nhân (clone bẩn hoặc chưa push: commit/push hoặc chuyển thay đổi đi; file lạ trong task workspace; file đang bị khoá; path lạ) rồi chạy lại `omi task finalize <n>`. Không `--force` |
-| Phiên crash giữa chừng | `omi cleanup scan` thấy attempt mở, report chưa đăng, task đã merge chưa dọn | `omi cleanup apply --safe` |
+| Phiên crash giữa chừng | `omi cleanup scan` thấy attempt mở, report chưa đăng, task đã merge chưa dọn | `omi cleanup apply --safe` (`cleanup scan` ghi "crashed (process gone)" khi PID của attempt đã chết, và "unknown (no PID)" cho attempt tạo trước cột PID) |
 | Report không đăng được | outbox pending; bước không tiến | Lỗi tạm thời: chạy lại lệnh; lỗi quyền: sửa token rồi chạy lại |
 | Status Blocked nhưng `task status` là RECOVERY_REQUIRED hoặc FAILED | `task unblock` báo INVALID_TRANSITION | CLI hiện không tự đưa run vào hai state này; không sửa DB tay, báo maintainer kèm `omi task status <n> --output json` |
 | Hai phiên cùng một Issue | `LOCK_HELD` (exit 75) | Đợi phiên kia, không xoá lease |

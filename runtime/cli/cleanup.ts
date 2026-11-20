@@ -86,7 +86,9 @@ export function cleanupScan(deps: { cwd: string; gh?: GhRunner }): ScanResult {
         crashedAttempts: crashed,
         unknownAttempts: live.filter((l) => l === "unknown").length,
         hint: crashed ? CRASHED_HINT : null,
-        leased: leaseActive(db, runLease(run)),
+        // A run whose open attempts all have a dead process is not driven by anyone, whatever
+        // the (6 h) lease still says.
+        leased: leaseActive(db, runLease(run)) && !(open.length > 0 && crashed === open.length),
       };
     });
     // Task workspaces are `<workspace>-task-<runId>/` siblings of the workspace.
@@ -141,6 +143,7 @@ export function cleanupApply(deps: { cwd: string; gh?: GhRunner; safe?: boolean 
           const n = recoverAttempts(db, {
             runId: r.runId,
             leaseKey: runLease(r),
+            isDead: (a) => attemptLiveness({ pid: a.pid }) === "crashed",
           });
           if (n) out.actions.push(`recovered ${n} open attempt(s)`);
         } finally {

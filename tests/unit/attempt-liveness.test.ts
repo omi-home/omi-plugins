@@ -33,7 +33,10 @@ test("attemptLiveness: open+dead PID is crashed, no PID is unknown, live PID is 
   );
   assert.equal(attemptLiveness({ pid: null }, errno("ESRCH")), "unknown");
   assert.equal(attemptLiveness({ pid: 4242 }, errno("EINVAL")), "unknown");
-  assert.equal(attemptLiveness({ pid: 4242, finishedAt: "2026-01-01" }, errno("ESRCH")), "running");
+  assert.equal(
+    attemptLiveness({ pid: 4242, finishedAt: "2026-01-01" }, errno("ESRCH")),
+    "finished",
+  );
 });
 
 test("migration 7: old schema upgrades in place, keeps data, old attempt has null PID", () => {

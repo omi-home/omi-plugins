@@ -1,7 +1,7 @@
 // Shared by `cleanup scan`, `status` and `watch` (DevTask-0086 #264): is the omi process that
 // opened an attempt still alive? Pure apart from the injected `kill` probe (default process.kill).
 
-export type AttemptLiveness = "running" | "crashed" | "unknown";
+export type AttemptLiveness = "running" | "crashed" | "unknown" | "finished";
 
 export type PidProbe = (pid: number, signal: 0) => unknown;
 
@@ -28,7 +28,7 @@ export function attemptLiveness(
   a: { pid: number | null; finishedAt?: string | null },
   kill: PidProbe = process.kill,
 ): AttemptLiveness {
-  if (a.finishedAt) return "running";
+  if (a.finishedAt) return "finished";
   if (a.pid === null) return "unknown";
   const alive = pidAlive(a.pid, kill);
   return alive === null ? "unknown" : alive ? "running" : "crashed";

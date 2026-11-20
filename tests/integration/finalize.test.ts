@@ -2,7 +2,7 @@
 // Feature/Milestone roll-up, failure at each step (no merge, report not posted, cleanup failed,
 // status write failed) never shows Done, and a rerun resumes to exactly one cleanup comment.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -509,6 +509,63 @@ test("attempt left open by a crash: closed as CRASH_RECOVERED and retryable; a l
   const db3 = db5(s.repo);
   assert.equal(beginAttempt(db3, step.id), 2);
   db3.close();
+});
+
+/** A PID that belonged to a process which has exited. */
+const deadPid = (): number => {
+  const r = spawnSync(process.execPath, ["-e", ""]);
+  assert.ok(r.pid);
+  return r.pid;
+};
+
+const setPid = (repo: string, step: number, attempt: number, pid: number | null) => {
+  const db = db5(repo);
+  db.prepare("UPDATE step_attempt SET pid = ? WHERE step_run_id = ? AND attempt = ?").run(
+    pid,
+    step,
+    attempt,
+  );
+  db.close();
+};
+
+test("scan: dead PID is crashed with a hint, NULL pid is unknown, a mixed run keeps its lease", () => {
+  const s = merged();
+  s.f.merged = false;
+  const db = db5(s.repo);
+  const a = startStep(db, { runId: "run5", stepId: "dev", round: 1, role: "backend-engineer" });
+  beginAttempt(db, a.id);
+  const b = startStep(db, { runId: "run5", stepId: "old", round: 1, role: "backend-engineer" });
+  beginAttempt(db, b.id);
+  acquireLease(db, { key: "task:o/repo#5", holder: "dead-session", ttlMs: 60_000 });
+  db.close();
+  setPid(s.repo, a.id, 1, deadPid());
+  setPid(s.repo, b.id, 1, null);
+  const run = cleanupScan({ cwd: s.repo, gh: s.gh }).runs[0];
+  assert.equal(run?.crashedAttempts, 1);
+  assert.equal(run?.unknownAttempts, 1);
+  assert.equal(run?.hint, "omi cleanup apply --safe");
+  assert.equal(run?.leased, true); // one attempt is not judged: keep the lease
+  assert.deepEqual(cleanupApply({ cwd: s.repo, gh: s.gh, safe: true }).outcomes, []);
+});
+
+test("crashed-only run with an unexpired lease is not leased; apply --safe recovers it at once", () => {
+  const s = merged();
+  s.f.merged = false;
+  const db = db5(s.repo);
+  const step = startStep(db, { runId: "run5", stepId: "dev", round: 1, role: "backend-engineer" });
+  beginAttempt(db, step.id);
+  acquireLease(db, { key: "task:o/repo#5", holder: "dead-session", ttlMs: 60_000 });
+  db.close();
+  setPid(s.repo, step.id, 1, deadPid());
+  const run = cleanupScan({ cwd: s.repo, gh: s.gh }).runs[0];
+  assert.equal(run?.crashedAttempts, 1);
+  assert.equal(run?.unknownAttempts, 0);
+  assert.equal(run?.leased, false);
+  const r = cleanupApply({ cwd: s.repo, gh: s.gh, safe: true });
+  assert.match(r.outcomes[0]?.actions.join() ?? "", /recovered 1 open attempt/);
+  const db2 = db5(s.repo);
+  assert.equal(beginAttempt(db2, step.id), 2);
+  db2.close();
 });
 
 test("orphan task workspace next to the workspace is reported and left alone", () => {

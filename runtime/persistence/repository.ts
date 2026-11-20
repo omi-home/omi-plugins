@@ -641,11 +641,21 @@ export const openAttempts = (
  */
 export function recoverAttempts(
   db: Db,
-  o: { runId: string; leaseKey: string; now?: number },
+  o: {
+    runId: string;
+    leaseKey: string;
+    now?: number;
+    /** An active lease is ignored (and dropped) when every open attempt satisfies this: its omi process is dead. */
+    isDead?: (a: { pid: number | null }) => boolean;
+  },
 ): number {
   return tx(db, "recover attempts", () => {
-    if (leaseActive(db, o.leaseKey, o.now)) return 0;
     const open = openAttempts(db, o.runId);
+    if (leaseActive(db, o.leaseKey, o.now)) {
+      const isDead = o.isDead;
+      if (!isDead || open.length === 0 || !open.every((a) => isDead(a))) return 0;
+      db.prepare("DELETE FROM lease WHERE key = ?").run(o.leaseKey);
+    }
     const at = iso();
     for (const a of open) {
       db.prepare(
