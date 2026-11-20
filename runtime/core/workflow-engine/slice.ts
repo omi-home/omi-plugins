@@ -203,8 +203,10 @@ export const spawnAgent = (l: AgentLaunch): string => {
 
 /**
  * Writes the role files of the task workspace, then the launch of its agent (ADR-0002 D2/D4).
- * Every Bash call starts in the task workspace: git is granted as `git -C <repo> …` (a `cd` before
- * git is refused by Claude Code) and check commands run as `cd <repo> && <check>`.
+ * The shell starts in the task workspace, but after a `cd <repo> && <check>` Claude Code keeps it in the
+ * repo. So two forms are granted, each as its own command: from the workspace `git -C <repo> …` and
+ * `cd <repo> && <check>`; from inside the repo bare `git status|diff|log|show` and bare `<check>`
+ * (all with or without arguments). A `cd` before git is refused by Claude Code.
  * Read-only git for everyone (the runtime commits); implementers may also run the repo's checks.
  */
 export function prepareAgent(o: {
@@ -228,13 +230,21 @@ export function prepareAgent(o: {
   const rel = relative(o.taskRoot, o.worktree);
   // ponytail: outside the task workspace (analysis) the absolute path must be typed verbatim.
   const repo = rel.startsWith("..") || isAbsolute(rel) ? o.worktree : rel.replaceAll("\\", "/");
-  const git = (sub: string[]) => sub.map((c) => `Bash(git -C ${repo} ${c}*)`);
-  const read = git(["status", "diff", "log", "show"]);
-  // One form, the one the rules tell the agent to type: `cd <repo> && <check>`, with or without
-  // arguments (`npm test -- <file>`) (#252, #262).
+  // Word boundary (`<sub>` and `<sub> *`), never a bare prefix `*`: `git diff*` would match `git difftool`.
+  // Read-only git also bare, for when a check's `cd <repo>` left the shell inside the repo (#275).
+  const read = ["status", "diff", "log", "show"].flatMap((c) => [
+    `Bash(git -C ${repo} ${c})`,
+    `Bash(git -C ${repo} ${c} *)`,
+    `Bash(git ${c})`,
+    `Bash(git ${c} *)`,
+  ]);
+  // Two forms, with or without arguments (`npm test -- <file>`): `cd <repo> && <check>` from the task
+  // workspace, and the bare `<check>` once a previous `cd` left the shell inside the repo (#252, #262, #275).
   const checks = o.checks.flatMap((c) => [
     `Bash(cd ${repo} && ${c})`,
     `Bash(cd ${repo} && ${c} *)`,
+    `Bash(${c})`,
+    `Bash(${c} *)`,
   ]);
   const runsChecks = o.edits || o.runsChecks === true;
   // Git stays read-only for everyone: the runtime commits an implementing step's work (#262).

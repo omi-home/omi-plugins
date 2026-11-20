@@ -99,6 +99,27 @@ test("agent hook: git push and gh blocked in any form; local git and checks pass
   }
 });
 
+test("agent hook: git stays read-only (no difftool, --ext-diff, --extcmd, --output)", () => {
+  for (const c of [
+    "git difftool -x sh",
+    "git -C omi-plugins difftool",
+    "git diff --ext-diff",
+    "git log --output=x",
+    "git show --output x",
+    "git diff --extcmd=y",
+    'git diff "--output=x"',
+    "git log '--output=x'",
+    "git show \\--output=x",
+    'git diff "--ext-diff"',
+    'git -C "a b" difftool',
+  ]) {
+    assert.match(call("Bash", { command: c }) ?? "", /read-only/, c);
+  }
+  for (const c of ["git diff", "git -C omi-plugins log -5", "git diff -- src/a.ts"]) {
+    assert.equal(call("Bash", { command: c }), null, c);
+  }
+});
+
 test("agent hook: file tools write only inside the task workspace", () => {
   assert.equal(call("Write", { file_path: join(ws, "app", "src", "a.ts") }), null);
   assert.equal(call("Edit", { file_path: "app/src/a.ts" }), null, "relative to cwd");

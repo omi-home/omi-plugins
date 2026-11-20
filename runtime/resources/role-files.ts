@@ -114,9 +114,9 @@ export function writeRoleFiles(o: {
   // Must name exactly what prepareAgent grants: an instruction outside allowedTools blocks the step (#252).
   const checks = o.checks ?? [];
   const checkLine = checks.length
-    ? ` The repository's check commands are ${checks.map((c) => `\`cd ${o.repo} && ${c}\``).join(", ")}; each may take extra arguments (e.g. one test file). No other command is permitted, including the repository's own aggregate scripts.`
+    ? ` The repository's check commands are ${checks.map((c) => `\`cd ${o.repo} && ${c}\``).join(", ")}; each may take extra arguments (e.g. one test file). Run each check as its own command: no \`;\`, no pipes, no chaining. Once a \`cd ${o.repo} && …\` has run, the shell stays inside the repository, so run the bare check (e.g. \`${checks[0]}\`) and never \`cd ${o.repo}\` again. No other command is permitted, including the repository's own aggregate scripts.`
     : "";
-  const repoLine = `The product repository is \`${o.repo}/\`. Every Bash call starts in this workspace, so run git as \`git -C ${o.repo} <command>\` (never \`cd\` before git: it is refused).${checkLine} Paths in your result are relative to the repository (\`src/x.ts\`, not \`${o.repo}/src/x.ts\`).`;
+  const repoLine = `The product repository is \`${o.repo}/\`. Your shell starts in this workspace: run git as \`git -C ${o.repo} <command>\` (never \`cd\` before git: it is refused). ${checks.length ? `Once a check's \`cd ${o.repo} && …\` has run, the shell stays inside the repository: run read-only git bare there (\`git status\`, \`git diff\`, \`git log\`, \`git show\`), not \`git -C ${o.repo}\`.` : ""}${checkLine} Paths in your result are relative to the repository (\`src/x.ts\`, not \`${o.repo}/src/x.ts\`).`;
   const sections = [
     part("core"),
     part(READ_ONLY_ROLES.includes(o.role) ? "read-only" : "editing"),

@@ -121,6 +121,20 @@ export function agentPreToolUse(
     if (/^git(?:\.exe)?(?:\s+-[Cc]\s+(?:"[^"]*"|'[^']*'|\S+))*\s+push\b/.test(s)) {
       return "OMI: agents never push. Commit in the clone; the OMI CLI pushes (omi pr create).";
     }
+    // Check the raw segment and the segment with shell quotes/escapes removed (the shell strips
+    // them, so `git diff "--output=x"` is `--output=x`).
+    const unquoted = s.replace(/["'\\]/g, "");
+    const refused = [s, unquoted].some((t) => {
+      const head = /^git(?:\.exe)?(?:\s+-[Cc]\s+(?:"[^"]*"|'[^']*'|\S+))*\s+/.exec(t);
+      return (
+        head &&
+        (/^difftool\b/.test(t.slice(head[0].length)) ||
+          /(?:^|\s)--(?:ext-diff|extcmd|output)(?:[=\s]|$)/.test(t))
+      );
+    });
+    if (refused) {
+      return "OMI: agents run git read-only; difftool, --ext-diff, --extcmd/-x and --output are refused.";
+    }
   }
   return null;
 }
