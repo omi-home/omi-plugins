@@ -38,7 +38,7 @@ import {
   stepResult,
 } from "../../persistence/repository.ts";
 import { publishPending } from "../../reporting/outbox.ts";
-import { redactDeep } from "../../reporting/redact.ts";
+import { redact, redactDeep } from "../../reporting/redact.ts";
 import { renderStepReport } from "../../reporting/render.ts";
 import { type SkillChoice, stepSkills, writeRoleFiles } from "../../resources/role-files.ts";
 import { git } from "../../resources/worktree.ts";
@@ -83,6 +83,9 @@ export interface SliceDeps {
 
 /** Suffix of the file that keeps why an agent attempt failed technically (G6-002, #121). */
 export const ERROR_SUFFIX = ".error.json";
+/** Suffix of the redacted raw agent output kept when its result is refused (Bug #268). */
+export const OUTPUT_SUFFIX = ".output.txt";
+const MAX_RAW_OUTPUT_CHARS = 64 * 1024;
 
 /** The newest technical failure recorded in `evidenceDir`, for the CLI to show on BLOCKED. */
 export function lastStepError(
@@ -303,6 +306,8 @@ function agentStep(
       skills,
     });
     let report: { result: StepResult; actualModel: string; marker: string; body: string };
+    /** The agent's raw answer while it is being accepted: kept for diagnosis when refused. */
+    let rawOutput: string | undefined;
     try {
       const fetched = fetchIssueContext(config, t.run.issue, d.gh);
       const packet = buildTaskPacket({
@@ -363,7 +368,9 @@ function agentStep(
       const durationMs = obs.durationMs ?? Date.now() - started;
       if (obs.isError) throw new OmiError("INTERNAL", `${spec.role} run ended in an error`);
       // Token usage is what the host observed, never what the agent claims.
+      rawOutput = obs.result;
       const { usage: _claimed, ...claimed } = acceptStepResult(packet, obs.result);
+      rawOutput = undefined;
       let result: StepResult = obs.usage ? { ...claimed, usage: obs.usage } : claimed;
       if (spec.edits && result.status === "PASSED") {
         // The runtime commits, not the agent (#262): its own claim of a SHA is dropped.
@@ -442,7 +449,18 @@ function agentStep(
       // The reason survives the attempt (G6-002, #121): the DB keeps only the code.
       mkdirSync(d.evidenceDir, { recursive: true });
       const file = join(d.evidenceDir, `${spec.stepId}-r${ctx.round}-a${attempt}${ERROR_SUFFIX}`);
-      const failure = { code: err.code, message: err.message, details: err.details ?? null };
+      let details: unknown = err.details ?? null;
+      if (rawOutput !== undefined) {
+        const outFile = join(
+          d.evidenceDir,
+          `${spec.stepId}-r${ctx.round}-a${attempt}${OUTPUT_SUFFIX}`,
+        );
+        writeFileSync(outFile, redact(cut(rawOutput, MAX_RAW_OUTPUT_CHARS)));
+        addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "log", path: outFile });
+        const base = details && typeof details === "object" ? details : {};
+        details = { ...base, rawOutputPath: outFile };
+      }
+      const failure = { code: err.code, message: err.message, details };
       writeFileSync(file, JSON.stringify(redactDeep(failure), null, 2));
       addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "log", path: file });
       if (err.code === "QUOTA_EXHAUSTED") {

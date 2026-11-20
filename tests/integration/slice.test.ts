@@ -490,6 +490,30 @@ test("a fake changed-file claim blocks the run; nothing is reported for it", () 
   assert.match(readFileSync(err?.file ?? "", "utf8"), /src\/never\.txt/);
 });
 
+test("unparseable agent output: redacted raw output kept beside the error, path in details (#269)", () => {
+  const s = setup();
+  const secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+  const runAgent = () =>
+    JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: `I could not produce JSON. token=${secret}`,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+  assert.equal(runSlice({ ...s.deps, runAgent }, s.target).state, "BLOCKED");
+  const err = lastStepError(s.deps.evidenceDir);
+  assert.equal(err?.code, "CONTRACT_INVALID");
+  const details = (
+    JSON.parse(readFileSync(err?.file ?? "", "utf8")) as {
+      details: { rawOutputPath: string };
+    }
+  ).details;
+  assert.match(details.rawOutputPath, /implement-r1-a1\.output\.txt$/);
+  const raw = readFileSync(join(s.deps.evidenceDir, "implement-r1-a1.output.txt"), "utf8");
+  assert.match(raw, /could not produce JSON/);
+  assert.doesNotMatch(raw, new RegExp(secret));
+});
+
 test("crash before the report is posted: rerun posts it without re-running the agent", () => {
   const s = setup();
   // Context read OK, then listing comments fails with a non-transient error.
