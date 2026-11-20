@@ -1,20 +1,23 @@
 // OMI configuration contract with safe defaults (spec §3, §7, §9, §14, §20).
 // Project config lives in <workspace>/.omi-plugins/omi.config.yaml (ADR-0002 D1); plugin config/
 // holds only default policies.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
+import { openState } from "../persistence/db.ts";
+import { listProfileRecords } from "../persistence/profiles.ts";
 import {
   GateCheck,
+  LegacyProfilesFile,
   type Profile,
   ProfileEffort,
-  ProfilesFile,
   parseContract,
   Role,
 } from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
-import { CONFIG_FILE, PROFILES_FILE } from "./workspace.ts";
+import { DEFAULT_KEY_ENV } from "./secrets.ts";
+import { CONFIG_FILE, PROFILES_FILE, STATE_FILE } from "./workspace.ts";
 
 const ModelAlias = z.enum(["sonnet", "opus", "haiku"]);
 const Effort = z.enum(["low", "medium", "high"]);
@@ -44,7 +47,16 @@ const GateChecks = z.strictObject(
   },
 );
 
+/** Names the env variable of the master key; the key itself never lives in the config (ADR-0004 D4). */
+const SecretsConfig = z.strictObject({
+  keyEnv: z
+    .string()
+    .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "expected an environment variable name")
+    .default(DEFAULT_KEY_ENV),
+});
+
 export const OmiConfig = z.strictObject({
+  secrets: SecretsConfig.prefault({}),
   github: z.strictObject({
     owner: z.string().regex(/^[\w.-]+$/),
     repo: z.string().regex(/^[\w.-]+$/),
@@ -130,25 +142,109 @@ export function loadConfig(workspace: string): OmiConfig {
   return parseConfig(data);
 }
 
-/**
- * Execution profiles of this machine (`<workspace>/.omi-plugins/omi.config.json`, never committed).
- * A missing file means no profile: steps keep the `agents.routing` defaults. Errors never echo values.
- */
-export function loadProfiles(workspace: string): Profile[] {
-  let text: string;
+/** Declarations of the pre-ADR-0004 layout still present on disk (never values of secrets). */
+export interface LegacyProfiles {
+  /** `<workspace>/.omi-plugins/omi.config.json`, when it exists. */
+  json?: { path: string; profiles: Profile[] };
+  /** The `profiles` section of `omi.config.yaml`, when present. */
+  yaml?: { path: string; profiles: Profile[] };
+}
+
+/** Reads the legacy `omi.config.json` and YAML `profiles` section. Errors never echo values. */
+export function readLegacyProfiles(workspace: string): LegacyProfiles {
+  const out: LegacyProfiles = {};
+  let text: string | undefined;
   try {
     text = readFileSync(join(workspace, PROFILES_FILE), "utf8");
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw new OmiError("CONFIG_INVALID", `${PROFILES_FILE}: unreadable`);
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new OmiError("CONFIG_INVALID", `${PROFILES_FILE}: unreadable`);
+    }
   }
+  if (text !== undefined) {
+    let data: unknown;
+    try {
+      data = JSON.parse(text.replace(/^﻿/, "")); // editors on Windows may write a BOM
+    } catch {
+      throw new OmiError("CONFIG_INVALID", `${PROFILES_FILE}: invalid JSON`);
+    }
+    out.json = {
+      path: PROFILES_FILE,
+      profiles: parseContract(LegacyProfilesFile, data, PROFILES_FILE, "CONFIG_INVALID").profiles,
+    };
+  }
+  let yaml: unknown;
+  try {
+    yaml = readConfigData(workspace);
+  } catch {
+    yaml = undefined; // a broken YAML is loadConfig's error to report
+  }
+  const section =
+    yaml && typeof yaml === "object" ? (yaml as Record<string, unknown>).profiles : undefined;
+  if (section !== undefined && section !== null) {
+    out.yaml = {
+      path: CONFIG_PATH,
+      profiles: parseContract(
+        LegacyProfilesFile,
+        { profiles: section },
+        `${CONFIG_PATH} profiles`,
+        "CONFIG_INVALID",
+      ).profiles,
+    };
+  }
+  return out;
+}
+
+/**
+ * Profiles declared in a file while profiles live in the database is ambiguous: never silently pick
+ * one side (ADR-0004 D3). Points at `omi profile import`.
+ */
+export function assertNoLegacyProfiles(workspace: string): void {
+  const legacy = readLegacyProfiles(workspace);
+  const where = [legacy.json, legacy.yaml].filter((s) => s?.profiles.length).map((s) => s?.path);
+  if (where.length) {
+    throw new OmiError(
+      "CONFIG_INVALID",
+      `profiles are still declared in ${where.join(", ")}: run \`omi profile import\` (profiles now live in state.sqlite)`,
+    );
+  }
+}
+
+/** Name of the env variable holding the master key: `secrets.keyEnv`, default `OMI_SECRET_KEY`. */
+export function keyEnvName(workspace: string): string {
   let data: unknown;
   try {
-    data = JSON.parse(text.replace(/^﻿/, "")); // editors on Windows may write a BOM
+    data = readConfigData(workspace);
   } catch {
-    throw new OmiError("CONFIG_INVALID", `${PROFILES_FILE}: invalid JSON`);
+    data = undefined;
   }
-  return parseContract(ProfilesFile, data, PROFILES_FILE, "CONFIG_INVALID").profiles;
+  const secrets =
+    data && typeof data === "object" ? (data as Record<string, unknown>).secrets : undefined;
+  if (secrets === undefined || secrets === null) return DEFAULT_KEY_ENV;
+  return parseContract(SecretsConfig, secrets, `${CONFIG_PATH} secrets`, "CONFIG_INVALID").keyEnv;
+}
+
+/** `<workspace>/.omi-plugins/state.sqlite` when it exists, else undefined (reading creates nothing). */
+const existingState = (workspace: string) => {
+  const file = join(workspace, STATE_FILE);
+  return existsSync(file) ? file : undefined;
+};
+
+/**
+ * Execution profiles of this machine, from the `profile` table of `state.sqlite` (ADR-0004 D3).
+ * No database means no profile: steps keep the `agents.routing` defaults. A profile still declared
+ * in `omi.config.json` is CONFIG_INVALID until `omi profile import` ran.
+ */
+export function loadProfiles(workspace: string): Profile[] {
+  assertNoLegacyProfiles(workspace);
+  const file = existingState(workspace);
+  if (!file) return [];
+  const db = openState(file);
+  try {
+    return listProfileRecords(db).map((r) => r.profile);
+  } finally {
+    db.close();
+  }
 }
 
 /** The env variable a profile's secret is read from. */
