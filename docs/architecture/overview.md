@@ -30,6 +30,8 @@ Ký hiệu `spec §N` (trong code, ADR, Issue) trỏ tới section `§N` trong p
 
 Luồng chính ([ADR-0002](../decisions/ADR-0002-workspace-va-profile-thuc-thi-claude-code.md) D2/D4/D5): Coordinator → `omi` CLI → `claude -p --agent omi-engineering:<role>` với cwd = task workspace, `--plugin-dir <plugin>`, `CLAUDE_CONFIG_DIR` riêng mỗi lần chạy và env dựng từ allowlist → kết quả có cấu trúc → CLI lưu SQLite và đăng comment. Rules của role đến qua `AGENTS.md`, skill của step qua `.claude/skills/` mà CLI sinh trong task workspace (DevTask-0065 #199). Kiến trúc đích ([ADR-0003](../decisions/ADR-0003-rules-skills-hooks-va-coordinator-mong.md), Milestone-0010 #182): Coordinator mỏng chỉ điều phối; một plugin `omi-coordinator` chứa `agent-pack/` chạy bằng `--plugin-dir <plugin root>/agent-pack`; CLI chỉ chép skill Coordinator chọn từ `agent-pack/skill-library/` vào `.claude/skills/` của task workspace; hooks chặn cứng; bỏ workflows. Profile thực thi (auth/model/effort theo profile) thuộc Feature-0021 #137; tới khi có, agent xác thực bằng `CLAUDE_CODE_OAUTH_TOKEN` của host.
 
+**OMI Monitor** ([ADR-0004](../decisions/ADR-0004-omi-monitor-hai-repo-profile-va-token-ma-hoa.md)): web app local ở repo riêng `omi-home/omi-monitor`, chỉ là giao diện. Đọc qua `omi watch --output jsonl`, ghi qua CLI `--output json`, không mở `state.sqlite`; phân phối bằng `omi web` với bản `.tar.gz` ghim trong `config/web.json`. Profile nằm trong `state.sqlite`, token mã hóa AES-256-GCM bằng master key từ biến môi trường (thay ADR-0002 D6).
+
 ## Hợp đồng thư mục gốc
 
 Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc mới cần ADR và cập nhật `ALLOWED_ROOT_DIRS` trong [tests/unit/directory-contract.test.ts](../../tests/unit/directory-contract.test.ts) — test này chặn mọi thư mục ngoài danh sách.
@@ -64,8 +66,9 @@ Dữ liệu và phiên làm việc của OMI nằm ngoài repo đích (ADR-0002 
 │   │   └── agent-memory/coordinator/   # auto memory của Coordinator (`MEMORY.md` + file chủ đề); `omi doctor` `memory-dir`
 │   ├── .omi-plugins/
 │   │   ├── omi.config.yaml             # config dự án: github, checks, review, agents, cleanup
-│   │   ├── omi.config.json             # profile thực thi, riêng từng máy, không commit (Feature-0021 #137)
-│   │   ├── state.sqlite                # state SQLite, dùng chung cho mọi task workspace
+│   │   ├── omi.config.json             # profile thực thi cũ, riêng từng máy, không commit; bị thay bởi bảng `profile` (ADR-0004 D3), `omi profile import` đổi thành `.bak`
+│   │   ├── state.sqlite                # state SQLite, dùng chung cho mọi task workspace; gồm bảng `profile` với token mã hóa
+│   │   ├── web/<version>/              # bản build OMI Monitor (standalone) do `omi web` tải và giải nén (ADR-0004 D2)
 │   │   └── evidence/<run>/             # task packet, log check; analysis: evidence/<run>/workspace/
 │   ├── AGENTS.md                       # chỉ dẫn của Coordinator
 │   └── <repo>/                         # checkout chính: chạy `omi` ở đây
@@ -136,6 +139,7 @@ omi-plugins/
 │   ├── resources/                      # task workspace (clone), role files, cleanup ownership
 │   └── persistence/                    # SQLite migrations and repositories
 ├── config/
+│   ├── web.json                        # ghim bản omi-monitor: { version, asset, sha256 } (ADR-0004 D2)
 │   ├── model-routing.yaml
 │   ├── workflow-policy.yaml
 │   ├── branching-policy.yaml
@@ -154,7 +158,8 @@ omi-plugins/
 │   ├── handoff.schema.json
 │   ├── review-findings.schema.json
 │   ├── github-comment.schema.json
-│   └── cleanup-result.schema.json
+│   ├── cleanup-result.schema.json
+│   └── monitor/                        # JSON Schema của mô hình màn hình và output lệnh cho omi-monitor (ADR-0004 D1)
 ├── templates/
 │   ├── project/AGENTS.md
 │   ├── github/issues/                  # one Issue Form per OMI type + config.yml, rendered into target repo
