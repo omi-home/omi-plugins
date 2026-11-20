@@ -69,6 +69,18 @@ test("CLAUDE.md shadows AGENTS.md → warn", () => {
   assert.equal(d.check("config")?.status, "pass");
 });
 
+test("setup is reported: command when configured, not configured otherwise (#261)", () => {
+  const withSetup = doctor(
+    fixture({
+      "AGENTS.md": "x",
+      ".omi-plugins/omi.config.yaml": `${CONFIG}setup: { run: npm ci }\n`,
+    }),
+  );
+  assert.match(withSetup.check("setup")?.detail ?? "", /^npm ci \(timeout 600s\)/);
+  const without = doctor(fixture({ "AGENTS.md": "x", ".omi-plugins/omi.config.yaml": CONFIG }));
+  assert.match(without.check("setup")?.detail ?? "", /not configured/);
+});
+
 test("valid config: public repo with develop default passes GitHub checks when authenticated", () => {
   const d = doctor(fixture({ "AGENTS.md": "x", ".omi-plugins/omi.config.yaml": CONFIG }));
   assert.equal(d.check("config")?.status, "pass");

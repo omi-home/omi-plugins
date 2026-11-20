@@ -64,6 +64,7 @@ import {
 import { sectionsCheck } from "../core/issue-forms.ts";
 import { PRE_MERGE, PROJECT_STATUS, transition } from "../core/workflow-engine/fsm.ts";
 import { planWorkflow, type WorkflowPlan } from "../core/workflow-engine/plan.ts";
+import { runSetup } from "../core/workflow-engine/setup.ts";
 import {
   lastStepError,
   runAnalysis,
@@ -266,6 +267,14 @@ export function taskStart(deps: TaskDeps, issue: number): StartResult {
         issue,
         branch,
         runId: run.id,
+      });
+      // Dependencies before anything runs in the clone; a failure stops here (no agent, no checks)
+      // and the next start retries, since nothing is recorded as done.
+      runSetup({
+        worktree: workspace.path,
+        gitDir: git(["rev-parse", "--absolute-git-dir"], workspace.path),
+        setup: config.setup,
+        logDir: join(dirname(statePath(deps.cwd)), "evidence", run.id, "setup"),
       });
       if (run.state === "TICKET_VALIDATED") run = step(db, run, "WORKSPACE_CREATED");
 

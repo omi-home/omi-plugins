@@ -16,6 +16,8 @@ export const ERROR_CODES = {
   INVALID_TRANSITION: { transient: false },
   OWNERSHIP_MISMATCH: { transient: false },
   WORKTREE_DIRTY: { transient: false },
+  // The repo's `setup` command failed or timed out in the task clone.
+  SETUP_FAILED: { transient: false },
   CLEANUP_UNSAFE: { transient: false },
   GITHUB_AUTH: { transient: false },
   GITHUB_RATE_LIMITED: { transient: true },

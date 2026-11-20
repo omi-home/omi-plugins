@@ -50,6 +50,48 @@ function tail(file: string): string {
   return text.length > SUMMARY_CHARS ? `…${text.slice(-(SUMMARY_CHARS - 1))}` : text;
 }
 
+export interface CommandResult {
+  outcome: CheckOutcome;
+  exitCode: number | null;
+  durationMs: number;
+  /** Last lines of output (redacted); empty on pass. */
+  summary: string;
+}
+
+/** Runs one configured command under supervise.ts, full output to `logPath`. */
+export function runCommand(
+  cmd: { run: string; timeoutSec: number },
+  cwd: string,
+  logPath: string,
+): CommandResult {
+  const fd = openSync(logPath, "w");
+  const started = Date.now();
+  let r: ReturnType<typeof spawnSync>;
+  try {
+    r = spawnSync(process.execPath, [SUPERVISOR, String(cmd.timeoutSec * 1000), cmd.run], {
+      cwd,
+      stdio: ["ignore", fd, fd], // to disk, not memory: output size never hits maxBuffer
+      timeout: cmd.timeoutSec * 1000 + SUPERVISOR_GRACE_MS,
+      windowsHide: true,
+    });
+  } finally {
+    closeSync(fd);
+  }
+  const durationMs = Date.now() - started;
+  const timedOut =
+    (r.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT" ||
+    (r.status === TIMEOUT_EXIT && durationMs >= cmd.timeoutSec * 1000);
+  const summary = !timedOut && r.status === 0 ? "" : tail(logPath);
+  const outcome: CheckOutcome = timedOut
+    ? "timeout"
+    : r.status === 0
+      ? "pass"
+      : (r.status !== null && MISSING_TOOL.has(r.status)) || NOT_FOUND.test(summary)
+        ? "missing-tool"
+        : "fail";
+  return { outcome, exitCode: r.status, durationMs, summary };
+}
+
 /**
  * Runs every configured check in GateCheck order; a failure does not stop later checks, so the
  * Engineer gets every problem in one validation-fix round.
@@ -74,39 +116,7 @@ export function runChecks(o: { worktree: string; checks: OmiConfig["checks"]; lo
       };
     }
     const logPath = join(o.logDir, `${name}.log`);
-    const fd = openSync(logPath, "w");
-    const started = Date.now();
-    let r: ReturnType<typeof spawnSync>;
-    try {
-      r = spawnSync(process.execPath, [SUPERVISOR, String(cmd.timeoutSec * 1000), cmd.run], {
-        cwd: o.worktree,
-        stdio: ["ignore", fd, fd], // to disk, not memory: output size never hits maxBuffer
-        timeout: cmd.timeoutSec * 1000 + SUPERVISOR_GRACE_MS,
-        windowsHide: true,
-      });
-    } finally {
-      closeSync(fd);
-    }
-    const durationMs = Date.now() - started;
-    const timedOut =
-      (r.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT" ||
-      (r.status === TIMEOUT_EXIT && durationMs >= cmd.timeoutSec * 1000);
-    const summary = !timedOut && r.status === 0 ? "" : tail(logPath);
-    const outcome: CheckOutcome = timedOut
-      ? "timeout"
-      : r.status === 0
-        ? "pass"
-        : (r.status !== null && MISSING_TOOL.has(r.status)) || NOT_FOUND.test(summary)
-          ? "missing-tool"
-          : "fail";
-    return {
-      name,
-      outcome,
-      exitCode: r.status,
-      durationMs,
-      summary,
-      logPath,
-    };
+    return { name, ...runCommand(cmd, o.worktree, logPath), logPath };
   });
   return { passed: results.every((r) => r.outcome === "pass" || r.outcome === "skipped"), results };
 }
