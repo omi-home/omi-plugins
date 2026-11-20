@@ -17,8 +17,13 @@ import {
   type StatusDrift,
 } from "../adapters/github/project-fields.ts";
 import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/github/repo.ts";
-import { listProfiles } from "../core/config.ts";
-import { IssueType, ProjectStatus, Role, type TokenUsage } from "../core/contracts.ts";
+import {
+  IssueType,
+  type ProfileView,
+  ProjectStatus,
+  Role,
+  type TokenUsage,
+} from "../core/contracts.ts";
 import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
 import type { RepoAction } from "../core/repo-config.ts";
 import { CONFIG_FILE, locate } from "../core/workspace.ts";
@@ -32,7 +37,17 @@ import { contextApply, contextPlan, humanContextPlan } from "./context.ts";
 import { type Check, doctor, probeProfiles } from "./doctor.ts";
 import { agentPreToolUse, type HookInput, preToolUse, sessionStart } from "./hook.ts";
 import { projectInit } from "./init.ts";
+import {
+  type ProfileDeps,
+  profileAdd,
+  profileEdit,
+  profileImport,
+  profileList,
+  profileRemove,
+  profileSetToken,
+} from "./profile.ts";
 import { releaseCheck, releaseTag } from "./release.ts";
+import { secretInitKey, secretRotateKey } from "./secret.ts";
 import { NO_PROFILE, NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "./status.ts";
 import {
   prCreate,
@@ -158,9 +173,27 @@ Commands:
                          Post the handoff on the active Milestone (the one open Milestone In Progress or
                          In Review) with marker <date>-s<N>; the same text again changes nothing, a text
                          opening with an existing marker updates that comment. Redacted
-  profile list           Read-only: execution profiles not disabled in .omi-plugins/omi.config.json
-                         (harness, auth type, models, efforts) and whether each secret env is set;
-                         never prints a secret
+  profile list           Read-only: execution profiles of state.sqlite (harness, auth, models, efforts,
+                         whether a token is stored); never prints a token
+  profile add <name> --auth subscription --token-env <VAR> | --auth gateway --base-url <url>
+                         --scheme <x-api-key|bearer> --key-env <VAR>; --models a,b --efforts high,medium
+                         [--harness claudecode] [--disabled] [--token-stdin]
+                         Add a profile; --token-stdin seals the token read from stdin
+  profile edit <name> [--auth ...] [--token-env|--key-env|--base-url|--scheme <v>] [--models a,b]
+                         [--efforts a,b] [--disabled|--enabled]
+                         Change a profile; its name cannot change (add a new one, remove the old)
+  profile remove <name>  Delete a profile and its sealed token
+  profile set-token <name>
+                         Seal the token read from stdin (never argv) for the profile; overwrites
+  profile import [--dry-run]
+                         One-time move of omi.config.json (and a YAML profiles section) into the
+                         database: seals each token from the env variable the profile declares, renames
+                         the file to <file>.<timestamp>.bak. Re-running is safe; env variables are kept
+  secret init-key        Create the master key (AES-256-GCM, 32 bytes) in the user environment variable
+                         secrets.keyEnv (default OMI_SECRET_KEY); never printed. Refused when a key is
+                         set or the database holds sealed tokens. Windows; elsewhere prints how
+  secret rotate-key      Re-seal every token with the key in <keyEnv>_NEXT in one transaction; any
+                         failure keeps the old key valid. Afterwards swap the variables yourself
   config get [path]      Read-only: the validated settings of .omi-plugins/omi.config.yaml (defaults
                          applied), or one value by dotted path (checks.test.run); data has an etag
   config set [--body-file <path>] [--if-match <etag>] [--confirm-commands]
@@ -275,11 +308,28 @@ const REPO_WIDE = new Set([
   "profile list",
   "config get",
   "config set",
+  "profile add",
+  "profile edit",
+  "profile remove",
+  "profile set-token",
+  "profile import",
+  "secret init-key",
+  "secret rotate-key",
   "skill list",
   "hook pre-tool-use",
   "hook session-start",
   "hook agent-pre-tool-use",
 ]);
+
+/** Profile subcommands that take the profile name as their one positional. */
+const NAMED = new Set(["profile add", "profile edit", "profile remove", "profile set-token"]);
+
+/** Process inputs the CLI reads; tests replace them. */
+export interface CliIo {
+  env?: NodeJS.ProcessEnv;
+  /** The whole of stdin (secrets arrive here, never in argv). */
+  stdin?: () => string;
+}
 
 const describe = (a: ProjectAction) =>
   a.kind === "create"
@@ -333,6 +383,22 @@ const pickFlags = (v: {
   skills: v.skills,
 });
 
+const profileFlags = (v: Record<string, string | boolean | string[] | undefined>) => ({
+  harness: v.harness as string | undefined,
+  auth: v.auth as string | undefined,
+  tokenEnv: v["token-env"] as string | undefined,
+  keyEnv: v["key-env"] as string | undefined,
+  baseUrl: v["base-url"] as string | undefined,
+  scheme: v.scheme as string | undefined,
+  models: v.models as string | undefined,
+  efforts: v.efforts as string | undefined,
+  disabled: v.disabled as boolean | undefined,
+  enabled: v.enabled as boolean | undefined,
+});
+
+const humanProfile = (p: ProfileView) =>
+  `${p.name.padEnd(16)} ${p.harness} ${p.auth.type} ${p.disabled ? "disabled" : "active"} ${p.hasToken ? "sealed" : "UNSEALED"}  models ${p.models.join(",")}  efforts ${p.efforts.join(",")}`;
+
 const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
 
 const humanChecks = (checks: Check[]) =>
@@ -340,7 +406,7 @@ const humanChecks = (checks: Check[]) =>
     .map((c) => `${c.status.toUpperCase().padEnd(5)} ${c.name.padEnd(18)} ${c.detail}\n`)
     .join("");
 
-export function main(argv: string[], cwd = process.cwd()): CliResult {
+export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliResult {
   // Decided before parsing so that usage errors are structured too.
   const json = argv.some(
     (a, i) => a === "--output=json" || (a === "json" && argv[i - 1] === "--output"),
@@ -403,6 +469,8 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         "workspace",
         "hook",
         "config",
+        "profile",
+        "secret",
       ].includes(command)
     ) {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
@@ -410,6 +478,12 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
     const issue =
       NESTED.has(command) || command.startsWith("issue section") ? issueArg(rest.shift()) : 0;
     const section = command.startsWith("issue section") ? sectionArg(rest.shift()) : "";
+    const profileName = NAMED.has(command) ? rest.shift() : undefined;
+    const deps = (): ProfileDeps => ({
+      workspace: locate(cwd).workspace,
+      env: io.env ?? process.env,
+      stdin: io.stdin ?? (() => readFileSync(0, "utf8")),
+    });
     const bodyFile = (): string => {
       const file = values["body-file"];
       if (!file) throw new OmiError("USAGE_INVALID", "--body-file is required");
@@ -487,16 +561,13 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         );
       }
       case "profile list": {
-        const profiles = listProfiles(locate(cwd).workspace);
+        const profiles = profileList(deps());
         return ok(
           { profiles },
           lines(
             profiles.length
-              ? profiles.map(
-                  (p) =>
-                    `${p.name.padEnd(16)} ${p.harness} ${p.auth} ${p.secretEnv}=${p.secretSet ? "set" : "UNSET"}  models ${p.models.join(",")}  efforts ${p.efforts.join(",")}`,
-                )
-              : ["profiles  none active: steps use agents.routing"],
+              ? profiles.map(humanProfile)
+              : ["profiles  none: steps use agents.routing"],
           ),
         );
       }
@@ -513,6 +584,66 @@ export function main(argv: string[], cwd = process.cwd()): CliResult {
         return ok(
           r,
           lines([`config    ${r.changed ? "updated" : "unchanged"} (etag ${r.etag.slice(0, 12)})`]),
+        );
+      }
+      case "profile add": {
+        const p = profileAdd(
+          deps(),
+          profileName,
+          profileFlags(values),
+          Boolean(values["token-stdin"]),
+        );
+        return ok({ profile: p }, lines([humanProfile(p)]));
+      }
+      case "profile edit": {
+        const p = profileEdit(deps(), profileName, { ...profileFlags(values), name: values.name });
+        return ok({ profile: p }, lines([humanProfile(p)]));
+      }
+      case "profile remove": {
+        const r = profileRemove(deps(), profileName);
+        return ok(r, lines([`removed   ${r.removed}`]));
+      }
+      case "profile set-token": {
+        const p = profileSetToken(deps(), profileName);
+        return ok({ profile: p }, lines([humanProfile(p)]));
+      }
+      case "profile import": {
+        const r = profileImport(deps(), Boolean(values["dry-run"]));
+        const human = [
+          ...(r.dryRun ? ["dry run  nothing changed"] : []),
+          ...r.imported.map((n) => `imported  ${n}`),
+          ...r.kept.map((n) => `kept      ${n} (already in the database)`),
+          ...r.tokensStored.map((n) => `token     ${n} sealed`),
+          ...r.tokensMissing.map(
+            (n) => `no token  ${n} (its env variable is not set: \`profile set-token\`)`,
+          ),
+          ...r.backups.map((f) => `backup    ${f}`),
+          ...(r.imported.length || r.kept.length || r.backups.length
+            ? ["note      env variables are kept until ChangeRequest-0004 #241 releases"]
+            : ["import    nothing to import"]),
+        ];
+        return ok(r, lines(human));
+      }
+      case "secret init-key": {
+        const d = deps();
+        const r = secretInitKey({ workspace: d.workspace, env: d.env });
+        return ok(
+          r,
+          lines([
+            `key       ${r.keyEnv} written to the user environment (fingerprint ${r.fingerprint})`,
+            `next      ${r.next}`,
+          ]),
+        );
+      }
+      case "secret rotate-key": {
+        const d = deps();
+        const r = secretRotateKey({ workspace: d.workspace, env: d.env });
+        return ok(
+          r,
+          lines([
+            `rotated   ${r.rotated} token(s), new fingerprint ${r.fingerprint}`,
+            `next      ${r.next}`,
+          ]),
         );
       }
       case "skill list": {
@@ -911,5 +1042,16 @@ const parse = (args: string[]) =>
       probe: { type: "boolean" },
       "if-match": { type: "string" },
       "confirm-commands": { type: "boolean" },
+      harness: { type: "string" },
+      auth: { type: "string" },
+      "token-env": { type: "string" },
+      "key-env": { type: "string" },
+      "base-url": { type: "string" },
+      scheme: { type: "string" },
+      models: { type: "string" },
+      efforts: { type: "string" },
+      disabled: { type: "boolean" },
+      enabled: { type: "boolean" },
+      "token-stdin": { type: "boolean" },
     },
   });

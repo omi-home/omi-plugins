@@ -13,6 +13,20 @@
     "config": {
       "type": "object",
       "properties": {
+        "secrets": {
+          "type": "object",
+          "properties": {
+            "keyEnv": {
+              "default": "OMI_SECRET_KEY",
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            }
+          },
+          "required": [
+            "keyEnv"
+          ],
+          "additionalProperties": false
+        },
         "github": {
           "type": "object",
           "properties": {
@@ -651,6 +665,7 @@
         }
       },
       "required": [
+        "secrets",
         "github",
         "git",
         "review",

@@ -117,9 +117,27 @@ Commands:
                          Post the handoff on the active Milestone (the one open Milestone In Progress or
                          In Review) with marker <date>-s<N>; the same text again changes nothing, a text
                          opening with an existing marker updates that comment. Redacted
-  profile list           Read-only: execution profiles not disabled in .omi-plugins/omi.config.json
-                         (harness, auth type, models, efforts) and whether each secret env is set;
-                         never prints a secret
+  profile list           Read-only: execution profiles of state.sqlite (harness, auth, models, efforts,
+                         whether a token is stored); never prints a token
+  profile add <name> --auth subscription --token-env <VAR> | --auth gateway --base-url <url>
+                         --scheme <x-api-key|bearer> --key-env <VAR>; --models a,b --efforts high,medium
+                         [--harness claudecode] [--disabled] [--token-stdin]
+                         Add a profile; --token-stdin seals the token read from stdin
+  profile edit <name> [--auth ...] [--token-env|--key-env|--base-url|--scheme <v>] [--models a,b]
+                         [--efforts a,b] [--disabled|--enabled]
+                         Change a profile; its name cannot change (add a new one, remove the old)
+  profile remove <name>  Delete a profile and its sealed token
+  profile set-token <name>
+                         Seal the token read from stdin (never argv) for the profile; overwrites
+  profile import [--dry-run]
+                         One-time move of omi.config.json (and a YAML profiles section) into the
+                         database: seals each token from the env variable the profile declares, renames
+                         the file to <file>.<timestamp>.bak. Re-running is safe; env variables are kept
+  secret init-key        Create the master key (AES-256-GCM, 32 bytes) in the user environment variable
+                         secrets.keyEnv (default OMI_SECRET_KEY); never printed. Refused when a key is
+                         set or the database holds sealed tokens. Windows; elsewhere prints how
+  secret rotate-key      Re-seal every token with the key in <keyEnv>_NEXT in one transaction; any
+                         failure keeps the old key valid. Afterwards swap the variables yourself
   config get [path]      Read-only: the validated settings of .omi-plugins/omi.config.yaml (defaults
                          applied), or one value by dotted path (checks.test.run); data has an etag
   config set [--body-file <path>] [--if-match <etag>] [--confirm-commands]

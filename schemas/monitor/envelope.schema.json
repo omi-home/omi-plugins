@@ -43,6 +43,12 @@
             "REPORT_NOT_POSTED",
             "CRASH_RECOVERED",
             "QUOTA_EXHAUSTED",
+            "SECRET_KEY_MISSING",
+            "SECRET_KEY_INVALID",
+            "SECRET_KEY_MISMATCH",
+            "SECRET_DECRYPT_FAILED",
+            "SECRET_KEY_EXISTS",
+            "SECRET_TOKEN_MISSING",
             "INTERNAL"
           ]
         },

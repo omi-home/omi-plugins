@@ -131,6 +131,23 @@ export const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE step_attempt ADD COLUMN pid INTEGER;
   `,
+  // 8 — execution profiles with AES-256-GCM sealed tokens (ADR-0004 D3/D4, DevTask-0093 #282).
+  // JSON columns hold the Profile contract fields; the secret_* columns are all base64 or null.
+  `
+  CREATE TABLE profile (
+    name               TEXT PRIMARY KEY,
+    harness            TEXT NOT NULL,
+    disabled           INTEGER NOT NULL DEFAULT 0,
+    auth               TEXT NOT NULL,
+    models             TEXT NOT NULL,
+    efforts            TEXT NOT NULL,
+    secret_ciphertext  TEXT,
+    secret_iv          TEXT,
+    secret_tag         TEXT,
+    key_fingerprint    TEXT,
+    updated_at         TEXT NOT NULL
+  );
+  `,
 ];
 
 export function migrate(db: DatabaseSync, migrations: readonly string[] = MIGRATIONS): number {

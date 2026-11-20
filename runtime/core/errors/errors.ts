@@ -31,6 +31,16 @@ export const ERROR_CODES = {
   CRASH_RECOVERED: { transient: true },
   // The profile ran out of quota mid-step (#218): retrying it is pointless, another profile runs.
   QUOTA_EXHAUSTED: { transient: false },
+  // Profile secrets (ADR-0004 D4): the master key is missing, malformed, or not the one that sealed a token.
+  SECRET_KEY_MISSING: { transient: false },
+  SECRET_KEY_INVALID: { transient: false },
+  SECRET_KEY_MISMATCH: { transient: false },
+  // Ciphertext, tag or AAD (profile name) was altered: the token cannot be trusted or read.
+  SECRET_DECRYPT_FAILED: { transient: false },
+  // `omi secret init-key` refused: a key is already set or the database already holds secrets.
+  SECRET_KEY_EXISTS: { transient: false },
+  // The profile has no stored token yet (`omi profile set-token`).
+  SECRET_TOKEN_MISSING: { transient: false },
   INTERNAL: { transient: false },
 } as const satisfies Record<string, { transient: boolean }>;
 

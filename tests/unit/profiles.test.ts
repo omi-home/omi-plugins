@@ -16,9 +16,16 @@ import {
 import { main } from "../../runtime/cli/main.ts";
 import { usageByProfile } from "../../runtime/cli/status.ts";
 import { harnessGate } from "../../runtime/cli/task.ts";
-import { listProfiles, loadProfiles, selectProfile } from "../../runtime/core/config.ts";
-import { ProfilesFile } from "../../runtime/core/contracts.ts";
+import {
+  listProfiles,
+  loadProfiles,
+  readLegacyProfiles,
+  selectProfile,
+} from "../../runtime/core/config.ts";
+import { Profile, ProfilesFile } from "../../runtime/core/contracts.ts";
 import { OmiError } from "../../runtime/core/errors/errors.ts";
+import { openState } from "../../runtime/persistence/db.ts";
+import { addProfile } from "../../runtime/persistence/profiles.ts";
 
 const SECRET = "sk-very-secret-value";
 
@@ -56,20 +63,42 @@ function workspace(profiles?: unknown) {
   return ws;
 }
 
+/** A workspace whose state.sqlite already holds these profiles (ADR-0004 D3). */
+function seeded(profiles: unknown[]) {
+  const ws = workspace();
+  const db = openState(join(ws, ".omi-plugins", "state.sqlite"));
+  try {
+    for (const p of profiles) addProfile(db, Profile.parse(p), null, new Date().toISOString());
+  } finally {
+    db.close();
+  }
+  return ws;
+}
+
 const invalid = (data: unknown) =>
   assert.throws(
-    () => loadProfiles(workspace(data)),
+    () => readLegacyProfiles(workspace(data)),
     (e) => e instanceof OmiError && e.code === "CONFIG_INVALID",
   );
 
-test("valid profiles parse with defaults; missing file means none", () => {
-  const ps = loadProfiles(workspace({ profiles: [sub, gw] }));
+test("profiles load from state.sqlite with defaults; no database means none", () => {
+  const ps = loadProfiles(seeded([sub, gw]));
   assert.equal(ps.length, 2);
   assert.equal(ps[0]?.disabled, false);
   assert.deepEqual(loadProfiles(workspace()), []);
   assert.deepEqual(loadProfiles(workspace({})), []);
+  // An empty legacy file (the workspace template) declares nothing.
+  assert.deepEqual(loadProfiles(workspace({ profiles: [] })), []);
+});
+
+test("a profile still declared in omi.config.json is CONFIG_INVALID until imported", () => {
+  assert.throws(() => loadProfiles(workspace({ profiles: [sub] })), {
+    code: "CONFIG_INVALID",
+    message: /omi profile import/,
+  });
   // Editors on Windows may write a UTF-8 BOM.
-  assert.equal(loadProfiles(workspace(`﻿${JSON.stringify({ profiles: [sub] })}`)).length, 1);
+  const bom = workspace(`﻿${JSON.stringify({ profiles: [sub] })}`);
+  assert.equal(readLegacyProfiles(bom).json?.profiles.length, 1);
 });
 
 test("invalid files are rejected without echoing values", () => {
@@ -83,20 +112,20 @@ test("invalid files are rejected without echoing values", () => {
   invalid({ profiles: [{ ...sub, auth: { type: "subscription", tokenEnv: SECRET } }] }); // not an env name
   invalid({ profiles: [{ ...gw, auth: { ...gw.auth, baseUrl: "http://gw.example.com" } }] });
   invalid({ profiles: [{ ...gw, auth: { ...gw.auth, scheme: "basic" } }] });
-  try {
-    loadProfiles(
-      workspace({ profiles: [{ ...sub, auth: { type: "subscription", tokenEnv: SECRET } }] }),
-    );
-  } catch (e) {
-    assert.ok(!JSON.stringify((e as OmiError).toJSON()).includes(SECRET));
-  }
+  assert.throws(
+    () =>
+      readLegacyProfiles(
+        workspace({ profiles: [{ ...sub, auth: { type: "subscription", tokenEnv: SECRET } }] }),
+      ),
+    (e) => !JSON.stringify((e as OmiError).toJSON()).includes(SECRET),
+  );
   // http is fine to this machine (a local proxy).
   const local = { ...gw, auth: { ...gw.auth, baseUrl: "http://localhost:4000" } };
-  assert.equal(loadProfiles(workspace({ profiles: [local] })).length, 1);
+  assert.equal(readLegacyProfiles(workspace({ profiles: [local] })).json?.profiles.length, 1);
 });
 
 test("listProfiles hides disabled profiles and never reads out the secret", () => {
-  const ws = workspace({ profiles: [sub, { ...gw, disabled: true }] });
+  const ws = seeded([sub, { ...gw, disabled: true }]);
   const list = listProfiles(ws, { OMI_T_SUB: SECRET });
   assert.deepEqual(
     list.map((p) => [p.name, p.auth, p.secretEnv, p.secretSet]),
@@ -107,7 +136,7 @@ test("listProfiles hides disabled profiles and never reads out the secret", () =
 });
 
 test("omi profile list prints active profiles as json and human", () => {
-  const ws = workspace({ profiles: [sub, gw] });
+  const ws = seeded([sub, { ...gw, disabled: true }]);
   const r = main(["profile", "list", "--output", "json"], ws);
   assert.equal(r.code, 0, r.stderr);
   const data = JSON.parse(r.stdout).data as { profiles: { name: string }[] };
@@ -115,12 +144,15 @@ test("omi profile list prints active profiles as json and human", () => {
     data.profiles.map((p) => p.name),
     ["cc-sub", "cc-gw"],
   );
-  assert.match(main(["profile", "list"], ws).stdout, /cc-gw\s+claudecode gateway OMI_T_GW=/);
-  assert.match(main(["profile", "list"], workspace()).stdout, /none active/);
+  assert.match(
+    main(["profile", "list"], ws).stdout,
+    /cc-gw\s+claudecode gateway disabled UNSEALED/,
+  );
+  assert.match(main(["profile", "list"], workspace()).stdout, /none/);
 });
 
 test("doctor: secret env must be set for every active profile", () => {
-  const ws = workspace({ profiles: [sub, gw, { ...gw, name: "off", disabled: true }] });
+  const ws = seeded([sub, gw, { ...gw, name: "off", disabled: true }]);
   const checks = profilesCheck(ws, { OMI_T_SUB: SECRET });
   assert.deepEqual(
     checks.map((c) => [c.name, c.status]),
@@ -143,7 +175,7 @@ test("workspace template matches the contract", () => {
 });
 
 test("selectProfile (#217): validated choice, defaults to the profile's first model/effort", () => {
-  const ps = loadProfiles(workspace({ profiles: [sub, { ...gw, disabled: true }] }));
+  const ps = loadProfiles(seeded([sub, { ...gw, disabled: true }]));
   assert.equal(selectProfile(ps, {}), undefined);
   const env = { OMI_T_SUB: SECRET };
   const pick = selectProfile(ps, { profile: "cc-sub", reason: "simple docs task" }, env);
@@ -219,7 +251,7 @@ test("harness registry (#219): versions inside the verified range run; others ar
 
 test("doctor: a gateway profile warns about the third party; bearer is not verified yet", () => {
   const bearer = { ...gw, name: "gw-b", auth: { ...gw.auth, scheme: "bearer" } };
-  const checks = profilesCheck(workspace({ profiles: [gw, bearer] }), { OMI_T_GW: SECRET });
+  const checks = profilesCheck(seeded([gw, bearer]), { OMI_T_GW: SECRET });
   const warn = checks.filter((c) => c.status === "warn");
   assert.equal(warn.length, 2);
   assert.match(warn[0]?.detail ?? "", /third party: it sees the code and prompts.*zero-width/);
@@ -235,7 +267,7 @@ const transcript = (model: string, result: object = { is_error: false, result: "
   ].join("\n");
 
 test("doctor --probe (#219): one short run per active profile; gateway lists models first", () => {
-  const ws = workspace({ profiles: [sub, gw, { ...gw, name: "off", disabled: true }] });
+  const ws = seeded([sub, gw, { ...gw, name: "off", disabled: true }]);
   const env = { PATH: "/bin", OMI_T_SUB: SECRET, OMI_T_GW: SECRET, ANTHROPIC_API_KEY: "sk-host" };
   const gets: { url: string; headers: Record<string, string> }[] = [];
   const runs: Parameters<ClaudeRun>[0][] = [];
@@ -269,7 +301,7 @@ test("doctor --probe (#219): one short run per active profile; gateway lists mod
 });
 
 test("doctor --probe: 402, missing model, auth error, wrong model and quota fail, redacted", () => {
-  const ws = workspace({ profiles: [gw] });
+  const ws = seeded([gw]);
   const env = { OMI_T_GW: SECRET };
   const never: ClaudeRun = () => assert.fail("no run after a failed model list");
   const probe = (http: HttpGet, claude: ClaudeRun = never) =>
