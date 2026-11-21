@@ -24,6 +24,8 @@ import {
 } from "../../adapters/claude/launch.ts";
 import type { GhRunner } from "../../adapters/github/client.ts";
 import { fetchIssueContext } from "../../adapters/github/context.ts";
+import { archShow } from "../../architecture/cli/arch.ts";
+import type { ArchitectureExcerpt } from "../../architecture/domain/contract.ts";
 import type { Db } from "../../persistence/db.ts";
 import {
   addArtifact,
@@ -178,6 +180,28 @@ export const isTest = (f: string) =>
   /(^|[\\/])(tests?|__tests__)[\\/]|[._-](test|spec)\.[^\\/]+$/i.test(f);
 const AGENT_TIMEOUT_MS = 30 * 60_000;
 
+/**
+ * The architecture contract's part for the packet (like `omi arch show --scope`). A repo without a
+ * contract, or with an invalid one, gets no field: an invalid contract must stay fixable by the
+ * engineer, and the architecture gate check reports it.
+ */
+export function architectureExcerpt(
+  worktree: string,
+  config: OmiConfig,
+  scope: string[],
+): ArchitectureExcerpt | undefined {
+  try {
+    return archShow({
+      cwd: worktree,
+      contract: config.architecture?.contract,
+      scope,
+    });
+  } catch (e) {
+    if (e instanceof OmiError && e.code === "CONTRACT_INVALID") return undefined;
+    throw e;
+  }
+}
+
 export const spawnAgent = (l: AgentLaunch): string => {
   // A gateway profile authenticates with its own key (#217).
   if (!l.env[AUTH_ENV] && !l.env.ANTHROPIC_API_KEY && !l.env.ANTHROPIC_AUTH_TOKEN) {
@@ -327,6 +351,7 @@ function agentStep(
     let rawOutput: string | undefined;
     try {
       const fetched = fetchIssueContext(config, t.run.issue, d.gh);
+      const architecture = architectureExcerpt(t.worktree, config, []);
       const packet = buildTaskPacket({
         workflowRunId: t.run.id,
         issue,
@@ -341,6 +366,7 @@ function agentStep(
         openFindings,
         readOnlyArtifacts: [],
         checkResults,
+        ...(architecture ? { architecture } : {}),
         // Attempts that finish are never re-run: an earlier one was cut and may have left edits.
         ...(attempt > 1 ? { priorAttemptCut: true as const } : {}),
       });

@@ -72,6 +72,17 @@ test("role parts name their section headings, finding prefix and verdict", () =>
   }
 });
 
+test("architecture contract rules are loaded into the role AGENTS.md (ARC-001, not skills)", () => {
+  assert.match(agentsMd("code-reviewer"), /Architecture contract:[\s\S]*plugin-paths\.ts/);
+  assert.match(
+    agentsMd("solution-architect"),
+    /Architecture contract:[\s\S]*omi-architecture\.yaml/,
+  );
+  assert.match(agentsMd("backend-engineer"), /`architecture`[\s\S]*plugin-paths\.ts/);
+  assert.match(agentsMd("frontend-engineer"), /place every new file by it/);
+  assert.doesNotMatch(agentsMd("business-analyst"), /place every new file by it/);
+});
+
 const ws = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-agent-ws-")));
 const call = (tool_name: string, tool_input: HookInput["tool_input"]) =>
   agentPreToolUse({ cwd: ws, tool_name, tool_input }, ws);
