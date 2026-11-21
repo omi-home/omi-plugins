@@ -76,6 +76,7 @@ test("fresh repo: create + link + config + templates; second run writes nothing"
     repo: "app",
     projectNumber: 7,
     privateRepoRiskAccepted: false,
+    model: "legacy",
   });
   assert.match(
     readFileSync(join(dir, ".omi-plugins", "omi.config.yaml"), "utf8"),

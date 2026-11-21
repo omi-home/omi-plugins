@@ -2,7 +2,13 @@
 // Project, valid OMI type, terminal, open parent, acceptance criteria, no open blockers.
 import { z } from "zod";
 import type { OmiConfig } from "../../core/config.ts";
-import { type Check, IssueType } from "../../core/contracts.ts";
+import {
+  type Check,
+  IssueType,
+  IssueTypeV2,
+  parseContract,
+  type WorkflowModel,
+} from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 import { type GhRunner, graphql, spawnGh } from "./client.ts";
 
@@ -74,6 +80,36 @@ export function fetchTicket(config: OmiConfig, number: number, run: GhRunner = s
     throw new OmiError("TICKET_INVALID", `issue ${owner}/${repo}#${number} not found`);
   }
   return data.repository.issue;
+}
+
+/**
+ * The OMI type of an Issue under the workflow model in use. `legacy`: the single `type:*` label;
+ * `v2`: the native issue type name, checked by `parseContract`. Missing or unknown → OmiError
+ * (TICKET_INVALID when absent or ambiguous, CONTRACT_INVALID when the v2 name is not a known type).
+ */
+export function readIssueType(
+  t: Pick<Ticket, "number" | "issueType" | "labels">,
+  model: WorkflowModel,
+): IssueType | IssueTypeV2 {
+  if (model === "v2") {
+    if (!t.issueType) {
+      throw new OmiError("TICKET_INVALID", `issue #${t.number} has no native issue type`);
+    }
+    return parseContract(IssueTypeV2, t.issueType.name, `issue #${t.number} issue type`);
+  }
+  const types = t.labels.nodes
+    .map((l) => /^type:(.+)$/.exec(l.name)?.[1])
+    .filter((s): s is string => s !== undefined);
+  const parsed = types.length === 1 ? IssueType.safeParse(types[0]) : undefined;
+  if (!parsed?.success) {
+    throw new OmiError(
+      "TICKET_INVALID",
+      types.length
+        ? `issue #${t.number}: expected one valid type:<OMI type> label, got ${types.map((s) => `type:${s}`).join(", ")}`
+        : `issue #${t.number}: missing type:<OMI type> label`,
+    );
+  }
+  return parsed.data;
 }
 
 /** Native Issue Type expected for an OMI type (ADR-0001 D6); unlisted types have none. */

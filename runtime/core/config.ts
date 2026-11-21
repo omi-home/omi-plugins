@@ -15,6 +15,7 @@ import {
   ProfileEffort,
   parseContract,
   Role,
+  WorkflowModel,
 } from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
 import { DEFAULT_KEY_ENV, decryptSecret, loadMasterKey } from "./secrets.ts";
@@ -64,6 +65,8 @@ export const OmiConfig = z.strictObject({
     projectNumber: z.int().positive(),
     /** Private repo on GitHub Free has no server-side protection (ADR-0001 D5). */
     privateRepoRiskAccepted: z.boolean().default(false),
+    /** Workflow model: `legacy` (type:* labels) until Project #2 migrates to `v2` (ADR-0005 D8). */
+    model: WorkflowModel.default("legacy"),
   }),
   git: z
     .strictObject({
@@ -108,6 +111,10 @@ export const OmiConfig = z.strictObject({
     .prefault({}),
 });
 export type OmiConfig = z.infer<typeof OmiConfig>;
+
+/** The single place that answers which workflow model is in use. */
+export const workflowModel = (config: Pick<OmiConfig, "github">): WorkflowModel =>
+  config.github.model;
 
 export const parseConfig = (input: unknown): OmiConfig =>
   parseContract(OmiConfig, input, "config", "CONFIG_INVALID");

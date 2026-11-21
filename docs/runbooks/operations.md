@@ -20,7 +20,7 @@ Skill `/omi-coordinator:omi-start`, hoặc tay theo thứ tự:
 Schema strict (field lạ bị từ chối): [runtime/core/config.ts](../../runtime/core/config.ts). Tối thiểu:
 
 ```yaml
-github: { owner: <org>, repo: <repo>, projectNumber: <n> }
+github: { owner: <org>, repo: <repo>, projectNumber: <n> } # tuỳ chọn: model: legacy | v2 (mặc định legacy)
 checks:
   lint: { run: npm run lint }
   build: { run: npm run typecheck }

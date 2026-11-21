@@ -35,6 +35,14 @@
         "privateRepoRiskAccepted": {
           "default": false,
           "type": "boolean"
+        },
+        "model": {
+          "default": "legacy",
+          "type": "string",
+          "enum": [
+            "legacy",
+            "v2"
+          ]
         }
       },
       "required": [
