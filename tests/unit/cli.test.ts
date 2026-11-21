@@ -106,7 +106,10 @@ Commands:
                          not use (status-transitions.yaml). github.model v2: also the organization's issue
                          types (config/github/issue-types.yaml), and reads project-v2.yaml + views-v2.yaml
                          (7 views, Status of 10 options) instead; lists every enabled built-in workflow
-                         with the manual step to turn it off. Read-only; exits 1 while anything is
+                         with the manual step to turn it off; Status drift is then checked against
+                         workflow.yaml (github.workflow override) by native issue type, not
+                         status-transitions.yaml, and also lists items with no issue type or no
+                         Status. Read-only; exits 1 while anything is
                          pending, manual or drifting. \`project plan\` is an alias
   github project apply   Create missing fields, options and views (by name + layout); never deletes. View
                          filters/grouping/sort, workflows, iteration fields and conflicts are printed as

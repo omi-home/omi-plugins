@@ -77,7 +77,7 @@ omi github repo validate
 omi doctor                    # scope admin:org và quyền Project
 ```
 
-`plan` thoát `0` nghĩa là field, view (filter/layout/group/sort/cột), issue type và workflow đã khớp. Cảnh báo `manual-steps` còn lại chỉ gồm các mục không đọc lại được (field hiển thị của view) hoặc built-in field đã thêm; tự kiểm bằng mắt trong UI.
+`plan` thoát `0` nghĩa là field, view (filter/layout/group/sort/cột), issue type và workflow đã khớp. `plan` thoát `0` không chứng minh built-in field (Type, Parent issue, Sub-issues progress) đã có: thiếu field vẫn thoát 0. Dòng `field <tên>: add it to the Project in the UI` trong `unsupported`/`manual-steps` nghĩa là field đó còn thiếu và phải làm mục 1 của phần 4 (view lọc theo `type:` phụ thuộc field Type). Sau khi thiết lập xong, chỉ các dòng `view ...: show ...` (field hiển thị của view, không đọc lại được) được phép còn lại; tự kiểm bằng mắt trong UI.
 
 Sửa một bước thủ công xong thì chạy lại `plan`; lệch tới đâu in tới đó. Muốn quay về trạng thái mong muốn của field/view/issue type thì chạy lại `apply`.
 
