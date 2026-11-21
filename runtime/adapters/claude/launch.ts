@@ -3,9 +3,9 @@
 // a fresh CLAUDE_CONFIG_DIR per run and an env built from an allowlist, never the host's env.
 import { spawnSync } from "node:child_process";
 import { isAbsolute, join, relative } from "node:path";
-import type { Selection } from "../../core/config.ts";
-import type { Harness, QuotaSignal, Role, TokenUsage } from "../../core/contracts.ts";
-import { OmiError } from "../../core/errors/errors.ts";
+import type { Selection } from "../../shared/config.ts";
+import type { Harness, QuotaSignal, Role, TokenUsage } from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
 
 const semver = (s: string) => /(\d+)\.(\d+)\.(\d+)/.exec(s)?.slice(1).map(Number);
 

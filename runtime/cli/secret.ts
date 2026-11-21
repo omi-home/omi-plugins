@@ -2,8 +2,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { keyEnvName } from "../core/config.ts";
-import { OmiError } from "../core/errors/errors.ts";
 import {
   decryptSecret,
   encryptSecret,
@@ -13,8 +11,10 @@ import {
   parseMasterKey,
 } from "../core/secrets.ts";
 import { STATE_FILE } from "../core/workspace.ts";
-import { openState, tx } from "../persistence/db.ts";
 import { hasAnySealedSecret, listProfileRecords, writeSealed } from "../persistence/profiles.ts";
+import { keyEnvName } from "../shared/config.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import { openState, tx } from "../shared/sqlite/db.ts";
 
 /** Persists `name=value` in the user's environment; the value must not travel through argv. */
 export type WriteUserEnv = (name: string, value: string) => void;

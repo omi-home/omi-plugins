@@ -16,19 +16,19 @@ import {
 import { main } from "../../runtime/cli/main.ts";
 import { usageByProfile } from "../../runtime/cli/status.ts";
 import { harnessGate } from "../../runtime/cli/task.ts";
+import { encryptSecret, generateMasterKey, parseMasterKey } from "../../runtime/core/secrets.ts";
+import { addProfile } from "../../runtime/persistence/profiles.ts";
 import {
   listProfiles,
   loadProfiles,
   profileSecretResolver,
   readLegacyProfiles,
   selectProfile,
-} from "../../runtime/core/config.ts";
-import { Profile, ProfilesFile } from "../../runtime/core/contracts.ts";
-import { OmiError } from "../../runtime/core/errors/errors.ts";
-import { encryptSecret, generateMasterKey, parseMasterKey } from "../../runtime/core/secrets.ts";
-import { openState } from "../../runtime/persistence/db.ts";
-import { addProfile } from "../../runtime/persistence/profiles.ts";
-import { redact } from "../../runtime/reporting/redact.ts";
+} from "../../runtime/shared/config.ts";
+import { Profile, ProfilesFile } from "../../runtime/shared/contracts.ts";
+import { OmiError } from "../../runtime/shared/errors/errors.ts";
+import { redact } from "../../runtime/shared/redact.ts";
+import { openState } from "../../runtime/shared/sqlite/db.ts";
 
 // Opaque on purpose: matches no static redact rule, so only registerSecret can scrub it.
 const SECRET = "omi-canary-profiles-5d4c3b2a1f09";

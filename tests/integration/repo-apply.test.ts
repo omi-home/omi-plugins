@@ -3,16 +3,16 @@
 // permission denied.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import {
   approvedActions,
   repoApply,
   repoPlan,
   repoValidate,
 } from "../../runtime/adapters/github/repo.ts";
-import { type OmiConfig, parseConfig } from "../../runtime/core/config.ts";
-import type { OmiError } from "../../runtime/core/errors/errors.ts";
 import { loadRepoConfig } from "../../runtime/core/repo-config.ts";
+import { type OmiConfig, parseConfig } from "../../runtime/shared/config.ts";
+import type { OmiError } from "../../runtime/shared/errors/errors.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
 
 const config = (privateRepoRiskAccepted = false): OmiConfig =>
   parseConfig({ github: { owner: "o", repo: "r", projectNumber: 2, privateRepoRiskAccepted } });

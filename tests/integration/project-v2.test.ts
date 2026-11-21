@@ -3,16 +3,12 @@
 // enabled built-in workflows, Status drift by native issue type; legacy stays untouched.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import {
   projectApply,
   projectPlan,
   projectValidate,
   statusDrift,
 } from "../../runtime/adapters/github/project-fields.ts";
-import type { OmiConfig } from "../../runtime/core/config.ts";
-import { ProjectStatusV2 } from "../../runtime/core/contracts.ts";
-import type { OmiError } from "../../runtime/core/errors/errors.ts";
 import { loadIssueTypesConfig } from "../../runtime/core/issue-type-config.ts";
 import {
   type GhOption,
@@ -20,6 +16,10 @@ import {
   loadProjectConfigV2,
   loadViewsConfigV2,
 } from "../../runtime/core/project-config.ts";
+import type { OmiConfig } from "../../runtime/shared/config.ts";
+import { ProjectStatusV2 } from "../../runtime/shared/contracts.ts";
+import type { OmiError } from "../../runtime/shared/errors/errors.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
 
 const config = {
   github: { owner: "o", repo: "repo", projectNumber: 2, model: "v2" },

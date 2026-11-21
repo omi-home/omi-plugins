@@ -5,10 +5,8 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import type { Ticket } from "../../runtime/adapters/github/ticket.ts";
 import { ticketValidate } from "../../runtime/cli/task.ts";
-import { IssueTypeV2 } from "../../runtime/core/contracts.ts";
 import {
   hierarchyChecks,
   type Link,
@@ -21,6 +19,8 @@ import {
   requiredSections,
   sectionsCheckV2,
 } from "../../runtime/core/issue-forms.ts";
+import { IssueTypeV2 } from "../../runtime/shared/contracts.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
 
 type T = IssueTypeV2;
 const h = loadHierarchyV2();

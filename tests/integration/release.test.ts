@@ -5,9 +5,9 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { prBody } from "../../runtime/adapters/github/pr.ts";
 import { newer, releaseCheck, releaseTag } from "../../runtime/cli/release.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();

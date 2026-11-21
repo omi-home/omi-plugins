@@ -5,12 +5,10 @@
 // repository line, agents-md/<role>.md. Generated every time: never edit them by hand.
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { AGENT_PACK } from "../adapters/claude/launch.ts";
-import { READ_ONLY_ROLES, type ReportCategory, Role } from "../core/contracts.ts";
-import { OmiError } from "../core/errors/errors.ts";
-
-const PLUGIN_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+import { READ_ONLY_ROLES, type ReportCategory, Role } from "../shared/contracts.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import { PLUGIN_ROOT } from "../shared/plugin-paths.ts";
 
 /** Skill the Coordinator always adds on rework for roles that change files (Spike-0011 §4). */
 export const REWORK_SKILL = "receiving-review-findings";

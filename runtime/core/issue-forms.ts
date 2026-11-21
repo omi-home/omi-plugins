@@ -4,9 +4,11 @@
 // written by hand passes with any heading level, a heading that starts with the label
 // ("Scope / Acceptance (from roadmap)") and non-empty text under it.
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-import { type Check, type IssueType, IssueTypeV2, parseContract } from "./contracts.ts";
+import { type Check, type IssueType, IssueTypeV2, parseContract } from "../shared/contracts.ts";
+import { TEMPLATES_DIR } from "../shared/plugin-paths.ts";
 
 const FormBody = z
   .array(
@@ -48,7 +50,7 @@ export const DOC_FORMS = [
 ] as const;
 
 const formPathV2 = (file: string) =>
-  new URL(`../../templates/github-v2/ISSUE_TEMPLATE/${file}.yml`, import.meta.url);
+  join(TEMPLATES_DIR, "github-v2", "ISSUE_TEMPLATE", `${file}.yml`);
 
 const cacheV2 = new Map<string, IssueFormV2>();
 const loadFile = (file: string): IssueFormV2 => {
@@ -75,7 +77,7 @@ const docKind = (f: IssueFormV2): string | undefined => {
 };
 
 export const formPath = (type: IssueType) =>
-  new URL(`../../templates/github/ISSUE_TEMPLATE/${type}.yml`, import.meta.url);
+  join(TEMPLATES_DIR, "github", "ISSUE_TEMPLATE", `${type}.yml`);
 
 const cache = new Map<IssueType, IssueForm>();
 export const loadForm = (type: IssueType): IssueForm => {

@@ -1,5 +1,13 @@
 // Run/step repository. Every write is one transaction; state changes are compare-and-set so a
 // stale writer fails instead of overwriting. Which transitions are legal is the FSM's job (T2.3).
+
+import {
+  initialContext,
+  POLICY,
+  type Policy,
+  transition,
+  type WorkflowEvent,
+} from "../core/workflow-engine/fsm.ts";
 import {
   type ArtifactKind,
   type IssueRef,
@@ -14,16 +22,9 @@ import {
   WorkflowContext,
   WorkflowEventType,
   WorkflowState,
-} from "../core/contracts.ts";
-import { type ErrorCode, OmiError } from "../core/errors/errors.ts";
-import {
-  initialContext,
-  POLICY,
-  type Policy,
-  transition,
-  type WorkflowEvent,
-} from "../core/workflow-engine/fsm.ts";
-import { type Db, tx } from "./db.ts";
+} from "../shared/contracts.ts";
+import { type ErrorCode, OmiError } from "../shared/errors/errors.ts";
+import { type Db, tx } from "../shared/sqlite/db.ts";
 
 const iso = () => new Date().toISOString();
 const LIVE_EXCLUDED = ["COMPLETED", "FAILED", "CANCELLED"] satisfies WorkflowState[];

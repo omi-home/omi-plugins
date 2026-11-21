@@ -2,11 +2,11 @@
 // ADR-0001 D5). Facts are read from GitHub; the gate itself is a pure function so every rule is
 // testable without a network. Merge evidence is GitHub's receipt, never `git branch --merged`.
 import { z } from "zod";
-import type { OmiConfig } from "../../core/config.ts";
-import type { Check } from "../../core/contracts.ts";
-import { OmiError } from "../../core/errors/errors.ts";
 import { loadRiskPolicy, riskLevel } from "../../core/repo-config.ts";
-import { type GhRunner, graphql, spawnGh } from "./client.ts";
+import type { OmiConfig } from "../../shared/config.ts";
+import type { Check } from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { type GhRunner, graphql, spawnGh } from "../../shared/github/client.ts";
 import { markedPrimaries } from "./pr.ts";
 
 const MergeMethod = z.enum(["SQUASH", "MERGE", "REBASE"]);

@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 const repoUrl = pathToFileURL(
   join(import.meta.dirname, "../../runtime/persistence/repository.ts"),
 ).href;
-const dbUrl = pathToFileURL(join(import.meta.dirname, "../../runtime/persistence/db.ts")).href;
+const dbUrl = pathToFileURL(join(import.meta.dirname, "../../runtime/shared/sqlite/db.ts")).href;
 
 const CHILD = `
 import { openState } from ${JSON.stringify(dbUrl)};

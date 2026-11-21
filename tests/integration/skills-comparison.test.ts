@@ -12,13 +12,13 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { observeRun } from "../../runtime/adapters/claude/launch.ts";
 import { parseContext } from "../../runtime/core/context-usage.ts";
-import type { Role } from "../../runtime/core/contracts.ts";
 import {
   acceptStepResult,
   buildTaskPacket,
   packetPrompt,
 } from "../../runtime/core/handoff/packet.ts";
 import { prepareAgent, spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
+import type { Role } from "../../runtime/shared/contracts.ts";
 
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 const live = process.env.OMI_LIVE === "1" && spawnSync("claude", ["--version"]).status === 0;

@@ -3,16 +3,16 @@
 // changelog entry, tag free and newer, Milestone work closed). tag: after the PO merged the
 // release PR, tag its merge commit `<plugin>--v<version>` (Claude Code's convention, the ref users
 // pin with `marketplace add owner/repo#<tag>`), push it, close the Release Issue and roll up.
-import type { GhRunner } from "../adapters/github/client.ts";
-import { classify, spawnGh } from "../adapters/github/client.ts";
 import { prFacts } from "../adapters/github/merge.ts";
 import { markedPrimaries } from "../adapters/github/pr.ts";
 import { type FinishChange, markFinished } from "../adapters/github/project.ts";
 import { fetchTicket } from "../adapters/github/ticket.ts";
-import type { Check } from "../core/contracts.ts";
-import { OmiError } from "../core/errors/errors.ts";
 import { labelType } from "../core/hierarchy.ts";
 import { git } from "../resources/worktree.ts";
+import type { Check } from "../shared/contracts.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import type { GhRunner } from "../shared/github/client.ts";
+import { classify, spawnGh } from "../shared/github/client.ts";
 import { repo } from "./task.ts";
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;

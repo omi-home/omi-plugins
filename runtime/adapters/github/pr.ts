@@ -2,10 +2,10 @@
 // One PR per head branch; exactly one primary executable Issue, proven by GitHub's closing
 // references when the base is the default branch, else by the OMI marker in the PR body.
 import { z } from "zod";
-import type { OmiConfig } from "../../core/config.ts";
-import type { Check } from "../../core/contracts.ts";
-import { OmiError } from "../../core/errors/errors.ts";
-import { type GhRunner, graphql, spawnGh } from "./client.ts";
+import type { OmiConfig } from "../../shared/config.ts";
+import type { Check } from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { type GhRunner, graphql, spawnGh } from "../../shared/github/client.ts";
 
 export const PullRequest = z.strictObject({
   id: z.string(),

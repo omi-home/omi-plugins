@@ -6,15 +6,12 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import {
   fetchIssueContext,
   PER_ISSUE_CHARS,
   parseCarriedFindings,
   TOTAL_CHARS,
 } from "../../runtime/adapters/github/context.ts";
-import { parseConfig } from "../../runtime/core/config.ts";
-import type { Role } from "../../runtime/core/contracts.ts";
 import {
   acceptStepResult,
   acceptStepResultWithWarnings,
@@ -25,6 +22,9 @@ import {
   type TaskPacketInput,
   TRUNCATION_SUFFIX,
 } from "../../runtime/core/handoff/packet.ts";
+import { parseConfig } from "../../runtime/shared/config.ts";
+import type { Role } from "../../runtime/shared/contracts.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8" }).trim();

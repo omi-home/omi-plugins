@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
-import { parseContract, ReportCategory, StepComment } from "../../runtime/core/contracts.ts";
 import { formatUsage, renderStepReport, sumUsage } from "../../runtime/reporting/render.ts";
+import { parseContract, ReportCategory, StepComment } from "../../runtime/shared/contracts.ts";
 
 const FIXTURES = new URL("../fixtures/reports/", import.meta.url);
 

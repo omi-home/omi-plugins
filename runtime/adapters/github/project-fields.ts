@@ -2,9 +2,6 @@
 // config/github/project.yaml and report items whose Status breaks their type's lifecycle
 // (config/github/status-transitions.yaml). Apply only adds; IDs are read, never configured.
 import { z } from "zod";
-import { type OmiConfig, workflowModel } from "../../core/config.ts";
-import { type Check, IssueTypeV2, ProjectStatus, ProjectStatusV2 } from "../../core/contracts.ts";
-import { OmiError } from "../../core/errors/errors.ts";
 import { labelType } from "../../core/hierarchy.ts";
 import {
   type IssueTypeAction,
@@ -32,7 +29,10 @@ import {
   type ViewsConfig,
 } from "../../core/project-config.ts";
 import { resolveWorkflow, statusesOf } from "../../core/workflow-config.ts";
-import { type GhRunner, graphql, spawnGh } from "./client.ts";
+import { type OmiConfig, workflowModel } from "../../shared/config.ts";
+import { type Check, IssueTypeV2, ProjectStatus, ProjectStatusV2 } from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { type GhRunner, graphql, spawnGh } from "../../shared/github/client.ts";
 import { issueTypeApply, issueTypePlan } from "./issue-types.ts";
 import { OWNER_PROJECT } from "./project.ts";
 

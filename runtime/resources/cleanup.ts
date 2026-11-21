@@ -9,22 +9,22 @@ import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { MergeReceipt } from "../adapters/github/merge.ts";
 import {
-  type CleanupResult,
-  type IssueRef,
-  parseContract,
-  type ResourceKind,
-  CleanupResult as Result,
-  SCHEMA_VERSION,
-} from "../core/contracts.ts";
-import { OmiError } from "../core/errors/errors.ts";
-import type { Db } from "../persistence/db.ts";
-import {
   acquireLease,
   getRun,
   ownedRefs,
   releaseLease,
   releaseResource,
 } from "../persistence/repository.ts";
+import {
+  type CleanupResult,
+  type IssueRef,
+  parseContract,
+  type ResourceKind,
+  CleanupResult as Result,
+  SCHEMA_VERSION,
+} from "../shared/contracts.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import type { Db } from "../shared/sqlite/db.ts";
 import { git, readMarker, same, tryGit } from "./worktree.ts";
 
 type StepName = CleanupResult["steps"][number]["name"];

@@ -6,9 +6,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { AGENT_PACK, agentEnv, PLUGIN_NAME } from "../adapters/claude/launch.ts";
-import { loadConfig } from "../core/config.ts";
 import {
   AppliedContext,
   addContext,
@@ -20,13 +18,13 @@ import {
   settingsDiff,
 } from "../core/context-settings.ts";
 import { classify, parseContext } from "../core/context-usage.ts";
-import { type ContextClass, type ContextUsage, parseContract, Role } from "../core/contracts.ts";
-import { OmiError } from "../core/errors/errors.ts";
 import { locate, WORKSPACE_DIR } from "../core/workspace.ts";
 import { writeRoleFiles } from "../resources/role-files.ts";
+import { loadConfig } from "../shared/config.ts";
+import { type ContextClass, type ContextUsage, parseContract, Role } from "../shared/contracts.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import { PLUGIN_ROOT } from "../shared/plugin-paths.ts";
 import { SETTINGS } from "./workspace.ts";
-
-const PLUGIN_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 /** Runs `claude <args>` in cwd with `/context` on stdin (a Git Bash argument would be rewritten). */
 export type ContextRunner = (o: {

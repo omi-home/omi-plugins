@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { parse } from "yaml";
-import { IssueType } from "../../runtime/core/contracts.ts";
 import { titleType } from "../../runtime/core/hierarchy.ts";
 import {
   loadForm,
@@ -12,6 +11,7 @@ import {
   requiredSections,
   sectionsCheck,
 } from "../../runtime/core/issue-forms.ts";
+import { IssueType } from "../../runtime/shared/contracts.ts";
 
 const root = new URL("../../", import.meta.url);
 const read = (p: string) => readFileSync(new URL(p, root), "utf8");

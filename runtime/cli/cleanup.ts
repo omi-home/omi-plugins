@@ -6,11 +6,8 @@
 
 import { existsSync, readdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { type GhRunner, spawnGh } from "../adapters/github/client.ts";
 import { prFacts, receiptOf } from "../adapters/github/merge.ts";
 import { attemptLiveness, CRASHED_HINT } from "../core/attempt-liveness.ts";
-import { OmiError } from "../core/errors/errors.ts";
-import { openState, statePath } from "../persistence/db.ts";
 import {
   claimedRefs,
   leaseActive,
@@ -23,6 +20,9 @@ import {
 } from "../persistence/repository.ts";
 import { publishPending } from "../reporting/outbox.ts";
 import { git, listWorktrees, same } from "../resources/worktree.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import { type GhRunner, spawnGh } from "../shared/github/client.ts";
+import { openState, statePath } from "../shared/sqlite/db.ts";
 import { repo, taskFinalize } from "./task.ts";
 
 export interface ScanRun {

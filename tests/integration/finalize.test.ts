@@ -16,12 +16,9 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { prBody } from "../../runtime/adapters/github/pr.ts";
 import { cleanupApply, cleanupScan } from "../../runtime/cli/cleanup.ts";
 import { taskFinalize, taskStatus } from "../../runtime/cli/task.ts";
-import { parseConfig } from "../../runtime/core/config.ts";
-import { openState, statePath } from "../../runtime/persistence/db.ts";
 import {
   acquireLease,
   advanceRun,
@@ -32,6 +29,9 @@ import {
   startStep,
 } from "../../runtime/persistence/repository.ts";
 import { ensureTaskWorkspace } from "../../runtime/resources/worktree.ts";
+import { parseConfig } from "../../runtime/shared/config.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
+import { openState, statePath } from "../../runtime/shared/sqlite/db.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();

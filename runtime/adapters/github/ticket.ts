@@ -1,17 +1,17 @@
 // Ticket lookup and ticket-first gates 1–2 (spec §8): exists, open, in the configured
 // Project, valid OMI type, terminal, open parent, acceptance criteria, no open blockers.
 import { z } from "zod";
-import { type OmiConfig, workflowModel } from "../../core/config.ts";
+import { labelType, loadHierarchyV2, typeLabels } from "../../core/hierarchy.ts";
+import { type OmiConfig, workflowModel } from "../../shared/config.ts";
 import {
   type Check,
   type IssueType,
   IssueTypeV2,
   parseContract,
   type WorkflowModel,
-} from "../../core/contracts.ts";
-import { OmiError } from "../../core/errors/errors.ts";
-import { labelType, loadHierarchyV2, typeLabels } from "../../core/hierarchy.ts";
-import { type GhRunner, graphql, spawnGh } from "./client.ts";
+} from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { type GhRunner, graphql, spawnGh } from "../../shared/github/client.ts";
 
 const PAGE = 50;
 

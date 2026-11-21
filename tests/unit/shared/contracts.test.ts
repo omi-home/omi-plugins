@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseConfig } from "../../runtime/core/config.ts";
+import { parseConfig } from "../../../runtime/shared/config.ts";
 import {
   CleanupResult,
   commentMarker,
   parseContract,
   StepComment,
   StepResult,
-} from "../../runtime/core/contracts.ts";
-import { OmiError } from "../../runtime/core/errors/errors.ts";
+} from "../../../runtime/shared/contracts.ts";
+import { OmiError } from "../../../runtime/shared/errors/errors.ts";
 
 const issue = { repository: "omi-home/omi-plugins", number: 17 };
 const step = {
@@ -151,4 +151,25 @@ test("config: safe defaults and fixed review policy", () => {
   fails(() => parseConfig({ github: gh, agents: { maxConcurrent: 4 } }), "CONFIG_INVALID");
   fails(() => parseConfig({ github: gh, cleanup: { force: true } }), "CONFIG_INVALID");
   fails(() => parseConfig({}), "CONFIG_INVALID", "github");
+});
+
+test("config: architecture.contract reaches a shell line, so only plain path characters pass (SEC-003)", () => {
+  const github = { owner: "omi-home", repo: "omi-plugins", projectNumber: 2 };
+  const contract = (c: string) => parseConfig({ github, architecture: { contract: c } });
+  assert.equal(contract("docs/arch_1-v2.yaml").architecture?.contract, "docs/arch_1-v2.yaml");
+  assert.equal(
+    parseConfig({ github, architecture: {} }).architecture?.contract,
+    "omi-architecture.yaml",
+  );
+  for (const bad of [
+    "a$HOME.yaml",
+    "a`id`.yaml",
+    'a".yaml',
+    "a'.yaml",
+    "my arch.yaml",
+    "a;b.yaml",
+  ]) {
+    fails(() => contract(bad), "CONFIG_INVALID", "architecture.contract");
+  }
+  fails(() => contract("../outside.yaml"), "CONFIG_INVALID", "architecture.contract");
 });

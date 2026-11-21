@@ -3,8 +3,8 @@
 // (GitHub errors on duplicates), a link that would close a cycle is refused. Blockers may live in
 // another repository; `omi ticket validate` keeps an Issue with open blockers out of `task start`.
 import { z } from "zod";
-import { OmiError } from "../../core/errors/errors.ts";
-import { type GhRunner, graphql, spawnGh } from "./client.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { type GhRunner, graphql, spawnGh } from "../../shared/github/client.ts";
 import type { IssueAt } from "./issue.ts";
 
 const PAGE = 50;

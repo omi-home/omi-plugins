@@ -7,8 +7,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
-import { type GhRunner, spawnGh } from "../adapters/github/client.ts";
 import { issueTypeApply } from "../adapters/github/issue-types.ts";
 import {
   findOrCreateProject,
@@ -16,11 +14,13 @@ import {
   type ProjectRef,
   projectByNumber,
 } from "../adapters/github/project.ts";
-import { CONFIG_PATH, loadConfig, readConfigData } from "../core/config.ts";
-import { OmiError } from "../core/errors/errors.ts";
 import { locate } from "../core/workspace.ts";
+import { CONFIG_PATH, loadConfig, readConfigData } from "../shared/config.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import { type GhRunner, spawnGh } from "../shared/github/client.ts";
+import { TEMPLATES_DIR } from "../shared/plugin-paths.ts";
 
-const TEMPLATES = fileURLToPath(new URL("../../templates/github/", import.meta.url));
+const TEMPLATES = join(TEMPLATES_DIR, "github");
 
 export interface InitResult {
   root: string;
@@ -107,7 +107,7 @@ export function projectInit(
     writeFileSync(
       file,
       `# Written by \`omi github project init\`. Add this repo's checks (lint/build/test commands)
-# before \`omi task run\`; see runtime/core/config.ts for every setting and its default.
+# before \`omi task run\`; see runtime/shared/config.ts for every setting and its default.
 github:
   owner: ${JSON.stringify(owner)}
   repo: ${JSON.stringify(repo)}

@@ -1,6 +1,7 @@
 // Issue hierarchy policy (DevTask-0045 #128): allowed parent → child OMI types, maximum depth,
 // no cycles, and the title rule `<IssueType>-<NNNN>-<Tiêu đề>` matching the `type:*` label.
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 import {
@@ -9,7 +10,8 @@ import {
   IssueTypeV2,
   type ProjectStatus,
   parseContract,
-} from "./contracts.ts";
+} from "../shared/contracts.ts";
+import { CONFIG_DIR } from "../shared/plugin-paths.ts";
 
 export const Hierarchy = z.strictObject({
   maxDepth: z.int().min(1),
@@ -21,9 +23,7 @@ let cached: Hierarchy | undefined;
 export const loadHierarchy = (): Hierarchy =>
   (cached ??= parseContract(
     Hierarchy,
-    parse(
-      readFileSync(new URL("../../config/github/issue-hierarchy.yaml", import.meta.url), "utf8"),
-    ),
+    parse(readFileSync(join(CONFIG_DIR, "github", "issue-hierarchy.yaml"), "utf8")),
     "issue hierarchy",
   ));
 
@@ -39,9 +39,7 @@ let cachedV2: HierarchyV2 | undefined;
 export const loadHierarchyV2 = (): HierarchyV2 =>
   (cachedV2 ??= parseContract(
     HierarchyV2,
-    parse(
-      readFileSync(new URL("../../config/github/issue-hierarchy-v2.yaml", import.meta.url), "utf8"),
-    ),
+    parse(readFileSync(join(CONFIG_DIR, "github", "issue-hierarchy-v2.yaml"), "utf8")),
     "issue hierarchy v2",
   ));
 

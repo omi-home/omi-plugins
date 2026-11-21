@@ -106,36 +106,6 @@ placement:
     message: "Tests live under tests/{unit,integration,contract,e2e}/<module>/, never next to the source."
 ignore: []
 legacy:
-  # R1 shared kernel -> runtime/shared/
-  - { path: runtime/core/contracts.ts, issue: 329, reason: "R1: moves to runtime/shared/" }
-  - { path: runtime/core/errors, issue: 329, reason: "R1: moves to runtime/shared/errors/" }
-  - {
-      path: runtime/reporting/redact.ts,
-      issue: 329,
-      reason: "R1: moves to runtime/shared/redact.ts",
-    }
-  - { path: runtime/core/config.ts, issue: 329, reason: "R1: moves to runtime/shared/config.ts" }
-  - {
-      path: runtime/core/workflow-engine/supervise.ts,
-      issue: 329,
-      reason: "R1: moves to runtime/shared/process/",
-    }
-  - {
-      path: runtime/core/workflow-engine/command-env.ts,
-      issue: 329,
-      reason: "R1: moves to runtime/shared/process/",
-    }
-  - { path: runtime/persistence/db.ts, issue: 329, reason: "R1: moves to runtime/shared/sqlite/" }
-  - {
-      path: runtime/persistence/migrations.ts,
-      issue: 329,
-      reason: "R1: moves to runtime/shared/sqlite/",
-    }
-  - {
-      path: runtime/adapters/github/client.ts,
-      issue: 329,
-      reason: "R1: moves to runtime/shared/github/",
-    }
   # R2 reporting -> runtime/reporting/
   - {
       path: runtime/reporting/render.ts,

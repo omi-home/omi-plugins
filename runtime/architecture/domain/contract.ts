@@ -1,53 +1,20 @@
 // Typed architecture contract (Feature-0043 #321). Every object is strict: unknown fields are
 // rejected. Paths are posix, relative to the repo root, and can never climb out of it.
 import { z } from "zod";
+import {
+  ArchitectureExcerpt,
+  ArchModule,
+  Glob,
+  Layer,
+  ModuleId,
+  Placement,
+  RelPath,
+} from "../../shared/contracts.ts";
 
-const MAX_PATH = 200;
+// The building blocks live in the shared kernel (the task packet carries an excerpt of the contract).
+export { ArchitectureExcerpt, ArchModule, Glob, Layer, ModuleId, Placement, RelPath };
 
-/** True when `p` is a safe repo-relative posix path (globs may also use `*` and `?`). */
-function safePath(p: string, glob: boolean): boolean {
-  if (p.length === 0 || p.length > MAX_PATH) return false;
-  if (p.startsWith("/") || /^[A-Za-z]:/.test(p) || p.includes("\\")) return false;
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are rejected on purpose
-  if (/[\u0000-\u001f]/.test(p)) return false;
-  if (!glob && /[*?]/.test(p)) return false;
-  return p.split("/").every((s) => s !== "" && s !== "." && s !== "..");
-}
-
-export const RelPath = z.string().refine((p) => safePath(p, false), {
-  message:
-    "must be a posix path relative to the repo (no '..', '.', absolute, drive, '\\', '*', '?')",
-});
-export const Glob = z.string().refine((p) => safePath(p, true), {
-  message: "must be a posix glob relative to the repo (no '..', '.', absolute, drive, '\\')",
-});
-export const ModuleId = z.string().regex(/^[a-z][a-z0-9-]{1,40}$/);
-const Segment = z
-  .string()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/)
-  .max(80);
 const text = (max: number) => z.string().min(1).max(max);
-
-export const Layer = z.strictObject({
-  name: ModuleId,
-  dir: Segment,
-  mayImport: z.array(ModuleId),
-  forbidPackages: z.array(text(200)).default([]),
-});
-
-export const ArchModule = z.strictObject({
-  id: ModuleId,
-  path: RelPath,
-  description: text(200),
-  shared: z.boolean().default(false),
-  dependsOn: z.array(ModuleId).default([]),
-});
-
-export const Placement = z.strictObject({
-  pattern: Glob,
-  allowedIn: z.array(Glob).min(1),
-  message: text(300),
-});
 
 export const ArchitectureContract = z
   .strictObject({
@@ -169,12 +136,3 @@ export const ArchReport = z.strictObject({
   truncated: z.boolean(),
 });
 export type ArchReport = z.infer<typeof ArchReport>;
-
-/** The part of the contract an agent needs for a scope (TaskPacket.architecture). */
-export const ArchitectureExcerpt = z.strictObject({
-  contractPath: RelPath,
-  layers: z.array(Layer),
-  modules: z.array(ArchModule).max(30),
-  placement: z.array(Placement),
-});
-export type ArchitectureExcerpt = z.infer<typeof ArchitectureExcerpt>;

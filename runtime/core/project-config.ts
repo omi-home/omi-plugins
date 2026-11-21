@@ -2,6 +2,7 @@
 // lifecycle per type in config/github/status-transitions.yaml. Pure: load, validate, diff.
 // GitHub reads and writes live in adapters/github/project.ts.
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 import {
@@ -10,7 +11,8 @@ import {
   ProjectStatus,
   ProjectStatusV2,
   parseContract,
-} from "./contracts.ts";
+} from "../shared/contracts.ts";
+import { CONFIG_DIR } from "../shared/plugin-paths.ts";
 import { initialStatus, loadDefaultWorkflow, type Workflow } from "./workflow-config.ts";
 
 const Color = z.enum(["GRAY", "BLUE", "GREEN", "YELLOW", "ORANGE", "RED", "PINK", "PURPLE"]);
@@ -67,8 +69,7 @@ export const StatusTransitions = z.strictObject({
 });
 export type StatusTransitions = z.infer<typeof StatusTransitions>;
 
-const read = (file: string) =>
-  parse(readFileSync(new URL(`../../config/github/${file}`, import.meta.url), "utf8"));
+const read = (file: string) => parse(readFileSync(join(CONFIG_DIR, "github", file), "utf8"));
 
 let project: ProjectConfig | undefined;
 let transitions: StatusTransitions | undefined;

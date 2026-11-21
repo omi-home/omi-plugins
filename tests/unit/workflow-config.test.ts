@@ -5,8 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
-import { parseConfig } from "../../runtime/core/config.ts";
-import { IssueTypeV2, ProjectStatusV2 } from "../../runtime/core/contracts.ts";
 import {
   canTransition,
   closesIssue,
@@ -19,6 +17,8 @@ import {
   statusesOf,
   transitionsBetween,
 } from "../../runtime/core/workflow-config.ts";
+import { parseConfig } from "../../runtime/shared/config.ts";
+import { IssueTypeV2, ProjectStatusV2 } from "../../runtime/shared/contracts.ts";
 
 // biome-ignore lint/suspicious/noExplicitAny: tests mutate the parsed YAML freely
 type Raw = Record<string, any>;

@@ -4,10 +4,8 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { harnessVersion, versionRefusal } from "../adapters/claude/launch.ts";
-import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import { writeSection } from "../adapters/github/context.ts";
 import {
   type MergeReceipt,
@@ -40,32 +38,6 @@ import {
   validateTicket,
 } from "../adapters/github/ticket.ts";
 import {
-  keyEnvName,
-  loadConfig,
-  loadProfiles,
-  type OmiConfig,
-  profileSecretResolver,
-  readLegacyProfiles,
-  type Selection,
-  secretEnv,
-  selectProfile,
-  workflowModel,
-} from "../core/config.ts";
-import {
-  type Check,
-  type CleanupResult,
-  commentMarker,
-  type IssueRef,
-  type IssueType,
-  type IssueTypeV2,
-  parseContract,
-  SCHEMA_VERSION,
-  StepComment,
-  type WorkflowContext,
-  type WorkflowEventType,
-} from "../core/contracts.ts";
-import { OmiError } from "../core/errors/errors.ts";
-import {
   hierarchyChecks,
   type Link,
   labelType,
@@ -75,7 +47,6 @@ import {
   titleCheckV2,
 } from "../core/hierarchy.ts";
 import { sectionsCheck, sectionsCheckV2 } from "../core/issue-forms.ts";
-import { commandEnv } from "../core/workflow-engine/command-env.ts";
 import { PRE_MERGE, PROJECT_STATUS, transition } from "../core/workflow-engine/fsm.ts";
 import { planWorkflow, type WorkflowPlan } from "../core/workflow-engine/plan.ts";
 import { runSetup } from "../core/workflow-engine/setup.ts";
@@ -86,7 +57,6 @@ import {
   type SliceDeps,
 } from "../core/workflow-engine/slice.ts";
 import { locate } from "../core/workspace.ts";
-import { type Db, openState, statePath } from "../persistence/db.ts";
 import {
   type AttemptUsage,
   acquireLease,
@@ -112,6 +82,36 @@ import { renderStepReport } from "../reporting/render.ts";
 import { applyRetention, cleanupRun } from "../resources/cleanup.ts";
 import { parseSkillChoice } from "../resources/role-files.ts";
 import { branchName, ensureTaskWorkspace, git, type Workspace } from "../resources/worktree.ts";
+import {
+  keyEnvName,
+  loadConfig,
+  loadProfiles,
+  type OmiConfig,
+  profileSecretResolver,
+  readLegacyProfiles,
+  type Selection,
+  secretEnv,
+  selectProfile,
+  workflowModel,
+} from "../shared/config.ts";
+import {
+  type Check,
+  type CleanupResult,
+  commentMarker,
+  type IssueRef,
+  type IssueType,
+  type IssueTypeV2,
+  parseContract,
+  SCHEMA_VERSION,
+  StepComment,
+  type WorkflowContext,
+  type WorkflowEventType,
+} from "../shared/contracts.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import { type GhRunner, graphql, spawnGh } from "../shared/github/client.ts";
+import { PLUGIN_ROOT } from "../shared/plugin-paths.ts";
+import { commandEnv } from "../shared/process/command-env.ts";
+import { type Db, openState, statePath } from "../shared/sqlite/db.ts";
 
 /**
  * Env of the repo's check/setup commands: the host's without the master key and any auth variable,
@@ -155,7 +155,6 @@ const EXECUTABLE: readonly IssueType[] = [
 const START_LEASE_MS = 10 * 60_000;
 /** A whole review loop may run several agents back to back. */
 const RUN_LEASE_MS = 6 * 60 * 60_000;
-const PLUGIN_ROOT = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 
 export function repo(cwd: string): { root: string; workspace: string; config: OmiConfig } {
   // Main checkout, even when called from inside a task worktree or at the workspace root.

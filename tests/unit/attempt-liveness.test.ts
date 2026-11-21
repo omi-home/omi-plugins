@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { attemptLiveness, pidAlive } from "../../runtime/core/attempt-liveness.ts";
-import { openState } from "../../runtime/persistence/db.ts";
-import { MIGRATIONS, migrate } from "../../runtime/persistence/migrations.ts";
 import * as repo from "../../runtime/persistence/repository.ts";
+import { openState } from "../../runtime/shared/sqlite/db.ts";
+import { MIGRATIONS, migrate } from "../../runtime/shared/sqlite/migrations.ts";
 
 const errno = (code: string) => () => {
   throw Object.assign(new Error(code), { code });

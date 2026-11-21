@@ -4,9 +4,9 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { redact } from "../../reporting/redact.ts";
-import type { OmiConfig } from "../config.ts";
-import { OmiError } from "../errors/errors.ts";
+import type { OmiConfig } from "../../shared/config.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { redact } from "../../shared/redact.ts";
 import { runCommand } from "./checks.ts";
 
 /** Files that declare the dependencies; a change in any of them invalidates the last setup. */

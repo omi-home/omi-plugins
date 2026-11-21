@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { Role } from "../../runtime/core/contracts.ts";
 import { roleSkills } from "../../runtime/resources/role-files.ts";
+import type { Role } from "../../runtime/shared/contracts.ts";
 
 const root = new URL("../../agent-pack/", import.meta.url);
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url));

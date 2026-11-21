@@ -1,10 +1,10 @@
 // `omi status` (DevTask-0050 #145): one Milestone's native sub-issue tree with each Issue's type,
 // Project Status (configured Project only) and open PRs that close it. Read-only.
 import { z } from "zod";
-import type { OmiConfig } from "../../core/config.ts";
-import { OmiError } from "../../core/errors/errors.ts";
 import { labelType } from "../../core/hierarchy.ts";
-import { type GhRunner, graphql, spawnGh } from "./client.ts";
+import type { OmiConfig } from "../../shared/config.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { type GhRunner, graphql, spawnGh } from "../../shared/github/client.ts";
 
 const PAGE = 50;
 const MAX_DEPTH = 8; // GitHub's sub-issue nesting limit

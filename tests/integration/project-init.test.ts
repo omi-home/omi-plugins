@@ -7,10 +7,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { projectInit } from "../../runtime/cli/init.ts";
-import { loadConfig } from "../../runtime/core/config.ts";
-import type { OmiError } from "../../runtime/core/errors/errors.ts";
+import { loadConfig } from "../../runtime/shared/config.ts";
+import type { OmiError } from "../../runtime/shared/errors/errors.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
 
 function checkout(remote = "git@github.com:acme/app.git") {
   const dir = mkdtempSync(join(tmpdir(), "omi-init-"));

@@ -16,8 +16,8 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { coordinatorPluginCheck, memoryDirCheck } from "../../runtime/cli/doctor.ts";
 import { memoryDir, workspaceInit } from "../../runtime/cli/workspace.ts";
-import type { OmiError } from "../../runtime/core/errors/errors.ts";
 import { locate } from "../../runtime/core/workspace.ts";
+import type { OmiError } from "../../runtime/shared/errors/errors.ts";
 
 const git = (cwd: string, ...a: string[]) =>
   execFileSync("git", a, { cwd, encoding: "utf8", stdio: "pipe" }).trim();

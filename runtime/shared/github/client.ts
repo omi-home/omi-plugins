@@ -3,8 +3,8 @@
 // (network, rate limit, 5xx) from actionable (auth, scopes) failures.
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
-import { type AuthorAssociation, parseContract } from "../../core/contracts.ts";
-import { type ErrorCode, OmiError } from "../../core/errors/errors.ts";
+import { type AuthorAssociation, parseContract } from "../contracts.ts";
+import { type ErrorCode, OmiError } from "../errors/errors.ts";
 
 export interface GhResult {
   status: number | null;

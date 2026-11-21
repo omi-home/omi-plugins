@@ -5,9 +5,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-import { openState } from "../persistence/db.ts";
+import { DEFAULT_KEY_ENV, decryptSecret, loadMasterKey } from "../core/secrets.ts";
+import { resolveWorkflow } from "../core/workflow-config.ts";
+import { CONFIG_FILE, PROFILES_FILE, STATE_FILE } from "../core/workspace.ts";
+// TODO(R3 #331, R4 #332): the imports of ../core/* and ../persistence/profiles.ts below leave shared
+// when profiles, secrets and workflow config move into their modules (ADR-0006).
 import { getProfileRecord, listProfileRecords } from "../persistence/profiles.ts";
-import { registerSecret } from "../reporting/redact.ts";
 import {
   GateCheck,
   LegacyProfilesFile,
@@ -19,9 +22,8 @@ import {
   WorkflowModel,
 } from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
-import { DEFAULT_KEY_ENV, decryptSecret, loadMasterKey } from "./secrets.ts";
-import { resolveWorkflow } from "./workflow-config.ts";
-import { CONFIG_FILE, PROFILES_FILE, STATE_FILE } from "./workspace.ts";
+import { registerSecret } from "./redact.ts";
+import { openState } from "./sqlite/db.ts";
 
 const ModelAlias = z.enum(["sonnet", "opus", "haiku"]);
 const Effort = z.enum(["low", "medium", "high"]);
@@ -113,7 +115,10 @@ export const OmiConfig = z.strictObject({
   /** Architecture contract of the target repo (Feature-0043 #321); checked by the gate and doctor. */
   architecture: z
     .strictObject({
-      contract: relPath.default("omi-architecture.yaml"),
+      // The path reaches a shell command line (checks.ts): only a plain set of characters (SEC-003).
+      contract: relPath
+        .regex(/^[\w./-]+$/, "expected only letters, digits, '_', '.', '/' and '-'")
+        .default("omi-architecture.yaml"),
     })
     .optional(),
   context: z

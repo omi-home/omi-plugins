@@ -4,7 +4,7 @@
 # (createIssueType / updateIssueType). IDs are always read from GitHub, never written here.
 # Never deletes or disables a type: a type GitHub has but this file does not is only reported.
 # Only an organization owns issue types (ADR-0005 D8); the token needs the `admin:org` scope.
-# Names must be exactly the IssueTypeV2 enum (runtime/core/contracts.ts).
+# Names must be exactly the IssueTypeV2 enum (runtime/shared/contracts.ts).
 types:
   - { name: Doc, description: "Tài liệu sống của dự án", color: GRAY }
   - { name: ADR, description: "Architecture Decision Record", color: PURPLE }

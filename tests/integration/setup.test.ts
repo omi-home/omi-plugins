@@ -4,9 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parseConfig } from "../../runtime/core/config.ts";
-import { OmiError } from "../../runtime/core/errors/errors.ts";
 import { runSetup } from "../../runtime/core/workflow-engine/setup.ts";
+import { parseConfig } from "../../runtime/shared/config.ts";
+import { OmiError } from "../../runtime/shared/errors/errors.ts";
 
 const dirs = () => {
   const base = mkdtempSync(join(tmpdir(), "omi-setup-"));

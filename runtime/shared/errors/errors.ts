@@ -1,4 +1,4 @@
-import { redact, redactDeep } from "../../reporting/redact.ts";
+import { redact, redactDeep } from "../redact.ts";
 
 /**
  * Error taxonomy. `transient` errors are retried as a new technical attempt and

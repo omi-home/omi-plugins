@@ -3,17 +3,17 @@
 // verdict without the reviewer's posted report. Plus policy from config, #99 status mapping.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { setStatus } from "../../runtime/adapters/github/project.ts";
-import { parseConfig } from "../../runtime/core/config.ts";
-import { parseContract, StepResult, WorkflowState } from "../../runtime/core/contracts.ts";
 import {
   PROJECT_STATUS,
   policyFrom,
   type WorkflowEvent,
 } from "../../runtime/core/workflow-engine/fsm.ts";
-import { openState } from "../../runtime/persistence/db.ts";
 import * as repo from "../../runtime/persistence/repository.ts";
+import { parseConfig } from "../../runtime/shared/config.ts";
+import { parseContract, StepResult, WorkflowState } from "../../runtime/shared/contracts.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
+import { openState } from "../../runtime/shared/sqlite/db.ts";
 
 const issue = { repository: "o/r", number: 5 };
 type Db = ReturnType<typeof openState>;

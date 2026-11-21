@@ -15,8 +15,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parseConfig } from "../../runtime/core/config.ts";
-import { openState } from "../../runtime/persistence/db.ts";
 import { acquireLease, createRun, resourceOwner } from "../../runtime/persistence/repository.ts";
 import {
   branchName,
@@ -24,6 +22,8 @@ import {
   OwnerMarker,
   taskWorkspaceRoot,
 } from "../../runtime/resources/worktree.ts";
+import { parseConfig } from "../../runtime/shared/config.ts";
+import { openState } from "../../runtime/shared/sqlite/db.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();

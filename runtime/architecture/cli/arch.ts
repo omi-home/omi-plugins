@@ -3,8 +3,8 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { extname, isAbsolute, resolve } from "node:path";
 import { parse } from "yaml";
-import { parseContract } from "../../core/contracts.ts";
-import { OmiError } from "../../core/errors/errors.ts";
+import { parseContract } from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
 import { scanImports } from "../adapters/imports.ts";
 import { insideRepo, isRegularFile, scanTree } from "../adapters/scan.ts";
 import {
