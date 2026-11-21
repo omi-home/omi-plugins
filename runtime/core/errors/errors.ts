@@ -10,6 +10,8 @@ export const ERROR_CODES = {
   // `omi config set --if-match <etag>` found the file changed since the caller read it.
   CONFIG_CONFLICT: { transient: false },
   CONTRACT_INVALID: { transient: false },
+  // `omi arch check` found imports, files or modules that break the architecture contract.
+  ARCH_VIOLATION: { transient: false },
   SCHEMA_VERSION_UNSUPPORTED: { transient: false },
   TICKET_INVALID: { transient: false },
   TICKET_NOT_IN_PROJECT: { transient: false },

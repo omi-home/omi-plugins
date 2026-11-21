@@ -25,6 +25,7 @@
             "CONFIG_INVALID",
             "CONFIG_CONFLICT",
             "CONTRACT_INVALID",
+            "ARCH_VIOLATION",
             "SCHEMA_VERSION_UNSUPPORTED",
             "TICKET_INVALID",
             "TICKET_NOT_IN_PROJECT",
