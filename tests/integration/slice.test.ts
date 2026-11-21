@@ -1018,96 +1018,137 @@ test("zeroWidthIn: untracked files and commit messages of an editing step", () =
   assert.deepEqual(zeroWidthIn(s.target, false, ["clean"]), []);
 });
 
-test("token canary: a decrypted token echoed by the agent reaches no evidence, outbox, comment, state.sqlite, stdout or envelope (AC-8, CR-001)", () => {
-  const CANARY = "sk-ant-oat01-CANARY-slice-0123456789abcdef";
-  const key = generateMasterKey();
-  const env = { OMI_SECRET_KEY: key };
-  const ws = mkdtempSync(join(tmpdir(), "omi-canary-ws-"));
-  mkdirSync(join(ws, ".omi-plugins"));
-  mkdirSync(join(ws, "repo", ".git"), { recursive: true });
-  const cli = (args: string[], stdin = "") =>
-    main([...args, "--output", "json"], ws, { env, stdin: () => stdin } satisfies CliIo);
-  const added = cli(
-    [
-      "profile",
-      "add",
-      "cc-sub",
+const CANARY_CASES = [
+  {
+    name: "subscription",
+    flags: ["--auth", "subscription", "--token-env", "OMI_T_CANARY"],
+    envVar: "CLAUDE_CODE_OAUTH_TOKEN",
+    canary: "omi-canary-7f3e9a1b2c4d5e6f",
+  },
+  {
+    name: "gateway bearer",
+    flags: [
       "--auth",
-      "subscription",
-      "--token-env",
-      "OMI_T_CANARY",
-      "--models",
-      "claude-sonnet-5-5",
-      "--efforts",
-      "medium",
-      "--token-stdin",
+      "gateway",
+      "--base-url",
+      "https://gw.example.com",
+      "--scheme",
+      "bearer",
+      "--key-env",
+      "OMI_T_GW",
     ],
-    CANARY,
-  );
-  assert.equal(added.code, 0, added.stdout);
+    envVar: "ANTHROPIC_AUTH_TOKEN",
+    canary: "omi-canary-8a1b2c3d4e5f6071",
+  },
+  {
+    name: "gateway x-api-key",
+    flags: [
+      "--auth",
+      "gateway",
+      "--base-url",
+      "https://gw.example.com",
+      "--scheme",
+      "x-api-key",
+      "--key-env",
+      "OMI_T_GW",
+    ],
+    envVar: "ANTHROPIC_API_KEY",
+    canary: "omi-canary-9b2c3d4e5f607182",
+  },
+] as const;
 
-  const stateFile = join(ws, ".omi-plugins", "state.sqlite");
-  const s = setup({}, undefined, stateFile);
-  const selection = selectProfile(
-    loadProfiles(ws),
-    { profile: "cc-sub", reason: "canary" },
-    profileSecretResolver(ws, env),
-  );
-  assert.ok(selection);
-  assert.ok(!JSON.stringify(selection).includes(CANARY));
+for (const tc of CANARY_CASES) {
+  test(`token canary (${tc.name}): a decrypted token echoed by the agent reaches no evidence, outbox, comment, state.sqlite, stdout or envelope (AC-8)`, () => {
+    const CANARY: string = tc.canary;
+    const key = generateMasterKey();
+    const env = { OMI_SECRET_KEY: key };
+    const ws = mkdtempSync(join(tmpdir(), "omi-canary-ws-"));
+    mkdirSync(join(ws, ".omi-plugins"));
+    mkdirSync(join(ws, "repo", ".git"), { recursive: true });
+    const cli = (args: string[], stdin = "") =>
+      main([...args, "--output", "json"], ws, { env, stdin: () => stdin } satisfies CliIo);
+    const added = cli(
+      [
+        "profile",
+        "add",
+        "cc-sub",
+        ...tc.flags,
+        "--models",
+        "claude-sonnet-5-5",
+        "--efforts",
+        "medium",
+        "--token-stdin",
+      ],
+      CANARY,
+    );
+    assert.equal(added.code, 0, added.stdout);
 
-  const real = s.deps.runAgent;
-  const runAgent = (l: AgentLaunch) => {
-    const token = l.env.CLAUDE_CODE_OAUTH_TOKEN as string;
-    assert.equal(token, CANARY);
-    const lines = real(l).split("\n");
-    const i = lines.findIndex((x) => x.startsWith('{"type":"result"'));
-    const result = JSON.parse(lines[i] as string);
-    const inner = JSON.parse(result.result);
-    inner.summary = `echo ${token}`;
-    inner.nextAction = `rotate ${token}`;
-    inner.sectionUpdates = [{ section: "scratch", markdown: `leak ${token}` }];
-    if (inner.role === "code-reviewer") {
-      inner.findings = [{ id: "CR-001", severity: "info", observed: token, expected: token }];
+    const stateFile = join(ws, ".omi-plugins", "state.sqlite");
+    const s = setup({}, undefined, stateFile);
+    const selection = selectProfile(
+      loadProfiles(ws),
+      { profile: "cc-sub", reason: "canary" },
+      profileSecretResolver(ws, env),
+    );
+    assert.ok(selection);
+    assert.ok(!JSON.stringify(selection).includes(CANARY));
+
+    const real = s.deps.runAgent;
+    const runAgent = (l: AgentLaunch) => {
+      const token = l.env[tc.envVar] as string;
+      assert.equal(token, CANARY);
+      const lines = real(l).split("\n");
+      const i = lines.findIndex((x) => x.startsWith('{"type":"result"'));
+      const result = JSON.parse(lines[i] as string);
+      const inner = JSON.parse(result.result);
+      inner.summary = `echo ${token}`;
+      inner.nextAction = `rotate ${token}`;
+      inner.sectionUpdates = [{ section: "scratch", markdown: `leak ${token}` }];
+      if (inner.role === "code-reviewer") {
+        inner.findings = [{ id: "CR-001", severity: "info", observed: token, expected: token }];
+      }
+      result.result = JSON.stringify(inner);
+      lines[i] = JSON.stringify(result);
+      // The raw stream-json stdout carries it too.
+      lines.unshift(JSON.stringify({ type: "assistant", message: { text: token } }));
+      return lines.join("\n");
+    };
+    const ctx = runSlice({ ...s.deps, runAgent, hostEnv: { PATH: "/bin" }, selection }, s.target);
+    assert.equal(ctx.state, "PR_PENDING");
+
+    const files: string[] = [];
+    const walk = (d: string) => {
+      for (const f of readdirSync(d)) {
+        const p = join(d, f);
+        if (statSync(p).isDirectory()) walk(p);
+        else files.push(p);
+      }
+    };
+    walk(s.deps.evidenceDir);
+    assert.ok(files.length > 0);
+    for (const f of files) assert.ok(!readFileSync(f).includes(CANARY), f);
+    const rows = JSON.stringify([
+      s.db.prepare("SELECT body FROM outbox").all(),
+      s.db.prepare("SELECT result FROM step_run").all(),
+      s.db.prepare("SELECT context FROM workflow_run").all(),
+    ]);
+    assert.ok(!rows.includes(CANARY));
+    // The success path keeps no raw agent output in evidence; the scrubbed echo lives in the persisted result/report.
+    // The canary matches no static rule, so only the registered-secret path can have produced this marker.
+    assert.ok(rows.includes("[REDACTED:secret]"), "registered-secret redaction must have fired");
+    assert.ok(!JSON.stringify(s.gh.comments).includes(CANARY));
+    assert.ok(!JSON.stringify(ctx).includes(CANARY));
+    s.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    const disk = readdirSync(join(ws, ".omi-plugins"))
+      .filter((f) => f.startsWith("state.sqlite"))
+      .map((f) => readFileSync(join(ws, ".omi-plugins", f)).toString("latin1"))
+      .join("");
+    assert.ok(!disk.includes(CANARY));
+    for (const out of [cli(["profile", "list"]), main(["profile", "list"], ws, { env })]) {
+      assert.ok(!out.stdout.includes(CANARY) && !out.stderr.includes(CANARY));
     }
-    result.result = JSON.stringify(inner);
-    lines[i] = JSON.stringify(result);
-    // The raw stream-json stdout carries it too.
-    lines.unshift(JSON.stringify({ type: "assistant", message: { text: token } }));
-    return lines.join("\n");
-  };
-  const ctx = runSlice({ ...s.deps, runAgent, hostEnv: { PATH: "/bin" }, selection }, s.target);
-  assert.equal(ctx.state, "PR_PENDING");
-
-  const files: string[] = [];
-  const walk = (d: string) => {
-    for (const f of readdirSync(d)) {
-      const p = join(d, f);
-      if (statSync(p).isDirectory()) walk(p);
-      else files.push(p);
-    }
-  };
-  walk(s.deps.evidenceDir);
-  assert.ok(files.length > 0);
-  for (const f of files) assert.ok(!readFileSync(f).includes(CANARY), f);
-  const rows = JSON.stringify([
-    s.db.prepare("SELECT body FROM outbox").all(),
-    s.db.prepare("SELECT result FROM step_run").all(),
-    s.db.prepare("SELECT context FROM workflow_run").all(),
-  ]);
-  assert.ok(!rows.includes(CANARY));
-  assert.ok(!JSON.stringify(s.gh.comments).includes(CANARY));
-  assert.ok(!JSON.stringify(ctx).includes(CANARY));
-  s.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-  const disk = readdirSync(join(ws, ".omi-plugins"))
-    .filter((f) => f.startsWith("state.sqlite"))
-    .map((f) => readFileSync(join(ws, ".omi-plugins", f)).toString("latin1"))
-    .join("");
-  assert.ok(!disk.includes(CANARY));
-  for (const out of [cli(["profile", "list"]), main(["profile", "list"], ws, { env })]) {
-    assert.ok(!out.stdout.includes(CANARY) && !out.stderr.includes(CANARY));
-  }
-});
+  });
+}
 
 test("no profile (#250): each role launches with its agents.routing; state and report match", () => {
   const s = setup();

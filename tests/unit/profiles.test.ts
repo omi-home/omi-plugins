@@ -30,7 +30,8 @@ import { openState } from "../../runtime/persistence/db.ts";
 import { addProfile } from "../../runtime/persistence/profiles.ts";
 import { redact } from "../../runtime/reporting/redact.ts";
 
-const SECRET = "sk-very-secret-value";
+// Opaque on purpose: matches no static redact rule, so only registerSecret can scrub it.
+const SECRET = "omi-canary-profiles-5d4c3b2a1f09";
 
 const sub = {
   name: "cc-sub",
@@ -232,7 +233,7 @@ test("selectProfile (#217): validated choice, defaults to the profile's first mo
   assert.equal(typeof pick?.secret, "function");
   assert.ok(!JSON.stringify(pick).includes(SECRET));
   assert.equal(pick?.secret(), SECRET);
-  assert.ok(!redact(`leak ${SECRET} here`).includes(SECRET));
+  assert.equal(redact(`leak ${SECRET}`), "leak [REDACTED:secret]");
   assert.equal(
     selectProfile(
       ps,
