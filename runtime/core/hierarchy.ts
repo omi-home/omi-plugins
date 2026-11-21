@@ -58,6 +58,8 @@ export function hierarchyChecks<T extends string = IssueType>(
   self: Link<T>,
   ancestors: Link<T>[],
   h: { maxDepth: number; children: Partial<Record<T, readonly T[]>>; roots?: readonly T[] },
+  /** Whether the Issue really has a parent; `ancestors` is cut at the repository boundary. */
+  hasParent: boolean = ancestors.length > 0,
 ): Check[] {
   const chain = [self, ...ancestors];
   const seen = new Set<string>();
@@ -80,7 +82,7 @@ export function hierarchyChecks<T extends string = IssueType>(
       ];
     }
   }
-  if (h.roots && self.type && !h.roots.includes(self.type) && !ancestors.length) {
+  if (h.roots && self.type && !h.roots.includes(self.type) && !hasParent) {
     return [
       fail(
         "hierarchy",

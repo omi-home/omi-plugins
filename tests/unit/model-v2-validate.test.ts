@@ -281,6 +281,16 @@ test("ticket validate at v2 reads the native type and checks tree, title and sec
   assert.equal(v(7).find((c) => c.name === "type")?.code, "CONTRACT_INVALID");
   // a leaf with a child fails terminal and the child fails the tree
   assert.equal(status(v(8), "hierarchy"), "fail");
+  // a parent in another repository still counts as a parent (CR-001)
+  const foreign = fakeGh({
+    9: ticketOf(9, {
+      title: "DevTask-0006-x",
+      issueType: { name: "DevTask" },
+      body: DEV_BODY,
+      parent: { number: 50, state: "OPEN", repository: { nameWithOwner: "o/other" } },
+    }),
+  });
+  assert.equal(status(ticketValidate({ cwd: root, gh: foreign }, 9), "hierarchy"), "pass");
   const leafWithChild = fakeGh({
     3: ticketOf(3, {
       title: "DevTask-0001-x",
@@ -308,8 +318,5 @@ test("ticket validate at legacy keeps the legacy rules and ignores the native ty
   assert.equal(status(ok, "executable"), "pass");
   const noLabel = ticketValidate({ cwd: root, gh }, 2);
   assert.equal(noLabel.find((c) => c.name === "type")?.status, "fail");
-  assert.match(
-    noLabel.find((c) => c.name === "type")?.detail ?? "",
-    /missing type:<OMI type> label/,
-  );
+  assert.equal(noLabel.find((c) => c.name === "type")?.detail, "missing type:<OMI type> label");
 });

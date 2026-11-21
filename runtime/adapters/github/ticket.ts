@@ -104,8 +104,8 @@ export function readIssueType(
     throw new OmiError(
       "TICKET_INVALID",
       types.length
-        ? `issue #${t.number}: expected one valid type:<OMI type> label, got ${types.map((s) => `type:${s}`).join(", ")}`
-        : `issue #${t.number}: missing type:<OMI type> label`,
+        ? `expected one valid type:<OMI type> label, got ${types.map((s) => `type:${s}`).join(", ")}`
+        : "missing type:<OMI type> label",
     );
   }
   return type;

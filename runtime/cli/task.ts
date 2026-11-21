@@ -250,7 +250,7 @@ function readyGatesV2(t: Ticket, config: OmiConfig, gh: GhRunner): Check[] {
   const checks = [titleCheckV2(t.title, type), sectionsCheckV2(t.body, type)];
   try {
     const chain = ancestors(config, t, gh, h.maxDepth, typeOfV2);
-    checks.push(...hierarchyChecks({ number: t.number, type }, chain, h));
+    checks.push(...hierarchyChecks({ number: t.number, type }, chain, h, t.parent !== null));
   } catch (e) {
     const err = e instanceof OmiError ? e : new OmiError("INTERNAL", (e as Error).message);
     checks.push({
