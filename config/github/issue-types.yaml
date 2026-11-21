@@ -1,0 +1,16 @@
+# Desired state of the organization's native issue types (model v2; DevTask-0101 #310, ADR-0005 D1,
+# ChangeRequest-0013 §2.1). `omi github project plan|validate` diff it against the organization,
+# `omi github project init|apply` create the missing types and update name / description / color
+# (createIssueType / updateIssueType). IDs are always read from GitHub, never written here.
+# Never deletes or disables a type: a type GitHub has but this file does not is only reported.
+# Only an organization owns issue types (ADR-0005 D8); the token needs the `admin:org` scope.
+# Names must be exactly the IssueTypeV2 enum (runtime/core/contracts.ts).
+types:
+  - { name: Doc, description: "Tài liệu sống của dự án", color: GRAY }
+  - { name: ADR, description: "Architecture Decision Record", color: PURPLE }
+  - { name: Epic, description: "Nhóm tính năng, đơn vị của Roadmap", color: ORANGE }
+  - { name: UserStory, description: "Yêu cầu người dùng (FR/NFR/CR)", color: BLUE }
+  - { name: DesignTask, description: "Việc thiết kế UI/UX", color: PINK }
+  - { name: DevTask, description: "Việc lập trình – 1 PR", color: GREEN }
+  - { name: QATask, description: "Việc kiểm thử", color: YELLOW }
+  - { name: Bug, description: "Lỗi", color: RED }

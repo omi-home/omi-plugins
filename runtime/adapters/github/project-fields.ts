@@ -2,10 +2,16 @@
 // config/github/project.yaml and report items whose Status breaks their type's lifecycle
 // (config/github/status-transitions.yaml). Apply only adds; IDs are read, never configured.
 import { z } from "zod";
-import type { OmiConfig } from "../../core/config.ts";
+import { type OmiConfig, workflowModel } from "../../core/config.ts";
 import { type Check, ProjectStatus } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 import { labelType } from "../../core/hierarchy.ts";
+import {
+  type IssueTypeAction,
+  type IssueTypePlan,
+  type IssueTypesConfig,
+  loadIssueTypesConfig,
+} from "../../core/issue-type-config.ts";
 import {
   type ActualField,
   type ActualView,
@@ -23,6 +29,7 @@ import {
   type ViewsConfig,
 } from "../../core/project-config.ts";
 import { type GhRunner, graphql, spawnGh } from "./client.ts";
+import { issueTypeApply, issueTypePlan } from "./issue-types.ts";
 import { OWNER_PROJECT } from "./project.ts";
 
 const FIELDS = `query($owner:String!,$number:Int!){ ${OWNER_PROJECT(`id viewerCanUpdate
@@ -155,6 +162,8 @@ const CREATE_VIEW = `mutation($p:ID!,$n:String!,$l:ProjectV2ViewLayout!){
 export interface ProjectPlan extends FieldPlan {
   views: ViewPlan;
   drift: StatusDrift[];
+  /** Organization issue types; only under `github.model: v2`. */
+  issueTypes?: IssueTypePlan;
 }
 
 const names = (n: { nodes: { name: string }[] } | null) =>
@@ -226,6 +235,8 @@ export function statusDrift(c: OmiConfig, run: GhRunner = spawnGh): StatusDrift[
 export interface ProjectDesired {
   fields: ProjectConfig;
   views: ViewsConfig;
+  /** Model v2 only; the plugin's issue-types.yaml when absent. */
+  issueTypes?: IssueTypesConfig;
 }
 const loadDesired = (): ProjectDesired => ({
   fields: loadProjectConfig(),
@@ -237,16 +248,19 @@ const diff = (d: ProjectDesired, actual: ReturnType<typeof readFields>) => ({
   views: planViews(d.views, actual.views, actual.workflows),
 });
 
-/** Field and view diff + Status drift. Read-only. */
+/** Field, view and (model v2) issue type diff + Status drift. Read-only. */
 export function projectPlan(
   c: OmiConfig,
   run: GhRunner = spawnGh,
   desired: ProjectDesired = loadDesired(),
 ): ProjectPlan {
-  return { ...diff(desired, readFields(c, run)), drift: statusDrift(c, run) };
+  const plan = { ...diff(desired, readFields(c, run)), drift: statusDrift(c, run) };
+  return workflowModel(c) === "v2"
+    ? { ...plan, issueTypes: issueTypePlan(c, run, desired.issueTypes ?? loadIssueTypesConfig()) }
+    : plan;
 }
 
-export type ProjectAction = FieldAction | ViewAction;
+export type ProjectAction = FieldAction | ViewAction | IssueTypeAction;
 const writable = (a: ProjectAction) =>
   a.kind === "create" || a.kind === "update-options" || a.kind === "create-view";
 
@@ -262,7 +276,14 @@ export function projectApply(
   desired: ProjectDesired = loadDesired(),
 ): { applied: ProjectAction[]; plan: Omit<ProjectPlan, "drift"> } {
   const actual = readFields(c, run);
-  const plan = diff(desired, actual);
+  const v2 = workflowModel(c) === "v2";
+  const types = desired.issueTypes ?? loadIssueTypesConfig();
+  // Issue types first: a personal account or a missing admin:org scope is refused before any write.
+  const typed = v2 ? issueTypeApply(c, run, types) : undefined;
+  const plan: Omit<ProjectPlan, "drift"> = {
+    ...diff(desired, actual),
+    ...(typed ? { issueTypes: typed.plan } : {}),
+  };
   const todo: ProjectAction[] = [...plan.actions, ...plan.views.actions].filter(writable);
   if (todo.length && !actual.canUpdate) {
     throw new OmiError(
@@ -305,8 +326,21 @@ export function projectApply(
       );
     }
   }
-  return { applied: todo, plan: todo.length ? diff(desired, readFields(c, run)) : plan };
+  return {
+    applied: [...(typed?.applied ?? []), ...todo],
+    plan: todo.length
+      ? { ...diff(desired, readFields(c, run)), ...(typed ? { issueTypes: typed.plan } : {}) }
+      : plan,
+  };
 }
+
+/** One issue type action as a sentence (validate, plan). */
+export const sayIssueType = (a: IssueTypeAction) =>
+  a.kind === "create-issue-type"
+    ? `missing issue type ${a.type.name}`
+    : a.kind === "update-issue-type"
+      ? `issue type ${a.name}: ${a.changes.join(", ")}`
+      : `issue type ${a.name}: ${a.reason}`;
 
 /** `github project validate`: the plan as checks. Insights (no API) is a warning, not a failure. */
 export function projectValidate(
@@ -319,7 +353,7 @@ export function projectValidate(
     todo.length
       ? { name, status: "fail", code: "POLICY_VIOLATION", detail: todo.join("; ") }
       : { name, status: "pass", detail: okDetail };
-  const say = (a: ProjectAction) =>
+  const say = (a: FieldAction | ViewAction) =>
     a.kind === "create"
       ? `missing field ${a.field.name}`
       : a.kind === "update-options"
@@ -346,7 +380,22 @@ export function projectValidate(
       "every item's Status fits its type",
     ),
   ];
-  const extra = [...plan.extra, ...plan.views.extraViews.map((v) => `view ${v}`)];
+  if (plan.issueTypes) {
+    checks.splice(
+      1,
+      0,
+      check(
+        "issue-types",
+        plan.issueTypes.actions.map(sayIssueType),
+        `${(desired.issueTypes ?? loadIssueTypesConfig()).types.length} in the desired state`,
+      ),
+    );
+  }
+  const extra = [
+    ...plan.extra,
+    ...(plan.issueTypes?.extra.map((t) => `issue type ${t}`) ?? []),
+    ...plan.views.extraViews.map((v) => `view ${v}`),
+  ];
   if (extra.length)
     checks.push({ name: "extra", status: "warn", detail: `kept: ${extra.join(", ")}` });
   if (plan.views.unsupported.length) {

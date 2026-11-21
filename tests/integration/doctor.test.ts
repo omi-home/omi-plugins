@@ -81,6 +81,20 @@ test("setup is reported: command when configured, not configured otherwise (#261
   assert.match(without.check("setup")?.detail ?? "", /not configured/);
 });
 
+test("model check passes with `legacy` by default and `v2` when the config sets it (carried CR-002 of #307)", () => {
+  const legacy = doctor(fixture({ "AGENTS.md": "x", ".omi-plugins/omi.config.yaml": CONFIG }));
+  assert.equal(legacy.check("model")?.status, "pass");
+  assert.equal(legacy.check("model")?.detail, "legacy");
+  const v2 = doctor(
+    fixture({
+      "AGENTS.md": "x",
+      ".omi-plugins/omi.config.yaml": `${CONFIG}  model: v2\n`,
+    }),
+  );
+  assert.equal(v2.check("model")?.status, "pass");
+  assert.equal(v2.check("model")?.detail, "v2");
+});
+
 test("valid config: public repo with develop default passes GitHub checks when authenticated", () => {
   const d = doctor(fixture({ "AGENTS.md": "x", ".omi-plugins/omi.config.yaml": CONFIG }));
   assert.equal(d.check("config")?.status, "pass");

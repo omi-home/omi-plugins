@@ -75,7 +75,9 @@ Commands:
   issue create           Create an Issue: --type <OMI type> --title <text> --body-file <path>
                          [--parent <n|owner/repo#n>]. Numbered <IssueType>-<NNNN>- per type, linked
                          as a sub-issue (hierarchy matrix checked first), added to the Project.
-                         Re-running with the same type and title completes the same Issue
+                         Re-running with the same type and title completes the same Issue.
+                         github.model v2: --type is a native type name (DevTask), set as the Issue's issue
+                         type (no type:* label); a non-root type needs --parent (issue-hierarchy-v2.yaml)
   issue depend <n> --on <m|owner/repo#m>
                          Record that Issue #n is blocked by #m (native dependency; another repo is
                          fine). Refuses cycles; re-running is a no-op. \`ticket validate\` then holds
@@ -97,16 +99,20 @@ Commands:
                          Bootstrap this repo into OMI: find or create the Project (title, default: repo
                          name), link it, write the github section of .omi-plugins/omi.config.yaml and
                          install templates/github/ into .github/ where missing. Re-running changes nothing;
-                         never overwrites a file
+                         never overwrites a file. github.model v2: also creates/updates the organization's
+                         8 issue types (needs the admin:org scope; a personal account is refused)
   github project plan    Diff the Project's custom fields (config/github/project.yaml), views, built-in
                          workflows and Insights (views.yaml) and list items whose Status their type does
-                         not use (status-transitions.yaml). Read-only; exits 1 while anything is pending,
-                         manual or drifting. \`project plan\` is an alias
+                         not use (status-transitions.yaml). github.model v2: also the organization's issue
+                         types (config/github/issue-types.yaml). Read-only; exits 1 while anything is
+                         pending, manual or drifting. \`project plan\` is an alias
   github project apply   Create missing fields, options and views (by name + layout); never deletes. View
                          filters/grouping/sort, workflows, iteration fields and conflicts are printed as
-                         manual steps (exit 1); Insights as unsupported. \`project apply\` is an alias
+                         manual steps (exit 1); Insights as unsupported. github.model v2: creates missing
+                         issue types and updates their name/description/color, never deletes or disables
+                         one; no admin:org scope: \`gh auth refresh -s admin:org\`. \`project apply\` is an alias
   github project validate
-                         The same diff as checks (extra fields/views and Insights: warnings)
+                         The same diff as checks (extra fields/views/issue types and Insights: warnings)
   github repo plan       Diff the repository's labels, main/develop protection and merge methods against
                          config/github/repository.yaml. Read-only; exits 1 while anything differs
   github repo apply --approved-plan <file>

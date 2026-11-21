@@ -19,6 +19,7 @@ import {
 import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/github/repo.ts";
 import {
   IssueType,
+  IssueTypeV2,
   type ProfileView,
   ProjectStatus,
   Role,
@@ -131,7 +132,9 @@ Commands:
   issue create           Create an Issue: --type <OMI type> --title <text> --body-file <path>
                          [--parent <n|owner/repo#n>]. Numbered <IssueType>-<NNNN>- per type, linked
                          as a sub-issue (hierarchy matrix checked first), added to the Project.
-                         Re-running with the same type and title completes the same Issue
+                         Re-running with the same type and title completes the same Issue.
+                         github.model v2: --type is a native type name (DevTask), set as the Issue's issue
+                         type (no type:* label); a non-root type needs --parent (issue-hierarchy-v2.yaml)
   issue depend <n> --on <m|owner/repo#m>
                          Record that Issue #n is blocked by #m (native dependency; another repo is
                          fine). Refuses cycles; re-running is a no-op. \`ticket validate\` then holds
@@ -153,16 +156,20 @@ Commands:
                          Bootstrap this repo into OMI: find or create the Project (title, default: repo
                          name), link it, write the github section of .omi-plugins/omi.config.yaml and
                          install templates/github/ into .github/ where missing. Re-running changes nothing;
-                         never overwrites a file
+                         never overwrites a file. github.model v2: also creates/updates the organization's
+                         8 issue types (needs the admin:org scope; a personal account is refused)
   github project plan    Diff the Project's custom fields (config/github/project.yaml), views, built-in
                          workflows and Insights (views.yaml) and list items whose Status their type does
-                         not use (status-transitions.yaml). Read-only; exits 1 while anything is pending,
-                         manual or drifting. \`project plan\` is an alias
+                         not use (status-transitions.yaml). github.model v2: also the organization's issue
+                         types (config/github/issue-types.yaml). Read-only; exits 1 while anything is
+                         pending, manual or drifting. \`project plan\` is an alias
   github project apply   Create missing fields, options and views (by name + layout); never deletes. View
                          filters/grouping/sort, workflows, iteration fields and conflicts are printed as
-                         manual steps (exit 1); Insights as unsupported. \`project apply\` is an alias
+                         manual steps (exit 1); Insights as unsupported. github.model v2: creates missing
+                         issue types and updates their name/description/color, never deletes or disables
+                         one; no admin:org scope: \`gh auth refresh -s admin:org\`. \`project apply\` is an alias
   github project validate
-                         The same diff as checks (extra fields/views and Insights: warnings)
+                         The same diff as checks (extra fields/views/issue types and Insights: warnings)
   github repo plan       Diff the repository's labels, main/develop protection and merge methods against
                          config/github/repository.yaml. Read-only; exits 1 while anything differs
   github repo apply --approved-plan <file>
@@ -341,16 +348,21 @@ const describe = (a: ProjectAction) =>
       ? `field ${a.name}: ${[...a.add.map((o) => `+${o}`), ...a.change.map((o) => `~${o}`)].join(", ")}`
       : a.kind === "create-view"
         ? `create view ${a.view.name} (${a.view.layout})`
-        : `${a.name}: ${a.reason}`;
+        : a.kind === "create-issue-type" || a.kind === "update-issue-type"
+          ? a.kind === "create-issue-type"
+            ? `create issue type ${a.type.name} (${a.type.color})`
+            : `update issue type ${a.name}: ${a.changes.join(", ")}`
+          : `${a.name}: ${a.reason}`;
 
 const humanPlan = (p: Omit<ProjectPlan, "drift">, drift: StatusDrift[]) => {
-  const actions = [...p.actions, ...p.views.actions];
+  const actions = [...(p.issueTypes?.actions ?? []), ...p.actions, ...p.views.actions];
   return [
     ...actions.map(
       (a) =>
         `${a.kind === "manual" || a.kind === "workflow" ? "manual " : "pending"}   ${describe(a)}`,
     ),
     ...(actions.length ? [] : ["project   in the desired state"]),
+    ...(p.issueTypes?.extra ?? []).map((e) => `extra     issue type ${e} (not managed: kept)`),
     ...p.extra.map((e) => `extra     ${e} (not managed: kept)`),
     ...p.views.extraViews.map((v) => `extra     view ${v} (not managed: kept)`),
     ...p.views.unsupported.map((u) => `unsupported ${u}`),
@@ -759,11 +771,13 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         return ok(r, lines(human));
       }
       case "issue create": {
-        const type = IssueType.safeParse(values.type).data;
+        // Legacy takes an OMI type (dev-task), v2 a native type name (DevTask): the model is known
+        // only from the workspace config, which createIssue checks the type against.
+        const type = [...IssueType.options, ...IssueTypeV2.options].find((t) => t === values.type);
         if (!type) {
           throw new OmiError(
             "USAGE_INVALID",
-            `--type must be one of ${IssueType.options.join(", ")}`,
+            `--type must be one of ${IssueType.options.join(", ")} (github.model legacy) or ${IssueTypeV2.options.join(", ")} (v2)`,
           );
         }
         if (!values.title) throw new OmiError("USAGE_INVALID", "--title is required");
@@ -911,7 +925,11 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
       case "github project plan": {
         const r = projectPlan(repo(cwd).config);
         // Like a check: 1 while anything is pending, manual or drifting, so scripts can gate on it.
-        const clean = !r.actions.length && !r.views.actions.length && !r.drift.length;
+        const clean =
+          !r.actions.length &&
+          !r.views.actions.length &&
+          !r.issueTypes?.actions.length &&
+          !r.drift.length;
         return ok(r, lines(humanPlan(r, r.drift)), clean ? EXIT.ok : EXIT.failed);
       }
       case "project apply":
@@ -922,7 +940,10 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
           ...(r.applied.length ? [] : ["applied   nothing (already in the desired state)"]),
           ...humanPlan(r.plan, []),
         ];
-        const left = r.plan.actions.length + r.plan.views.actions.length;
+        const left =
+          r.plan.actions.length +
+          r.plan.views.actions.length +
+          (r.plan.issueTypes?.actions.length ?? 0);
         return ok(r, lines(human), left ? EXIT.failed : EXIT.ok);
       }
       case "github project validate": {
@@ -958,6 +979,8 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
           ...(r.templates.kept.length
             ? [`template  ${r.templates.kept.length} kept (already present)`]
             : []),
+          ...(r.issueTypes?.applied.map((a) => `issuetype ${a}`) ?? []),
+          ...(r.issueTypes?.manual.map((m) => `manual    issue type ${m}`) ?? []),
           "next      github repo plan, github project apply (see skills/omi-start)",
         ];
         return ok(r, lines(human));
