@@ -4,11 +4,11 @@
 import { spawnSync } from "node:child_process";
 import { closeSync, lstatSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { redact } from "../../reporting/redact.ts";
-import type { OmiConfig } from "../config.ts";
-import { type CheckOutcome, GateCheck } from "../contracts.ts";
-import { commandEnv } from "./command-env.ts";
+import type { OmiConfig } from "../../shared/config.ts";
+import { type CheckOutcome, GateCheck } from "../../shared/contracts.ts";
+import { PLUGIN_ROOT } from "../../shared/plugin-paths.ts";
+import { commandEnv } from "../../shared/process/command-env.ts";
+import { redact } from "../../shared/redact.ts";
 
 export interface GateResult {
   name: GateCheck;
@@ -27,7 +27,7 @@ const TAIL_BYTES = 16 * 1024;
 
 /** 127: POSIX sh "command not found"; 9009: cmd.exe "is not recognized". */
 const MISSING_TOOL = new Set([127, 9009]);
-const SUPERVISOR = fileURLToPath(new URL("./supervise.ts", import.meta.url));
+const SUPERVISOR = join(PLUGIN_ROOT, "runtime", "shared", "process", "supervise.ts");
 /** supervise.ts exit code after it killed the command's process tree. */
 const TIMEOUT_EXIT = 124;
 /** Grace for the supervisor itself on top of the check's own timeout. */
@@ -96,9 +96,6 @@ export function runCommand(
   return { outcome, exitCode: r.status, durationMs, summary };
 }
 
-// TODO(R1 #329): same plugin root as resources/role-files.ts and cli/{context,task}.ts; all of them
-// move to shared/plugin-paths.ts (ADR-0006).
-const PLUGIN_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const ARCH_TIMEOUT_SEC = 120;
 
 /**

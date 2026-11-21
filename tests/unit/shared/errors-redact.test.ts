@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseContract, StepResult } from "../../runtime/core/contracts.ts";
-import { isTransient, OmiError } from "../../runtime/core/errors/errors.ts";
-import { redact, redactDeep, registerSecret } from "../../runtime/reporting/redact.ts";
+import { parseContract, StepResult } from "../../../runtime/shared/contracts.ts";
+import { isTransient, OmiError } from "../../../runtime/shared/errors/errors.ts";
+import { redact, redactDeep, registerSecret } from "../../../runtime/shared/redact.ts";
 
 const cases: [string, string][] = [
   [`ghp_${"a".repeat(36)}`, "[REDACTED:github-token]"],

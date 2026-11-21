@@ -1,16 +1,18 @@
 // Step report renderer (spec §12): fills `templates/reports/<category>.md` from a validated
 // StepComment. Deterministic, no LLM reformatting; output is sanitized before it leaves.
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type CarriedFinding,
   commentMarker,
   type StepComment,
   type TokenUsage,
-} from "../core/contracts.ts";
-import { OmiError } from "../core/errors/errors.ts";
-import { redact } from "./redact.ts";
+} from "../shared/contracts.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import { TEMPLATES_DIR } from "../shared/plugin-paths.ts";
+import { redact } from "../shared/redact.ts";
 
-const TEMPLATES = new URL("../../templates/reports/", import.meta.url);
+const TEMPLATES = join(TEMPLATES_DIR, "reports");
 
 /** Agent text must not forge an `omi:` marker or break out of its section. */
 const block = (s: string) => {
@@ -141,7 +143,7 @@ export function renderStepReport(c: StepComment): string {
 }
 
 function fill(name: string, values: Record<string, string>): string {
-  const template = readFileSync(new URL(`${name}.md`, TEMPLATES), "utf8");
+  const template = readFileSync(join(TEMPLATES, `${name}.md`), "utf8");
   const out = template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
     const v = values[key];
     if (v === undefined) {

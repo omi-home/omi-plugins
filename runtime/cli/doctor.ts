@@ -13,7 +13,6 @@ import {
   selectionEnv,
   versionRefusal,
 } from "../adapters/claude/launch.ts";
-import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import {
   ADMIN_ORG_HINT,
   hasAdminOrg,
@@ -23,18 +22,7 @@ import {
 import { sayIssueType } from "../adapters/github/project-fields.ts";
 import { archCheck, DEFAULT_CONTRACT, loadContract } from "../architecture/cli/arch.ts";
 import { formatViolation } from "../architecture/domain/rules.ts";
-import {
-  keyEnvName,
-  loadConfig,
-  loadProfiles,
-  type OmiConfig,
-  profileSecretResolver,
-  type Selection,
-  workflowModel,
-} from "../core/config.ts";
 import { parseContext } from "../core/context-usage.ts";
-import type { Check } from "../core/contracts.ts";
-import { OmiError } from "../core/errors/errors.ts";
 import { issueTypeWrites } from "../core/issue-type-config.ts";
 import { keyFingerprint, loadMasterKey } from "../core/secrets.ts";
 import {
@@ -44,11 +32,23 @@ import {
   STATE_FILE,
   WORKSPACE_DIR,
 } from "../core/workspace.ts";
-import { openState } from "../persistence/db.ts";
 import { listProfileRecords } from "../persistence/profiles.ts";
 import { openRuns, ownedRefs } from "../persistence/repository.ts";
-import { redact } from "../reporting/redact.ts";
 import { same } from "../resources/worktree.ts";
+import {
+  keyEnvName,
+  loadConfig,
+  loadProfiles,
+  type OmiConfig,
+  profileSecretResolver,
+  type Selection,
+  workflowModel,
+} from "../shared/config.ts";
+import type { Check } from "../shared/contracts.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import { type GhRunner, graphql, spawnGh } from "../shared/github/client.ts";
+import { redact } from "../shared/redact.ts";
+import { openState } from "../shared/sqlite/db.ts";
 import { memoryDir, OLD_LAYOUT, SETTINGS } from "./workspace.ts";
 
 export type { Check };

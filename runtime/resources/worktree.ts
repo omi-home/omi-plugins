@@ -16,12 +16,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import { classify } from "../adapters/github/client.ts";
-import type { OmiConfig } from "../core/config.ts";
-import { type IssueType, parseContract, SCHEMA_VERSION } from "../core/contracts.ts";
-import { type ErrorCode, OmiError } from "../core/errors/errors.ts";
 import { titleType } from "../core/hierarchy.ts";
-import type { Db } from "../persistence/db.ts";
 import {
   acquireLease,
   claimResource,
@@ -29,6 +24,11 @@ import {
   releaseLease,
   resourceOwner,
 } from "../persistence/repository.ts";
+import type { OmiConfig } from "../shared/config.ts";
+import { type IssueType, parseContract, SCHEMA_VERSION } from "../shared/contracts.ts";
+import { type ErrorCode, OmiError } from "../shared/errors/errors.ts";
+import { classify } from "../shared/github/client.ts";
+import type { Db } from "../shared/sqlite/db.ts";
 
 export const OwnerMarker = z.strictObject({
   schemaVersion: z.literal(SCHEMA_VERSION),

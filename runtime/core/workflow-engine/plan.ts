@@ -1,7 +1,7 @@
 // Workflow composition (spec §10 workflow catalogue, DevTask-0026 #55): the CLI picks a small set
 // of reusable stages from the Issue type and labels, never all eleven agents. Pure: no I/O.
-import type { IssueType, Role } from "../contracts.ts";
-import { OmiError } from "../errors/errors.ts";
+import type { IssueType, Role } from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
 
 export interface PlanInput {
   type: IssueType;

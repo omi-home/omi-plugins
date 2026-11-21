@@ -3,15 +3,15 @@
 // (`cleanup scan`), Status drift (`project plan`) and governance gaps (`github repo validate`).
 // The tree is required; each side section reports its own error instead of failing the command.
 import { type BoardIssue, readTree } from "../adapters/github/board.ts";
-import type { GhRunner } from "../adapters/github/client.ts";
 import { activeMilestone } from "../adapters/github/handoff.ts";
 import { type StatusDrift, statusDrift } from "../adapters/github/project-fields.ts";
 import { repoValidate } from "../adapters/github/repo.ts";
-import { type Check, ProjectStatus, type TokenUsage } from "../core/contracts.ts";
-import { OmiError } from "../core/errors/errors.ts";
-import { openState, statePath } from "../persistence/db.ts";
 import { type AttemptUsage, latestRun, runUsage } from "../persistence/repository.ts";
 import { sumUsage } from "../reporting/render.ts";
+import { type Check, ProjectStatus, type TokenUsage } from "../shared/contracts.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import type { GhRunner } from "../shared/github/client.ts";
+import { openState, statePath } from "../shared/sqlite/db.ts";
 import { cleanupScan, type ScanResult } from "./cleanup.ts";
 import { repo } from "./task.ts";
 

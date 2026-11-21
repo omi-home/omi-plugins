@@ -2,8 +2,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { parseConfig } from "../../runtime/core/config.ts";
-import { Role } from "../../runtime/core/contracts.ts";
+import { parseConfig } from "../../runtime/shared/config.ts";
+import { Role } from "../../runtime/shared/contracts.ts";
 
 test("agent-pack/agents/<role>.md model/effort equal the agents.routing defaults", () => {
   const c = parseConfig({ github: { owner: "o", repo: "r", projectNumber: 1 } });

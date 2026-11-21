@@ -2,10 +2,12 @@
 // merge methods in config/github/repository.yaml; merge tiers in config/risk-policy.yaml.
 // Pure: load, validate, diff. GitHub reads and writes live in adapters/github/repo.ts.
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-import { type OmiConfig, workflowModel } from "./config.ts";
-import { IssueType, parseContract } from "./contracts.ts";
+import { type OmiConfig, workflowModel } from "../shared/config.ts";
+import { IssueType, parseContract } from "../shared/contracts.ts";
+import { CONFIG_DIR } from "../shared/plugin-paths.ts";
 
 export const Rule = z.enum([
   "pull-request",
@@ -56,8 +58,7 @@ export const RiskPolicy = z
   .refine((p) => [p.default, ...p.poMerge].every((l) => p.levels.includes(l)), "unknown level");
 export type RiskPolicy = z.infer<typeof RiskPolicy>;
 
-const read = (path: string) =>
-  parse(readFileSync(new URL(`../../config/${path}`, import.meta.url), "utf8"));
+const read = (path: string) => parse(readFileSync(join(CONFIG_DIR, path), "utf8"));
 
 let repo: RepoConfig | undefined;
 let risk: RiskPolicy | undefined;

@@ -22,11 +22,9 @@ import {
   detectQuota,
   observeRun,
 } from "../../adapters/claude/launch.ts";
-import type { GhRunner } from "../../adapters/github/client.ts";
 import { fetchIssueContext } from "../../adapters/github/context.ts";
 import { archShow } from "../../architecture/cli/arch.ts";
 import type { ArchitectureExcerpt } from "../../architecture/domain/contract.ts";
-import type { Db } from "../../persistence/db.ts";
 import {
   addArtifact,
   advanceRun,
@@ -40,11 +38,10 @@ import {
   stepResult,
 } from "../../persistence/repository.ts";
 import { publishPending } from "../../reporting/outbox.ts";
-import { redact, redactDeep } from "../../reporting/redact.ts";
 import { renderStepReport } from "../../reporting/render.ts";
 import { type SkillChoice, stepSkills, writeRoleFiles } from "../../resources/role-files.ts";
 import { git } from "../../resources/worktree.ts";
-import type { OmiConfig, Selection } from "../config.ts";
+import type { OmiConfig, Selection } from "../../shared/config.ts";
 import {
   type CheckRun,
   commentMarker,
@@ -55,8 +52,11 @@ import {
   StepComment,
   type StepResult,
   type WorkflowContext,
-} from "../contracts.ts";
-import { OmiError } from "../errors/errors.ts";
+} from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import type { GhRunner } from "../../shared/github/client.ts";
+import { redact, redactDeep } from "../../shared/redact.ts";
+import type { Db } from "../../shared/sqlite/db.ts";
 import { acceptStepResultWithWarnings, buildTaskPacket, packetPrompt } from "../handoff/packet.ts";
 import { runChecks } from "./checks.ts";
 import { commitWork } from "./commit.ts";

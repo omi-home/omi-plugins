@@ -3,16 +3,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  type WorkflowContext,
-  WorkflowEventType,
-  WorkflowState,
-} from "../../runtime/core/contracts.ts";
-import { OmiError } from "../../runtime/core/errors/errors.ts";
-import {
   initialContext,
   transition,
   type WorkflowEvent,
 } from "../../runtime/core/workflow-engine/fsm.ts";
+import {
+  type WorkflowContext,
+  WorkflowEventType,
+  WorkflowState,
+} from "../../runtime/shared/contracts.ts";
+import { OmiError } from "../../runtime/shared/errors/errors.ts";
 
 const ev = (type: WorkflowEventType): WorkflowEvent =>
   type === "TECHNICAL_FAILURE" ? { type, errorCode: "NETWORK" } : { type };

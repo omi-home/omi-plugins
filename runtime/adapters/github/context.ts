@@ -2,17 +2,17 @@
 // executable Issue body plus its parent chain, size-bounded, and the findings other tasks
 // carried into it. One GraphQL call, read-only.
 import { z } from "zod";
-import type { OmiConfig } from "../../core/config.ts";
+import { labelType } from "../../core/hierarchy.ts";
+import type { OmiConfig } from "../../shared/config.ts";
 import {
   AuthorAssociation,
   type CarriedFinding,
   type IssueContextEntry,
   type IssueType,
-} from "../../core/contracts.ts";
-import { OmiError } from "../../core/errors/errors.ts";
-import { labelType } from "../../core/hierarchy.ts";
-import { redact } from "../../reporting/redact.ts";
-import { type GhRunner, graphql, markerAuthor, spawnGh } from "./client.ts";
+} from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { type GhRunner, graphql, markerAuthor, spawnGh } from "../../shared/github/client.ts";
+import { redact } from "../../shared/redact.ts";
 
 /** Parent levels fetched above the executable Issue (Task → Feature → Milestone → Epic …). */
 const DEPTH = 5;

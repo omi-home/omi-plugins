@@ -4,11 +4,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isCollection, isMap, parseDocument } from "yaml";
-import { type OmiConfig, parseConfig } from "../core/config.ts";
-import { parseContract } from "../core/contracts.ts";
-import { OmiError } from "../core/errors/errors.ts";
 import { CONFIG_FILE } from "../core/workspace.ts";
 import { ConfigSetInput } from "../monitor/protocol.ts";
+import { type OmiConfig, parseConfig } from "../shared/config.ts";
+import { parseContract } from "../shared/contracts.ts";
+import { OmiError } from "../shared/errors/errors.ts";
 
 /** Top-level keys whose values are shell commands OMI runs: changing them needs `--confirm-commands`. */
 const COMMAND_KEYS = new Set(["checks", "setup"]);

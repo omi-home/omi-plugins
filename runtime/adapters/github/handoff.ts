@@ -2,12 +2,18 @@
 // with `<!-- omi:handoff=<date>-s<N> -->` on the active Milestone (ADR-0001 D7), so a new session
 // resumes from GitHub instead of local memory.
 import { z } from "zod";
-import type { OmiConfig } from "../../core/config.ts";
-import { AuthorAssociation, type ProjectStatus, parseContract } from "../../core/contracts.ts";
-import { OmiError } from "../../core/errors/errors.ts";
 import { api } from "../../reporting/outbox.ts";
-import { redact } from "../../reporting/redact.ts";
-import { type GhRunner, graphql, markerAuthor, RestComment, spawnGh } from "./client.ts";
+import type { OmiConfig } from "../../shared/config.ts";
+import { AuthorAssociation, type ProjectStatus, parseContract } from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import {
+  type GhRunner,
+  graphql,
+  markerAuthor,
+  RestComment,
+  spawnGh,
+} from "../../shared/github/client.ts";
+import { redact } from "../../shared/redact.ts";
 
 const MARKER = /^<!-- omi:handoff=([\w.-]+) -->/;
 /** Handoff-holding Issues read per `show`; comments read per Issue. */

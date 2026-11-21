@@ -6,7 +6,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { READ_ONLY_ROLES, Role } from "../../runtime/core/contracts.ts";
+import { READ_ONLY_ROLES, Role } from "../../runtime/shared/contracts.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const read = (p: string) => readFileSync(join(root, p), "utf8");

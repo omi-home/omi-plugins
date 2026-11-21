@@ -1,7 +1,6 @@
 // DevTask-0045 #128: parent → child matrix, depth, cycles, title ↔ type label.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { IssueType } from "../../runtime/core/contracts.ts";
 import {
   hierarchyChecks,
   type Link,
@@ -9,6 +8,7 @@ import {
   titleCheck,
   titleType,
 } from "../../runtime/core/hierarchy.ts";
+import type { IssueType } from "../../runtime/shared/contracts.ts";
 
 const h = loadHierarchy();
 const chain = (...types: IssueType[]): Link[] => types.map((type, i) => ({ number: i + 1, type }));

@@ -2,13 +2,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { originRepo } from "../../runtime/cli/init.ts";
-import type { OmiError } from "../../runtime/core/errors/errors.ts";
 import {
   type ActualView,
   loadViewsConfig,
   planViews,
   ViewsConfig,
 } from "../../runtime/core/project-config.ts";
+import type { OmiError } from "../../runtime/shared/errors/errors.ts";
 
 const desired = loadViewsConfig();
 /** GitHub's view as `want` would look once fully configured. */

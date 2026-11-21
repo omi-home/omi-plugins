@@ -3,12 +3,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  IssueType,
-  ProjectStatus,
-  WorkflowEventType,
-  WorkflowState,
-} from "../../runtime/core/contracts.ts";
-import {
   type ActualField,
   allowedStatuses,
   canMove,
@@ -22,6 +16,12 @@ import {
   PROJECT_STATUS,
   transition,
 } from "../../runtime/core/workflow-engine/fsm.ts";
+import {
+  IssueType,
+  ProjectStatus,
+  WorkflowEventType,
+  WorkflowState,
+} from "../../runtime/shared/contracts.ts";
 
 const desired = loadProjectConfig();
 const STATUS = desired.fields.find((f) => f.name === "Status");

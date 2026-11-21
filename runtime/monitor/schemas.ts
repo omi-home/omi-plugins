@@ -1,9 +1,11 @@
 // Generates schemas/monitor/*.schema.json from the zod contracts (committed; a test fails on drift).
 import { mkdirSync, writeFileSync } from "node:fs";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SCHEMAS_DIR } from "../shared/plugin-paths.ts";
 import { MONITOR_SCHEMAS, renderSchema } from "./protocol.ts";
 
-export const SCHEMA_DIR = fileURLToPath(new URL("../../schemas/monitor/", import.meta.url));
+export const SCHEMA_DIR = `${join(SCHEMAS_DIR, "monitor")}${sep}`;
 export const schemaFile = (name: string) => `${SCHEMA_DIR}${name}.schema.json`;
 
 export function writeSchemas() {

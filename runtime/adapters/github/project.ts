@@ -2,11 +2,11 @@
 // from Backlog/Ready, and rolls the same move up the native parent chain so a parent never
 // shows less progress than its children. Built-in Project automation does not do this.
 import { z } from "zod";
-import type { OmiConfig } from "../../core/config.ts";
-import { ProjectStatus } from "../../core/contracts.ts";
-import { OmiError } from "../../core/errors/errors.ts";
 import { type Child, rollUp } from "../../core/hierarchy.ts";
-import { classify, type GhRunner, graphql, spawnGh } from "./client.ts";
+import type { OmiConfig } from "../../shared/config.ts";
+import { ProjectStatus } from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { classify, type GhRunner, graphql, spawnGh } from "../../shared/github/client.ts";
 
 export const OWNER_PROJECT = (body: string) =>
   `repositoryOwner(login:$owner){ ... on Organization{projectV2(number:$number){${body}}} ... on User{projectV2(number:$number){${body}}} }`;

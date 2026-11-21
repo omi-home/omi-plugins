@@ -2,7 +2,7 @@
 // project settings Spike-0010 verified, merge them into the workspace `.claude/settings.json`
 // and record what OMI added, so a re-run changes nothing and `--remove` takes back only that.
 import { z } from "zod";
-import { type ContextUsage, parseContract } from "./contracts.ts";
+import { type ContextUsage, parseContract } from "../shared/contracts.ts";
 
 /** Entries OMI added to the workspace settings (stored next to the state, never in settings). */
 export const AppliedContext = z.strictObject({

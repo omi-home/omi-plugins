@@ -17,7 +17,7 @@ Skill `/omi-coordinator:omi-start`, hoặc tay theo thứ tự:
 
 ## 2. Cấu hình `.omi-plugins/omi.config.yaml`
 
-Schema strict (field lạ bị từ chối): [runtime/core/config.ts](../../runtime/core/config.ts). Tối thiểu:
+Schema strict (field lạ bị từ chối): [runtime/shared/config.ts](../../runtime/shared/config.ts). Tối thiểu:
 
 ```yaml
 github: { owner: <org>, repo: <repo>, projectNumber: <n> } # tuỳ chọn: model: legacy | v2 (mặc định legacy)

@@ -2,7 +2,7 @@
 // a failing migration leaves the database at the previous version. Never edit a released entry.
 // Enum columns carry no CHECK: the typed repository is the single writer (contracts.ts enums).
 import type { DatabaseSync } from "node:sqlite";
-import { OmiError } from "../core/errors/errors.ts";
+import { OmiError } from "../errors/errors.ts";
 
 export const MIGRATIONS: readonly string[] = [
   // 1 — initial state model (spec §10, §12, §13, §14)

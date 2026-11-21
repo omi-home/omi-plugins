@@ -2,20 +2,20 @@
 // once, option IDs survive, no write without permission, Status drift across pages.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import {
   projectApply,
   projectPlan,
   projectValidate,
   statusDrift,
 } from "../../runtime/adapters/github/project-fields.ts";
-import type { OmiConfig } from "../../runtime/core/config.ts";
-import type { OmiError } from "../../runtime/core/errors/errors.ts";
 import {
   type GhOption,
   loadProjectConfig,
   loadViewsConfig,
 } from "../../runtime/core/project-config.ts";
+import type { OmiConfig } from "../../runtime/shared/config.ts";
+import type { OmiError } from "../../runtime/shared/errors/errors.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
 
 const config = { github: { owner: "o", repo: "repo", projectNumber: 2 } } as OmiConfig;
 const desired = loadProjectConfig();

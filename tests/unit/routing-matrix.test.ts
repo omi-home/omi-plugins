@@ -2,8 +2,8 @@
 // the agents it needs on its happy path; the readable copy of this table is in Issue #56's body.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type IssueType, Role } from "../../runtime/core/contracts.ts";
 import { planWorkflow, type WorkflowPlan } from "../../runtime/core/workflow-engine/plan.ts";
+import { type IssueType, Role } from "../../runtime/shared/contracts.ts";
 
 /** Agent calls of a plan's happy path, in order (Architect diagnosis only after 2 failed rounds). */
 const agentsOf = (p: WorkflowPlan): Role[] =>

@@ -2,11 +2,13 @@
 // zod loader, the workspace override (`github.workflow` in omi.config.yaml) and the derived queries.
 // Pure: no GitHub reads, no predicate evaluation (Feature-0039 #298).
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-import { readConfigData } from "./config.ts";
-import { IssueTypeV2, ProjectStatusV2, parseContract } from "./contracts.ts";
-import { OmiError } from "./errors/errors.ts";
+import { readConfigData } from "../shared/config.ts";
+import { IssueTypeV2, ProjectStatusV2, parseContract } from "../shared/contracts.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import { CONFIG_DIR } from "../shared/plugin-paths.ts";
 
 export const TransitionBy = z.enum(["po", "coordinator", "auto"]);
 export type TransitionBy = z.infer<typeof TransitionBy>;
@@ -183,7 +185,7 @@ export function mergeWorkflow(base: unknown, override: unknown): unknown {
 }
 
 function readDefault(): unknown {
-  return parse(readFileSync(new URL("../../config/github/workflow.yaml", import.meta.url), "utf8"));
+  return parse(readFileSync(join(CONFIG_DIR, "github", "workflow.yaml"), "utf8"));
 }
 
 let defaults: Workflow | undefined;

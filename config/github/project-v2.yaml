@@ -2,7 +2,7 @@
 # §4.1 + §5.1, ADR-0005 D2). Read instead of project.yaml when `github.model: v2`; project.yaml stays
 # for `legacy` until Feature-0042 #301. Same apply rules: only adds, option IDs are kept, extras are
 # reported and never deleted.
-# Status options are exactly the ProjectStatusV2 enum, in this order (runtime/core/contracts.ts).
+# Status options are exactly the ProjectStatusV2 enum, in this order (runtime/shared/contracts.ts).
 # The status an Issue starts in is not here: it is `types.<IssueType>.initial` of workflow.yaml.
 
 fields:

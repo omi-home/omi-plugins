@@ -9,8 +9,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { AGENT_PACK } from "../../runtime/adapters/claude/launch.ts";
 import { agentPreToolUse, type HookInput } from "../../runtime/cli/hook.ts";
-import { READ_ONLY_ROLES, Role } from "../../runtime/core/contracts.ts";
 import { writeRoleFiles } from "../../runtime/resources/role-files.ts";
+import { READ_ONLY_ROLES, Role } from "../../runtime/shared/contracts.ts";
 
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url));
 const bin = join(pluginRoot, "bin", "omi");

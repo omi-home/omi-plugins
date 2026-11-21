@@ -5,11 +5,11 @@ import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parseContract, StepResult } from "../../runtime/core/contracts.ts";
-import { OmiError } from "../../runtime/core/errors/errors.ts";
-import { openState, statePath } from "../../runtime/persistence/db.ts";
-import { MIGRATIONS, migrate } from "../../runtime/persistence/migrations.ts";
 import * as repo from "../../runtime/persistence/repository.ts";
+import { parseContract, StepResult } from "../../runtime/shared/contracts.ts";
+import { OmiError } from "../../runtime/shared/errors/errors.ts";
+import { openState, statePath } from "../../runtime/shared/sqlite/db.ts";
+import { MIGRATIONS, migrate } from "../../runtime/shared/sqlite/migrations.ts";
 
 const issue = { repository: "omi-home/omi-plugins", number: 24 };
 const dbFile = () => join(mkdtempSync(join(tmpdir(), "omi-state-")), "state.sqlite");

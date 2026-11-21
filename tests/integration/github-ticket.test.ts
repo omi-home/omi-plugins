@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fetchTicket, validateTicket } from "../../runtime/adapters/github/ticket.ts";
-import { parseConfig } from "../../runtime/core/config.ts";
+import { parseConfig } from "../../runtime/shared/config.ts";
 
 const authed = spawnSync("gh", ["auth", "status", "--hostname", "github.com"]).status === 0;
 const skip = !authed && "no gh session on this machine";

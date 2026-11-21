@@ -2,8 +2,6 @@
 // diff and write with createIssueType / updateIssueType. Read → diff → write; a second run writes
 // nothing. Never deletes or disables a type. Only an organization owns issue types.
 import { z } from "zod";
-import type { OmiConfig } from "../../core/config.ts";
-import { OmiError } from "../../core/errors/errors.ts";
 import {
   type ActualIssueType,
   type IssueTypeAction,
@@ -13,7 +11,9 @@ import {
   loadIssueTypesConfig,
   planIssueTypes,
 } from "../../core/issue-type-config.ts";
-import { type GhRunner, graphql, spawnGh } from "./client.ts";
+import type { OmiConfig } from "../../shared/config.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { type GhRunner, graphql, spawnGh } from "../../shared/github/client.ts";
 
 export const ADMIN_ORG_HINT = "gh auth refresh -s admin:org";
 

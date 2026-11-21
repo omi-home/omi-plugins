@@ -17,15 +17,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { AgentLaunch } from "../../runtime/adapters/claude/launch.ts";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { type CliIo, main } from "../../runtime/cli/main.ts";
-import {
-  loadProfiles,
-  parseConfig,
-  profileSecretResolver,
-  selectProfile,
-} from "../../runtime/core/config.ts";
-import type { TaskPacket } from "../../runtime/core/contracts.ts";
 import { generateMasterKey } from "../../runtime/core/secrets.ts";
 import type { DeliveryPlan, WorkflowPlan } from "../../runtime/core/workflow-engine/plan.ts";
 import {
@@ -34,9 +26,17 @@ import {
   runSlice,
   zeroWidthIn,
 } from "../../runtime/core/workflow-engine/slice.ts";
-import { openState } from "../../runtime/persistence/db.ts";
 import * as repo from "../../runtime/persistence/repository.ts";
 import { roleSkills } from "../../runtime/resources/role-files.ts";
+import {
+  loadProfiles,
+  parseConfig,
+  profileSecretResolver,
+  selectProfile,
+} from "../../runtime/shared/config.ts";
+import type { TaskPacket } from "../../runtime/shared/contracts.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
+import { openState } from "../../runtime/shared/sqlite/db.ts";
 
 type Verdict = "PASSED" | "FAILED" | "BLOCKED";
 interface Script {

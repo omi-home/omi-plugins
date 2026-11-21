@@ -2,10 +2,10 @@
 // against a fake dependency graph: cycles, other repositories, re-run, unverifiable graphs.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { addDependency } from "../../runtime/adapters/github/dependency.ts";
-import type { OmiError } from "../../runtime/core/errors/errors.ts";
 import { type Child, rollUp } from "../../runtime/core/hierarchy.ts";
+import type { OmiError } from "../../runtime/shared/errors/errors.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
 
 const kid = (ref: string, over: Partial<Child> = {}): Child => ({
   ref,

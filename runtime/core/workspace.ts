@@ -3,7 +3,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { OmiError } from "./errors/errors.ts";
+import { OmiError } from "../shared/errors/errors.ts";
 
 export const WORKSPACE_DIR = ".omi-plugins";
 export const CONFIG_FILE = `${WORKSPACE_DIR}/omi.config.yaml`;

@@ -5,8 +5,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parseConfig } from "../../runtime/core/config.ts";
 import { runChecks, SUMMARY_CHARS } from "../../runtime/core/workflow-engine/checks.ts";
+import { parseConfig } from "../../runtime/shared/config.ts";
 
 import { makeRepo } from "../unit/architecture/helpers.ts";
 

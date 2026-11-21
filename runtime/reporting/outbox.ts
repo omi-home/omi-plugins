@@ -4,23 +4,23 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
-  classify,
-  type GhRunner,
-  markerAuthor,
-  RestComment,
-  spawnGh,
-} from "../adapters/github/client.ts";
-import { type IssueRef, parseContract } from "../core/contracts.ts";
-import { isTransient, OmiError } from "../core/errors/errors.ts";
-import type { Db } from "../persistence/db.ts";
-import {
   acquireLease,
   markReported,
   type PendingReport,
   pendingReports,
   releaseLease,
 } from "../persistence/repository.ts";
-import { redact } from "./redact.ts";
+import { type IssueRef, parseContract } from "../shared/contracts.ts";
+import { isTransient, OmiError } from "../shared/errors/errors.ts";
+import {
+  classify,
+  type GhRunner,
+  markerAuthor,
+  RestComment,
+  spawnGh,
+} from "../shared/github/client.ts";
+import { redact } from "../shared/redact.ts";
+import type { Db } from "../shared/sqlite/db.ts";
 
 const Comment = RestComment;
 type Comment = z.infer<typeof Comment>;

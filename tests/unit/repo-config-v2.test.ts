@@ -1,7 +1,6 @@
 // DevTask-0102 #311: model v2 labels (flags only) chosen by github.model; protection unchanged.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { OmiConfig } from "../../runtime/core/config.ts";
 import {
   type ActualRepo,
   loadRepoConfig,
@@ -9,6 +8,7 @@ import {
   loadRepoConfigV2,
   planRepo,
 } from "../../runtime/core/repo-config.ts";
+import type { OmiConfig } from "../../runtime/shared/config.ts";
 
 const legacy = loadRepoConfig();
 const v2 = loadRepoConfigV2();

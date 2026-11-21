@@ -5,7 +5,7 @@
 # GitHub has but this file does not are reported, never deleted. Built-in fields (Title,
 # Assignees, Labels, Milestone, Parent issue…) are GitHub's and not listed: no field may
 # duplicate Issue Type, labels, Milestone or Parent (governance §4.2).
-# Status option names must equal the ProjectStatus enum (runtime/core/contracts.ts).
+# Status option names must equal the ProjectStatus enum (runtime/shared/contracts.ts).
 
 # Status an Issue gets when `omi issue create` adds it to the Project.
 initialStatus: Backlog

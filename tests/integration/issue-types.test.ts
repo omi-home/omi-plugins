@@ -3,7 +3,6 @@
 // disabled, a personal account and a missing admin:org scope are refused with guidance.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import {
   hasAdminOrg,
   issueTypeApply,
@@ -12,9 +11,10 @@ import {
 } from "../../runtime/adapters/github/issue-types.ts";
 import { projectPlan, projectValidate } from "../../runtime/adapters/github/project-fields.ts";
 import { issueTypeChecks } from "../../runtime/cli/doctor.ts";
-import type { OmiConfig } from "../../runtime/core/config.ts";
-import type { OmiError } from "../../runtime/core/errors/errors.ts";
 import { loadIssueTypesConfig } from "../../runtime/core/issue-type-config.ts";
+import type { OmiConfig } from "../../runtime/shared/config.ts";
+import type { OmiError } from "../../runtime/shared/errors/errors.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
 
 const v2 = { github: { owner: "o", repo: "repo", projectNumber: 2, model: "v2" } } as OmiConfig;
 const legacy = { github: { owner: "o", repo: "repo", projectNumber: 2 } } as OmiConfig;

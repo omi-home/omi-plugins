@@ -18,7 +18,12 @@ import {
 } from "../adapters/github/project-fields.ts";
 import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/github/repo.ts";
 import { archCheck, archShow, humanReport, violationError } from "../architecture/cli/arch.ts";
-import { workflowModel } from "../core/config.ts";
+import type { RepoAction } from "../core/repo-config.ts";
+import { CONFIG_FILE, locate } from "../core/workspace.ts";
+import { MONITOR_PROTOCOL_VERSION } from "../monitor/protocol.ts";
+import { formatUsage, sumUsage } from "../reporting/render.ts";
+import { skillList } from "../resources/role-files.ts";
+import { workflowModel } from "../shared/config.ts";
 import {
   IssueType,
   IssueTypeV2,
@@ -26,14 +31,10 @@ import {
   ProjectStatus,
   Role,
   type TokenUsage,
-} from "../core/contracts.ts";
-import { ERROR_CODES, OmiError } from "../core/errors/errors.ts";
-import type { RepoAction } from "../core/repo-config.ts";
-import { CONFIG_FILE, locate } from "../core/workspace.ts";
-import { MONITOR_PROTOCOL_VERSION } from "../monitor/protocol.ts";
-import { redact, redactDeep } from "../reporting/redact.ts";
-import { formatUsage, sumUsage } from "../reporting/render.ts";
-import { skillList } from "../resources/role-files.ts";
+} from "../shared/contracts.ts";
+import { ERROR_CODES, OmiError } from "../shared/errors/errors.ts";
+import { PLUGIN_ROOT } from "../shared/plugin-paths.ts";
+import { redact, redactDeep } from "../shared/redact.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { configGet, configSet } from "./config.ts";
 import { contextApply, contextPlan, humanContextPlan } from "./context.ts";
@@ -270,7 +271,7 @@ export interface CliResult {
 }
 
 const VERSION: string = JSON.parse(
-  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+  readFileSync(resolve(PLUGIN_ROOT, "package.json"), "utf8"),
 ).version;
 
 /** 0 when nothing failed; 75 when every failure is transient (retry helps); else 1. */

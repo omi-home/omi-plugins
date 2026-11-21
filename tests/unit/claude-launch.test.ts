@@ -10,9 +10,9 @@ import {
   detectQuota,
   observeRun,
 } from "../../runtime/adapters/claude/launch.ts";
-import type { Selection } from "../../runtime/core/config.ts";
-import { OmiError } from "../../runtime/core/errors/errors.ts";
 import { spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
+import type { Selection } from "../../runtime/shared/config.ts";
+import { OmiError } from "../../runtime/shared/errors/errors.ts";
 
 const win = process.platform === "win32";
 const root = win ? "E:/plug" : "/plug";

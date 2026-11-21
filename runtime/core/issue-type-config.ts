@@ -2,9 +2,11 @@
 // and the pure diff against what the organization has. GitHub reads and writes live in
 // adapters/github/issue-types.ts. Nothing here deletes or disables a type.
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-import { IssueTypeV2, parseContract } from "./contracts.ts";
+import { IssueTypeV2, parseContract } from "../shared/contracts.ts";
+import { CONFIG_DIR } from "../shared/plugin-paths.ts";
 
 export const IssueTypeColor = z.enum([
   "GRAY",
@@ -39,7 +41,7 @@ let cached: IssueTypesConfig | undefined;
 export const loadIssueTypesConfig = (): IssueTypesConfig =>
   (cached ??= parseContract(
     IssueTypesConfig,
-    parse(readFileSync(new URL("../../config/github/issue-types.yaml", import.meta.url), "utf8")),
+    parse(readFileSync(join(CONFIG_DIR, "github", "issue-types.yaml"), "utf8")),
     "issue types config",
     "CONFIG_INVALID",
   ));

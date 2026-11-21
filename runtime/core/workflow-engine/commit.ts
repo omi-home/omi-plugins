@@ -1,8 +1,9 @@
 // The runtime commits an implementing step's work (DevTask-0085 #262): the agent only writes code
 // and tests, so it needs no git write permission. The message comes from data, never from the LLM.
-import { redact } from "../../reporting/redact.ts";
+
 import { git } from "../../resources/worktree.ts";
-import { OmiError } from "../errors/errors.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { redact } from "../../shared/redact.ts";
 
 /** Directories no task commit may contain, whatever the repo's .gitignore says. */
 const UNSAFE_DIRS = new Set([".git", ".omi-plugins", "node_modules", ".ssh", ".aws"]);

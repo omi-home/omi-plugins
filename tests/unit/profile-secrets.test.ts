@@ -14,8 +14,6 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { type CliIo, main } from "../../runtime/cli/main.ts";
 import { secretInitKey, secretRotateKey } from "../../runtime/cli/secret.ts";
-import { loadProfiles } from "../../runtime/core/config.ts";
-import type { OmiError } from "../../runtime/core/errors/errors.ts";
 import {
   decryptSecret,
   encryptSecret,
@@ -24,9 +22,11 @@ import {
   loadMasterKey,
   parseMasterKey,
 } from "../../runtime/core/secrets.ts";
-import { openState } from "../../runtime/persistence/db.ts";
-import { MIGRATIONS } from "../../runtime/persistence/migrations.ts";
 import { getProfileRecord } from "../../runtime/persistence/profiles.ts";
+import { loadProfiles } from "../../runtime/shared/config.ts";
+import type { OmiError } from "../../runtime/shared/errors/errors.ts";
+import { openState } from "../../runtime/shared/sqlite/db.ts";
+import { MIGRATIONS } from "../../runtime/shared/sqlite/migrations.ts";
 
 const CANARY = "sk-ant-oat01-CANARY-token-0123456789abcdef";
 const KEY = generateMasterKey();

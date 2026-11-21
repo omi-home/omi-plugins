@@ -14,16 +14,16 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import type { Ticket } from "../../runtime/adapters/github/ticket.ts";
 import { taskStart, taskStatus, taskUnblock, ticketValidate } from "../../runtime/cli/task.ts";
-import { openState, statePath } from "../../runtime/persistence/db.ts";
 import {
   acquireLease,
   advanceRun,
   getRun,
   transitionRun,
 } from "../../runtime/persistence/repository.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
+import { openState, statePath } from "../../runtime/shared/sqlite/db.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();

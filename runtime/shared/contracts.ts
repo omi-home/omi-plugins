@@ -2,11 +2,70 @@
 // Every document is strict (unknown fields rejected) and versioned via `schemaVersion`.
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { ArchitectureExcerpt } from "../architecture/domain/contract.ts";
 import { type ErrorCode, OmiError } from "./errors/errors.ts";
 
 export const SCHEMA_VERSION = 1;
 const schemaVersion = z.literal(SCHEMA_VERSION);
+
+// ---- Architecture contract building blocks (ADR-0006) ----
+// Here, not in runtime/architecture/: the task packet carries an excerpt of the contract and shared
+// imports no module. runtime/architecture/domain/contract.ts re-exports them.
+
+const MAX_PATH = 200;
+
+/** True when `p` is a safe repo-relative posix path (globs may also use `*` and `?`). */
+function safePath(p: string, glob: boolean): boolean {
+  if (p.length === 0 || p.length > MAX_PATH) return false;
+  if (p.startsWith("/") || /^[A-Za-z]:/.test(p) || p.includes("\\")) return false;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are rejected on purpose
+  if (/[\u0000-\u001f]/.test(p)) return false;
+  if (!glob && /[*?]/.test(p)) return false;
+  return p.split("/").every((s) => s !== "" && s !== "." && s !== "..");
+}
+
+export const RelPath = z.string().refine((p) => safePath(p, false), {
+  message:
+    "must be a posix path relative to the repo (no '..', '.', absolute, drive, '\\', '*', '?')",
+});
+export const Glob = z.string().refine((p) => safePath(p, true), {
+  message: "must be a posix glob relative to the repo (no '..', '.', absolute, drive, '\\')",
+});
+export const ModuleId = z.string().regex(/^[a-z][a-z0-9-]{1,40}$/);
+const Segment = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/)
+  .max(80);
+const archText = (max: number) => z.string().min(1).max(max);
+
+export const Layer = z.strictObject({
+  name: ModuleId,
+  dir: Segment,
+  mayImport: z.array(ModuleId),
+  forbidPackages: z.array(archText(200)).default([]),
+});
+
+export const ArchModule = z.strictObject({
+  id: ModuleId,
+  path: RelPath,
+  description: archText(200),
+  shared: z.boolean().default(false),
+  dependsOn: z.array(ModuleId).default([]),
+});
+
+export const Placement = z.strictObject({
+  pattern: Glob,
+  allowedIn: z.array(Glob).min(1),
+  message: archText(300),
+});
+
+/** The part of the contract an agent needs for a scope (TaskPacket.architecture). */
+export const ArchitectureExcerpt = z.strictObject({
+  contractPath: RelPath,
+  layers: z.array(Layer),
+  modules: z.array(ArchModule).max(30),
+  placement: z.array(Placement),
+});
+export type ArchitectureExcerpt = z.infer<typeof ArchitectureExcerpt>;
 
 // ---- Enums (single source for every state name; no raw strings elsewhere) ----
 

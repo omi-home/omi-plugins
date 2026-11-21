@@ -3,9 +3,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readTree } from "../../runtime/adapters/github/board.ts";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
-import type { OmiConfig } from "../../runtime/core/config.ts";
-import type { OmiError } from "../../runtime/core/errors/errors.ts";
+import type { OmiConfig } from "../../runtime/shared/config.ts";
+import type { OmiError } from "../../runtime/shared/errors/errors.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
 
 const config = { github: { owner: "o", repo: "r", projectNumber: 2 } } as OmiConfig;
 

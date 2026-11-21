@@ -2,9 +2,6 @@
 // classic branch protection and merge methods against config/github/repository.yaml. Apply writes
 // only the plan the PO approved (governance is High risk), only adds/tightens, never deletes.
 import { z } from "zod";
-import type { OmiConfig } from "../../core/config.ts";
-import { type Check, parseContract } from "../../core/contracts.ts";
-import { OmiError } from "../../core/errors/errors.ts";
 import {
   type ActualBranch,
   type Label,
@@ -16,8 +13,11 @@ import {
   type Rule,
   writable,
 } from "../../core/repo-config.ts";
-import { redactDeep } from "../../reporting/redact.ts";
-import { classify, type GhRunner, spawnGh } from "./client.ts";
+import type { OmiConfig } from "../../shared/config.ts";
+import { type Check, parseContract } from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { classify, type GhRunner, spawnGh } from "../../shared/github/client.ts";
+import { redactDeep } from "../../shared/redact.ts";
 
 function api(run: GhRunner, args: string[], what: string, body?: unknown): unknown {
   const r = run(

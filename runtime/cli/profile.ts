@@ -3,23 +3,8 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
-import {
-  assertNoLegacyProfiles,
-  keyEnvName,
-  readLegacyProfiles,
-  secretEnv,
-} from "../core/config.ts";
-import {
-  type Profile,
-  ProfileEdit,
-  ProfileView,
-  ProfileWrite,
-  parseContract,
-} from "../core/contracts.ts";
-import { OmiError } from "../core/errors/errors.ts";
 import { encryptSecret, loadMasterKey, type SealedSecret } from "../core/secrets.ts";
 import { STATE_FILE } from "../core/workspace.ts";
-import { type Db, openState, tx } from "../persistence/db.ts";
 import {
   addProfile,
   getProfileRecord,
@@ -31,6 +16,21 @@ import {
   updateProfile,
   writeSealed,
 } from "../persistence/profiles.ts";
+import {
+  assertNoLegacyProfiles,
+  keyEnvName,
+  readLegacyProfiles,
+  secretEnv,
+} from "../shared/config.ts";
+import {
+  type Profile,
+  ProfileEdit,
+  ProfileView,
+  ProfileWrite,
+  parseContract,
+} from "../shared/contracts.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import { type Db, openState, tx } from "../shared/sqlite/db.ts";
 
 export interface ProfileDeps {
   workspace: string;

@@ -15,8 +15,8 @@ import {
   StepResult,
   TaskPacket,
   VERDICT_ROLES,
-} from "../contracts.ts";
-import { OmiError } from "../errors/errors.ts";
+} from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
 
 /** Raw agent output above this is rejected before parsing. */
 export const MAX_RESULT_CHARS = 64 * 1024;

@@ -1,10 +1,10 @@
 // DevTask-0098 #307: model v2 enums, `github.model` config and reading an Issue's type per model.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { fetchTicket, readIssueType } from "../../runtime/adapters/github/ticket.ts";
-import { parseConfig, workflowModel } from "../../runtime/core/config.ts";
-import { IssueType, IssueTypeV2, ProjectStatusV2, RoleV2 } from "../../runtime/core/contracts.ts";
+import { parseConfig, workflowModel } from "../../runtime/shared/config.ts";
+import { IssueType, IssueTypeV2, ProjectStatusV2, RoleV2 } from "../../runtime/shared/contracts.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
 
 const gh = { owner: "o", repo: "r", projectNumber: 2 };
 const codeOf = (fn: () => unknown) => {

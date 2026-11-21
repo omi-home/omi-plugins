@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { Role } from "../../runtime/core/contracts.ts";
 import {
   parseSkillChoice,
   roleSkills,
@@ -14,6 +13,7 @@ import {
   stepSkills,
   writeRoleFiles,
 } from "../../runtime/resources/role-files.ts";
+import { Role } from "../../runtime/shared/contracts.ts";
 
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url));
 const installed = (taskRoot: string) => readdirSync(join(taskRoot, ".claude", "skills")).sort();

@@ -4,9 +4,6 @@
 // Read before every write: a second run with the same type + title finds the Issue it made and
 // only completes the steps still missing; a wrong parent or a cycle is refused before any write.
 import { z } from "zod";
-import { type OmiConfig, workflowModel } from "../../core/config.ts";
-import { type IssueType, IssueTypeV2 } from "../../core/contracts.ts";
-import { OmiError } from "../../core/errors/errors.ts";
 import {
   hierarchyChecks,
   type Link,
@@ -19,8 +16,11 @@ import {
 import { loadForm, missingSections, sectionsCheckV2 } from "../../core/issue-forms.ts";
 import { loadProjectConfig } from "../../core/project-config.ts";
 import { initialStatus, resolveWorkflow } from "../../core/workflow-config.ts";
-import { redact } from "../../reporting/redact.ts";
-import { type GhRunner, graphql, spawnGh } from "./client.ts";
+import { type OmiConfig, workflowModel } from "../../shared/config.ts";
+import { type IssueType, IssueTypeV2 } from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { type GhRunner, graphql, spawnGh } from "../../shared/github/client.ts";
+import { redact } from "../../shared/redact.ts";
 import { setItemStatus, statusField } from "./project.ts";
 import { NATIVE_TYPE } from "./ticket.ts";
 

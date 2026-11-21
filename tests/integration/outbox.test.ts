@@ -5,13 +5,13 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { parseCarriedFindings } from "../../runtime/adapters/github/context.ts";
 import { initialContext, transition } from "../../runtime/core/workflow-engine/fsm.ts";
-import { openState } from "../../runtime/persistence/db.ts";
 import * as repo from "../../runtime/persistence/repository.ts";
 import { publishPending } from "../../runtime/reporting/outbox.ts";
 import { renderCarriedFindings } from "../../runtime/reporting/render.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
+import { openState } from "../../runtime/shared/sqlite/db.ts";
 
 const issue = { repository: "o/r", number: 7 };
 

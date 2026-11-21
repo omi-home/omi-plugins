@@ -1,14 +1,14 @@
 // Workflow FSM (spec §10): pure (context, event, facts) → next context. No I/O; the caller
 // persists the result with a compare-and-set transition (runtime/persistence/repository.ts).
 // Review policy: 2 rounds → Architect once → 2 rounds → WAITING_PO. Never a fifth round.
-import type { OmiConfig } from "../config.ts";
+import type { OmiConfig } from "../../shared/config.ts";
 import type {
   ProjectStatus,
   WorkflowContext,
   WorkflowEventType,
   WorkflowState,
-} from "../contracts.ts";
-import { ERROR_CODES, type ErrorCode, OmiError } from "../errors/errors.ts";
+} from "../../shared/contracts.ts";
+import { ERROR_CODES, type ErrorCode, OmiError } from "../../shared/errors/errors.ts";
 
 export type WorkflowEvent =
   | { type: "TECHNICAL_FAILURE"; errorCode: ErrorCode }

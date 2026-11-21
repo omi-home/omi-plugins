@@ -6,7 +6,7 @@ import {
   type ContextItemKind,
   ContextUsage,
   parseContract,
-} from "./contracts.ts";
+} from "../shared/contracts.ts";
 
 /** `7.1k`, `~170`, `661`, `1m` → tokens. */
 export function tokenCount(s: string): number {
