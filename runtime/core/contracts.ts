@@ -413,7 +413,7 @@ const attempt = z.int().min(1);
 const text = (max: number) => z.string().trim().min(1).max(max);
 
 /** Repo-relative path from untrusted agent output: no absolute paths, no traversal. */
-const relPath = z
+export const relPath = z
   .string()
   .min(1)
   .max(500)

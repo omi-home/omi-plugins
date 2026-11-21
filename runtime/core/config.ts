@@ -5,7 +5,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-import { RelPath } from "../architecture/domain/contract.ts";
 import { openState } from "../persistence/db.ts";
 import { getProfileRecord, listProfileRecords } from "../persistence/profiles.ts";
 import { registerSecret } from "../reporting/redact.ts";
@@ -16,6 +15,7 @@ import {
   ProfileEffort,
   parseContract,
   Role,
+  relPath,
   WorkflowModel,
 } from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
@@ -113,7 +113,7 @@ export const OmiConfig = z.strictObject({
   /** Architecture contract of the target repo (Feature-0043 #321); checked by the gate and doctor. */
   architecture: z
     .strictObject({
-      contract: RelPath.default("omi-architecture.yaml"),
+      contract: relPath.default("omi-architecture.yaml"),
     })
     .optional(),
   context: z

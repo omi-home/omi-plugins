@@ -666,7 +666,9 @@
           "properties": {
             "contract": {
               "default": "omi-architecture.yaml",
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
             }
           },
           "required": [

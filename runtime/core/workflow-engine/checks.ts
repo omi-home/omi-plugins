@@ -96,6 +96,8 @@ export function runCommand(
   return { outcome, exitCode: r.status, durationMs, summary };
 }
 
+// TODO(R1 #329): same plugin root as resources/role-files.ts and cli/{context,task}.ts; all of them
+// move to shared/plugin-paths.ts (ADR-0006).
 const PLUGIN_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const ARCH_TIMEOUT_SEC = 120;
 
