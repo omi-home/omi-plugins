@@ -1,6 +1,6 @@
 // `omi doctor`: deterministic environment/repository checks (spec §15, ADR-0001 D4/D5, T0.4).
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
@@ -21,6 +21,8 @@ import {
   tokenScopes,
 } from "../adapters/github/issue-types.ts";
 import { sayIssueType } from "../adapters/github/project-fields.ts";
+import { archCheck, DEFAULT_CONTRACT, loadContract } from "../architecture/cli/arch.ts";
+import { formatViolation } from "../architecture/domain/rules.ts";
 import {
   keyEnvName,
   loadConfig,
@@ -781,6 +783,60 @@ export function probeProfiles(
     : [{ name: "probe", status: "pass", detail: `no active profile in ${PROFILES_FILE}` }];
 }
 
+const ARCH_RUNBOOK = "docs/runbooks/architecture-contract.md";
+const ARCH_SHOWN = 5;
+
+/**
+ * `architecture` (Feature-0043 #321): no contract is a warning pointing at the runbook; an invalid
+ * contract or any violation fails; a contract that still lists `legacy` folders warns.
+ */
+export function architectureCheck(repoRoot: string, config?: OmiConfig): Check {
+  const name = "architecture";
+  const rel = config?.architecture?.contract ?? DEFAULT_CONTRACT;
+  try {
+    lstatSync(join(repoRoot, rel));
+  } catch {
+    return {
+      name,
+      status: "warn",
+      detail: `no architecture contract at ${rel}: see ${ARCH_RUNBOOK} to enable it`,
+    };
+  }
+  try {
+    const contract = loadContract(repoRoot, rel);
+    const report = archCheck({ cwd: repoRoot, repo: ".", contract: rel });
+    if (!report.passed) {
+      const first = report.violations.slice(0, ARCH_SHOWN).map(formatViolation).join("\n");
+      const more = report.violations.length - ARCH_SHOWN;
+      return {
+        name,
+        status: "fail",
+        code: "ARCH_VIOLATION",
+        detail: `${report.violations.length}${report.truncated ? "+" : ""} violation(s):\n${first}${more > 0 ? `\n… and ${more}${report.truncated ? "+" : ""} more: run \`omi arch check\`` : ""}`,
+      };
+    }
+    return contract.legacy.length
+      ? {
+          name,
+          status: "warn",
+          detail: `${rel} still lists ${contract.legacy.length} legacy folder(s): move them and remove the entries`,
+        }
+      : {
+          name,
+          status: "pass",
+          detail: `${report.filesScanned} file(s) checked against ${rel}`,
+        };
+  } catch (e) {
+    const err = e instanceof OmiError ? e : new OmiError("INTERNAL", "architecture check crashed");
+    return {
+      name,
+      status: "fail",
+      detail: redact(err.message),
+      code: err.code,
+    };
+  }
+}
+
 export function doctor(cwd: string): Check[] {
   const checks: Check[] = [
     atLeast(process.versions.node, MIN_NODE)
@@ -840,6 +896,7 @@ export function doctor(cwd: string): Check[] {
       coordinatorPluginCheck(loc.workspace),
     );
 
+  checks.push(architectureCheck(repoRoot, config));
   checks.push(...github(config));
   return checks;
 }

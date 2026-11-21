@@ -2,7 +2,7 @@
 // worktree before each cognitive review. Full output goes to a retained log file; the result
 // carries only a short, redacted tail. No LLM involved.
 import { spawnSync } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, lstatSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redact } from "../../reporting/redact.ts";
@@ -96,6 +96,31 @@ export function runCommand(
   return { outcome, exitCode: r.status, durationMs, summary };
 }
 
+const PLUGIN_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
+const ARCH_TIMEOUT_SEC = 120;
+
+/**
+ * Built-in architecture check: when `checks.architecture` is not configured and the worktree has a
+ * contract file (a symlink too, so the check reports it as invalid), run `omi arch check` on it.
+ */
+function architectureCommand(o: {
+  worktree: string;
+  architecture?: OmiConfig["architecture"];
+  pluginRoot?: string;
+}): { run: string; timeoutSec: number } | undefined {
+  const contract = o.architecture?.contract ?? "omi-architecture.yaml";
+  try {
+    lstatSync(join(o.worktree, contract));
+  } catch {
+    return undefined;
+  }
+  const omi = join(o.pluginRoot ?? PLUGIN_ROOT, "bin", "omi");
+  return {
+    run: `node ${JSON.stringify(omi)} arch check --repo . --contract ${JSON.stringify(contract)}`,
+    timeoutSec: ARCH_TIMEOUT_SEC,
+  };
+}
+
 /**
  * Runs every configured check in GateCheck order; a failure does not stop later checks, so the
  * Engineer gets every problem in one validation-fix round.
@@ -105,6 +130,10 @@ export function runCommand(
 export function runChecks(o: {
   worktree: string;
   checks: OmiConfig["checks"];
+  /** Where the contract is; unset means omi-architecture.yaml. */
+  architecture?: OmiConfig["architecture"];
+  /** Plugin root holding bin/omi; default: this plugin. */
+  pluginRoot?: string;
   logDir: string;
   /** Already filtered by `commandEnv`; default filters the host's env with the default key name. */
   env?: NodeJS.ProcessEnv;
@@ -114,7 +143,7 @@ export function runChecks(o: {
 } {
   mkdirSync(o.logDir, { recursive: true });
   const results = GateCheck.options.map((name): GateResult => {
-    const cmd = o.checks[name];
+    const cmd = o.checks[name] ?? (name === "architecture" ? architectureCommand(o) : undefined);
     if (!cmd) {
       return {
         name,

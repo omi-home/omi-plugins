@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
+import { RelPath } from "../architecture/domain/contract.ts";
 import { openState } from "../persistence/db.ts";
 import { getProfileRecord, listProfileRecords } from "../persistence/profiles.ts";
 import { registerSecret } from "../reporting/redact.ts";
@@ -109,6 +110,12 @@ export const OmiConfig = z.strictObject({
   setup: GateCommand.optional(),
   /** Unset checks are skipped; a repo with none configured has no deterministic gate. */
   checks: GateChecks.prefault({}),
+  /** Architecture contract of the target repo (Feature-0043 #321); checked by the gate and doctor. */
+  architecture: z
+    .strictObject({
+      contract: RelPath.default("omi-architecture.yaml"),
+    })
+    .optional(),
   context: z
     .strictObject({
       /** Context items the PO keeps (`omi context plan`): plugin/skill/MCP server names, paths. */

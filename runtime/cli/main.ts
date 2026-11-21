@@ -468,7 +468,7 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
     const { values, positionals } = parsed;
     // `text` is an alias of `human` (omi arch check --output text|json).
     if (values.output !== "human" && values.output !== "text" && values.output !== "json") {
-      throw new OmiError("USAGE_INVALID", "--output must be human or json");
+      throw new OmiError("USAGE_INVALID", "--output must be human, text or json");
     }
     command = values.help ? "help" : (positionals[0] ?? "");
     let rest = positionals.slice(1);
