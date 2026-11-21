@@ -15,6 +15,13 @@ import {
 } from "../adapters/claude/launch.ts";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import {
+  ADMIN_ORG_HINT,
+  hasAdminOrg,
+  issueTypePlan,
+  tokenScopes,
+} from "../adapters/github/issue-types.ts";
+import { sayIssueType } from "../adapters/github/project-fields.ts";
+import {
   keyEnvName,
   loadConfig,
   loadProfiles,
@@ -26,6 +33,7 @@ import {
 import { parseContext } from "../core/context-usage.ts";
 import type { Check } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
+import { issueTypeWrites } from "../core/issue-type-config.ts";
 import { keyFingerprint, loadMasterKey } from "../core/secrets.ts";
 import {
   CONFIG_FILE,
@@ -440,6 +448,58 @@ export function github(config: OmiConfig | undefined, run: GhRunner = spawnGh): 
           : `default is '${branch}', expected '${config.git.baseBranch}': PRs will not close issues`,
     },
   );
+  if (workflowModel(config) === "v2") checks.push(...issueTypeChecks(config, run));
+  return checks;
+}
+
+/**
+ * Model v2 (DevTask-0101 #310): the organization's native issue types match config/github/
+ * issue-types.yaml, and while any is missing or different the token has `admin:org`, which
+ * `omi github project apply` needs to write them.
+ */
+export function issueTypeChecks(config: OmiConfig, run: GhRunner = spawnGh): Check[] {
+  let plan: ReturnType<typeof issueTypePlan>;
+  try {
+    plan = issueTypePlan(config, run);
+  } catch (e) {
+    return [failed("issue-types", e)];
+  }
+  const writes = issueTypeWrites(plan);
+  const missing = plan.actions.filter((a) => a.kind === "create-issue-type");
+  const checks: Check[] = [];
+  if (!plan.actions.length) {
+    checks.push({
+      name: "issue-types",
+      status: "pass",
+      detail: "as in config/github/issue-types.yaml",
+    });
+  } else {
+    const detail = `${plan.actions.map(sayIssueType).join("; ")}: run \`omi github project apply\``;
+    checks.push(
+      missing.length
+        ? { name: "issue-types", status: "fail", code: "POLICY_VIOLATION", detail }
+        : { name: "issue-types", status: "warn", detail },
+    );
+  }
+  if (writes.length) {
+    const has = hasAdminOrg(tokenScopes(run));
+    checks.push(
+      has === undefined
+        ? {
+            name: "admin-org-scope",
+            status: "warn",
+            detail: `cannot read the token's scopes; creating issue types needs admin:org (\`${ADMIN_ORG_HINT}\`)`,
+          }
+        : has
+          ? { name: "admin-org-scope", status: "pass", detail: "token has admin:org" }
+          : {
+              name: "admin-org-scope",
+              status: "fail",
+              code: "GITHUB_AUTH",
+              detail: `token lacks admin:org, needed to write issue types: run \`${ADMIN_ORG_HINT}\``,
+            },
+    );
+  }
   return checks;
 }
 

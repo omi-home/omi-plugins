@@ -95,7 +95,8 @@ const MAX_DEPTH = 8; // GitHub's sub-issue nesting limit
 export interface StatusField {
   projectId: string;
   fieldId: string;
-  option: (name: ProjectStatus) => string;
+  /** Option ID of a Status name (legacy ProjectStatus or a model v2 status). */
+  option: (name: string) => string;
 }
 
 export function statusField(config: OmiConfig, run: GhRunner): StatusField {
@@ -146,7 +147,7 @@ function projectItem(config: OmiConfig, at: At, run: GhRunner) {
 }
 
 /** Sets one Project item's Status (option ID read from GitHub through `f`). */
-export const setItemStatus = (f: StatusField, itemId: string, to: ProjectStatus, run: GhRunner) =>
+export const setItemStatus = (f: StatusField, itemId: string, to: string, run: GhRunner) =>
   graphql(
     MUTATION,
     { p: f.projectId, i: itemId, f: f.fieldId, o: f.option(to) },

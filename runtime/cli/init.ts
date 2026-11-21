@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type GhRunner, spawnGh } from "../adapters/github/client.ts";
+import { issueTypeApply } from "../adapters/github/issue-types.ts";
 import {
   findOrCreateProject,
   linkProject,
@@ -29,6 +30,8 @@ export interface InitResult {
   linked: boolean;
   config: "created" | "kept";
   templates: { copied: string[]; kept: string[] };
+  /** Model v2 only: issue types written, and what is left after (needs a person). */
+  issueTypes?: { applied: string[]; manual: string[] };
 }
 
 const git = (cwd: string, ...args: string[]) => {
@@ -90,6 +93,10 @@ export function projectInit(
   } else {
     project = findOrCreateProject(owner, o.title ?? repo, run);
   }
+  // Model v2: the organization's issue types first (a personal account or a missing admin:org
+  // scope is refused before anything is linked or written); a second run writes nothing.
+  const issueTypes =
+    existing?.model === "v2" ? issueTypeApply({ github: existing }, run) : undefined;
   const linked = linkProject(owner, repo, project, run);
 
   if (!hasConfig) {
@@ -129,5 +136,21 @@ ${existsSync(join(root, "package-lock.json")) ? "setup: { run: npm ci }\n" : ""}
     linked,
     config: hasConfig ? "kept" : "created",
     templates,
+    ...(issueTypes
+      ? {
+          issueTypes: {
+            applied: issueTypes.applied.map((a) =>
+              a.kind === "create-issue-type"
+                ? `create ${a.type.name}`
+                : a.kind === "update-issue-type"
+                  ? `update ${a.name}`
+                  : a.name,
+            ),
+            manual: issueTypes.plan.actions.map((a) =>
+              a.kind === "create-issue-type" ? `create ${a.type.name}` : a.name,
+            ),
+          },
+        }
+      : {}),
   };
 }

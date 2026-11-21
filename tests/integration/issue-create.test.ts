@@ -4,11 +4,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { GhRunner } from "../../runtime/adapters/github/client.ts";
 import { readSection, sectionOf } from "../../runtime/adapters/github/context.ts";
-import { createIssue } from "../../runtime/adapters/github/issue.ts";
+import { createIssue, type IssueAt } from "../../runtime/adapters/github/issue.ts";
 import type { OmiConfig } from "../../runtime/core/config.ts";
 import type { OmiError } from "../../runtime/core/errors/errors.ts";
 
 const config = { github: { owner: "o", repo: "repo", projectNumber: 2 } } as OmiConfig;
+
+const V2_TYPES = ["Doc", "ADR", "Epic", "UserStory", "DesignTask", "DevTask", "QATask", "Bug"];
 
 interface FakeIssue {
   title: string;
@@ -24,7 +26,15 @@ interface FakeIssue {
 
 function fakeGh(
   seed: Record<string, FakeIssue>,
-  opts: { pageSize?: number; onTitle?: () => void; statusOptions?: string[] } = {},
+  opts: {
+    pageSize?: number;
+    onTitle?: () => void;
+    statusOptions?: string[];
+    /** github.model v2: native issue types, no `type:*` label. */
+    v2?: boolean;
+    /** v2: native types the organization lacks. */
+    missingTypes?: string[];
+  } = {},
 ) {
   const issues = new Map(Object.entries(seed));
   const writes: string[] = [];
@@ -32,7 +42,8 @@ function fakeGh(
   const num = (k: string) => Number(k.split("#")[1]);
   const repoOf = (k: string) => k.split("#")[0] as string;
   const byId = (id: string) => id.replace(/^I_/, "");
-  const labels = (i: FakeIssue) => ({ nodes: [{ name: `type:${i.type}` }] });
+  const labels = (i: FakeIssue) => ({ nodes: opts.v2 ? [] : [{ name: `type:${i.type}` }] });
+  const issueType = (i: FakeIssue) => (opts.v2 ? { name: i.type } : null);
   let itemSeq = 0;
   const items = (i: FakeIssue) => {
     if (!i.inProject) return { nodes: [] };
@@ -46,7 +57,9 @@ function fakeGh(
     if (!k) return null;
     const i = issues.get(k) as FakeIssue;
     const base = { number: num(k), repository: { nameWithOwner: repoOf(k) } };
-    return depth <= 0 ? base : { ...base, labels: labels(i), parent: up(i.parent, depth - 1) };
+    return depth <= 0
+      ? base
+      : { ...base, labels: labels(i), issueType: issueType(i), parent: up(i.parent, depth - 1) };
   };
   const ok = (data: unknown) => ({ status: 0, stdout: JSON.stringify({ data }), stderr: "" });
 
@@ -66,10 +79,10 @@ function fakeGh(
     if (query.includes("createIssue")) {
       const n =
         Math.max(0, ...[...issues.keys()].filter((k) => repoOf(k) === "o/repo").map(num)) + 1;
-      assert.equal(vars.label, "LABEL");
+      assert.equal(vars.label, opts.v2 ? undefined : "LABEL");
       issues.set(key("o/repo", n), {
         title: vars.title as string,
-        type: "dev-task",
+        type: opts.v2 ? (vars.type as string).replace("IT_", "") : "dev-task",
         body: vars.body,
       });
       writes.push(`create:${vars.type ?? "-"}`);
@@ -110,7 +123,14 @@ function fakeGh(
         repository: {
           id: "R",
           url: "https://github.com/o/repo",
-          issueTypes: { nodes: [{ id: "IT_TASK", name: "Task" }] },
+          issueTypes: {
+            nodes: opts.v2
+              ? V2_TYPES.filter((n) => !opts.missingTypes?.includes(n)).map((name) => ({
+                  id: `IT_${name}`,
+                  name,
+                }))
+              : [{ id: "IT_TASK", name: "Task" }],
+          },
           label: vars.label === "type:bogus" ? null : { id: "LABEL" },
         },
         repositoryOwner: { projectV2: { id: "P" } },
@@ -133,6 +153,7 @@ function fakeGh(
               number: num(k),
               title: i.title,
               state: i.state ?? "OPEN",
+              issueType: issueType(i),
               labels: labels(i),
               parent: i.parent
                 ? { number: num(i.parent), repository: { nameWithOwner: repoOf(i.parent) } }
@@ -155,6 +176,7 @@ function fakeGh(
             number: num(k),
             repository: { nameWithOwner: repoOf(k) },
             labels: labels(i),
+            issueType: issueType(i),
             projectItems: items(i),
             parent: up(i.parent, 6),
           },
@@ -382,4 +404,119 @@ test("issue section get reads one omi:section", () => {
   const gh = fakeGh({ "o/repo#1": { title: "DevTask-0001-x", type: "dev-task", body } });
   assert.equal(readSection(config, 1, "test-cases", gh.run), "- [ ] one");
   assert.throws(() => readSection(config, 1, "other", gh.run), /no section other/);
+});
+
+// --- model v2 (DevTask-0101 #310): native issue type, v2 hierarchy and title, no type:* label -----
+
+const v2config = {
+  github: { owner: "o", repo: "repo", projectNumber: 2, model: "v2" },
+} as OmiConfig;
+const v2opts = { v2: true, statusOptions: ["Draft", "Ready"] };
+const v2tree = (): Record<string, FakeIssue> => ({
+  "o/repo#1": { title: "Epic-0001-Gốc", type: "Epic", inProject: true },
+  "o/repo#2": { title: "UserStory-0004-S", type: "UserStory", parent: "o/repo#1", inProject: true },
+  "o/repo#3": { title: "DevTask-0003-Cũ", type: "DevTask", parent: "o/repo#2", inProject: true },
+  "o/repo#4": {
+    title: "DevTask-0007-Cũ hơn",
+    type: "DevTask",
+    parent: "o/repo#2",
+    inProject: true,
+  },
+});
+const DEV_BODY =
+  "## Objective\nx\n\n## Technical approach\na\n\n## Affected areas\nb\n\n## Verification\nc";
+const EPIC_BODY =
+  "## Goal\ng\n\n## Users & value\nu\n\n## Scope / Out of scope\ns\n\n## Key flows\nk\n\n## Success metrics\nm";
+const v2input = (parent: IssueAt | undefined = at(2), title = "Việc mới") => ({
+  type: "DevTask" as const,
+  title,
+  body: DEV_BODY,
+  parent,
+});
+
+test("v2: native issueTypeId, no type:* label, v2 numbering, initial status from workflow.yaml", () => {
+  const gh = fakeGh(v2tree(), v2opts);
+  const r = createIssue(v2config, v2input(), gh.run);
+  assert.equal(r.number, 5);
+  // Counted per native type: UserStory-0004 does not move DevTask numbering.
+  assert.equal(r.title, "DevTask-0008-Việc mới");
+  assert.deepEqual(r.changes, ["create", "project", "parent", "status", "title"]);
+  assert.deepEqual(gh.writes, [
+    "create:IT_DevTask", // the fake asserts that no label is sent
+    "project",
+    "parent:o/repo#2",
+    "status:Ready", // DevTask starts Ready
+    "title:DevTask-0008-Việc mới",
+  ]);
+  assert.equal(gh.issues.get("o/repo#5")?.type, "DevTask");
+});
+
+test("v2: re-run is a no-op; an Epic (no parent) starts Draft", () => {
+  const gh = fakeGh(v2tree(), v2opts);
+  createIssue(v2config, v2input(), gh.run);
+  const writes = gh.writes.length;
+  const again = createIssue(v2config, v2input(at(2), "DevTask-0008-Việc mới"), gh.run);
+  assert.equal(again.created, false);
+  assert.deepEqual(again.changes, []);
+  assert.equal(gh.writes.length, writes);
+
+  const epic = createIssue(v2config, { type: "Epic", title: "Nhóm mới", body: EPIC_BODY }, gh.run);
+  assert.equal(epic.title, "Epic-0002-Nhóm mới");
+  assert.equal(gh.issues.get(`o/repo#${epic.number}`)?.status, "Draft");
+});
+
+test("v2: parent checked against the v2 tree before any write", () => {
+  const gh = fakeGh(v2tree(), v2opts);
+  // DevTask under an Epic: the v2 tree only lets an Epic hold UserStory and Bug.
+  assert.throws(
+    () => createIssue(v2config, v2input(at(1)), gh.run),
+    (e: OmiError) => e.code === "POLICY_VIOLATION" && /cannot be a child/.test(e.message),
+  );
+  // DevTask under a leaf.
+  assert.throws(
+    () => createIssue(v2config, v2input(at(3)), gh.run),
+    (e: OmiError) => e.code === "POLICY_VIOLATION",
+  );
+  // Only Epic, Doc and ADR have no parent.
+  assert.throws(
+    () => createIssue(v2config, { ...v2input(), parent: undefined }, gh.run),
+    (e: OmiError) => e.code === "POLICY_VIOLATION" && /needs a parent/.test(e.message),
+  );
+  // An Epic never has one.
+  assert.throws(
+    () =>
+      createIssue(v2config, { type: "Epic", title: "E", body: EPIC_BODY, parent: at(1) }, gh.run),
+    (e: OmiError) => e.code === "POLICY_VIOLATION" && /cannot be a child/.test(e.message),
+  );
+  assert.deepEqual(gh.writes, []);
+});
+
+test("v2: a v2 parent without a native type is refused; legacy label is not read", () => {
+  const gh = fakeGh(
+    { ...v2tree(), "o/repo#9": { title: "Mồ côi", type: "", parent: "o/repo#1", inProject: true } },
+    v2opts,
+  );
+  assert.throws(
+    () => createIssue(v2config, v2input(at(9)), gh.run),
+    (e: OmiError) => e.code === "TICKET_INVALID" && /native issue type/.test(e.message),
+  );
+  assert.deepEqual(gh.writes, []);
+});
+
+test("v2: legacy type name, missing native type and thin body are refused before any write", () => {
+  const gh = fakeGh(v2tree(), v2opts);
+  assert.throws(
+    () => createIssue(v2config, { ...v2input(), type: "dev-task" as "DevTask" }, gh.run),
+    (e: OmiError) => e.code === "USAGE_INVALID" && /DevTask/.test(e.message),
+  );
+  const lacking = fakeGh(v2tree(), { ...v2opts, missingTypes: ["DevTask"] });
+  assert.throws(
+    () => createIssue(v2config, v2input(), lacking.run),
+    (e: OmiError) => e.code === "CONFIG_INVALID" && /omi github project apply/.test(e.message),
+  );
+  assert.throws(
+    () => createIssue(v2config, { ...v2input(), body: "## Objective\nx" }, gh.run),
+    (e: OmiError) => e.code === "TICKET_INVALID" && /Technical approach/.test(e.message),
+  );
+  assert.deepEqual([...gh.writes, ...lacking.writes], []);
 });
