@@ -92,7 +92,10 @@ Commands:
                          Read-only overview of a Milestone (default: the active one): its Issues by
                          Project Status with open PRs, local runs and leftovers, Status drift and
                          governance gaps
-  ticket validate <n>    Check Issue #n against the ticket-first gates (no changes)
+  ticket validate <n>    Check Issue #n against the ticket-first gates (no changes). github.model
+                         legacy: type:* label, issue-hierarchy.yaml, templates/github forms; v2: native
+                         issue type, issue-hierarchy-v2.yaml (Epic/Doc/ADR have no parent, others need
+                         one), title <IssueType>-<NNNN>-, sections of templates/github-v2 forms
   task start <n>         Validate Issue #n, create or reuse its run and worktree, mark it In Progress
   task status <n>        Show the local run, worktree and transitions of Issue #n
   task run <n>           Start Issue #n and drive its planned Engineer (label role:*) → checks → Code

@@ -1,0 +1,2 @@
+# Issue Forms of model v2: not installed by `omi init` until Feature-0042 #301 (legacy forms stay in templates/github).
+blank_issues_enabled: false

@@ -1,0 +1,31 @@
+# OMI Issue Form, model v2 (DevTask-0100 #309; frame: ChangeRequest-0013 §11). Required fields are
+# the sections `omi ticket validate` checks when `github.model: v2`.
+name: DesignTask
+description: Việc thiết kế UI/UX của một Story.
+title: DesignTask-NNNN-
+type: DesignTask
+body:
+  - type: textarea
+    id: screens-flow
+    attributes: { label: Screens & flow, description: Màn hình và luồng (Mermaid). }
+    validations: { required: true }
+  - type: textarea
+    id: states
+    attributes: { label: States, description: empty / loading / error / success. }
+    validations: { required: true }
+  - type: textarea
+    id: wireframe
+    attributes: { label: Wireframe / mockup, description: Ảnh upload. }
+    validations: { required: false }
+  - type: textarea
+    id: copy-text
+    attributes: { label: Copy text, description: Nội dung chữ. }
+    validations: { required: false }
+  - type: textarea
+    id: responsive-a11y
+    attributes: { label: Responsive & a11y, description: Ghi chú responsive và a11y. }
+    validations: { required: true }
+  - type: textarea
+    id: design-system-refs
+    attributes: { label: Design System refs, description: Tham chiếu Design System. }
+    validations: { required: false }

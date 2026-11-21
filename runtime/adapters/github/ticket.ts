@@ -1,15 +1,16 @@
 // Ticket lookup and ticket-first gates 1–2 (spec §8): exists, open, in the configured
 // Project, valid OMI type, terminal, open parent, acceptance criteria, no open blockers.
 import { z } from "zod";
-import type { OmiConfig } from "../../core/config.ts";
+import { type OmiConfig, workflowModel } from "../../core/config.ts";
 import {
   type Check,
-  IssueType,
+  type IssueType,
   IssueTypeV2,
   parseContract,
   type WorkflowModel,
 } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
+import { labelType, loadHierarchyV2, typeLabels } from "../../core/hierarchy.ts";
 import { type GhRunner, graphql, spawnGh } from "./client.ts";
 
 const PAGE = 50;
@@ -97,11 +98,9 @@ export function readIssueType(
     }
     return parseContract(IssueTypeV2, t.issueType.name, `issue #${t.number} issue type`);
   }
-  const types = t.labels.nodes
-    .map((l) => /^type:(.+)$/.exec(l.name)?.[1])
-    .filter((s): s is string => s !== undefined);
-  const parsed = types.length === 1 ? IssueType.safeParse(types[0]) : undefined;
-  if (!parsed?.success) {
+  const type = labelType(t.labels.nodes);
+  if (!type) {
+    const types = typeLabels(t.labels.nodes);
     throw new OmiError(
       "TICKET_INVALID",
       types.length
@@ -109,7 +108,7 @@ export function readIssueType(
         : `issue #${t.number}: missing type:<OMI type> label`,
     );
   }
-  return parsed.data;
+  return type;
 }
 
 /** Native Issue Type expected for an OMI type (ADR-0001 D6); unlisted types have none. */
@@ -156,21 +155,16 @@ export function validateTicket(t: Ticket, config: OmiConfig): Check[] {
         : fail("project", `not in ${owner} Project #${projectNumber}`, "TICKET_NOT_IN_PROJECT"),
   );
 
-  const types = t.labels.nodes
-    .map((l) => /^type:(.+)$/.exec(l.name)?.[1])
-    .filter((s): s is string => s !== undefined);
-  const type = types.length === 1 ? IssueType.safeParse(types[0]).data : undefined;
-  if (!type) {
-    checks.push(
-      fail(
-        "type",
-        types.length
-          ? `expected one valid type:<OMI type> label, got ${types.map((s) => `type:${s}`).join(", ")}`
-          : "missing type:<OMI type> label",
-      ),
-    );
-  } else {
-    const native = NATIVE_TYPE[type];
+  const model = workflowModel(config);
+  let type: IssueType | IssueTypeV2 | undefined;
+  try {
+    type = readIssueType(t, model);
+  } catch (e) {
+    const err = e instanceof OmiError ? e : new OmiError("INTERNAL", (e as Error).message);
+    checks.push(fail("type", err.message, err.code));
+  }
+  if (type) {
+    const native = model === "legacy" ? NATIVE_TYPE[type as IssueType] : undefined;
     checks.push(
       !native || t.issueType?.name === native
         ? pass("type", type)
@@ -181,13 +175,18 @@ export function validateTicket(t: Ticket, config: OmiConfig): Check[] {
     );
   }
 
+  // v2: only the leaf types (no children by the tree) must be terminal; Epic and UserStory
+  // are containers.
+  const leaf = model === "legacy" || (type !== undefined && !(type in loadHierarchyV2().children));
   checks.push(
     t.subIssuesSummary.total === 0
       ? pass("terminal", "no sub-issues")
-      : fail(
-          "terminal",
-          `has ${t.subIssuesSummary.total} sub-issue(s): work happens on terminal issues`,
-        ),
+      : leaf || type === undefined
+        ? fail(
+            "terminal",
+            `has ${t.subIssuesSummary.total} sub-issue(s): work happens on terminal issues`,
+          )
+        : pass("terminal", `${type} container, ${t.subIssuesSummary.total} sub-issue(s)`),
   );
 
   checks.push(

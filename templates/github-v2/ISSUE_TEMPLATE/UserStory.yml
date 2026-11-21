@@ -1,0 +1,38 @@
+# OMI Issue Form, model v2 (DevTask-0100 #309; frame: ChangeRequest-0013 §11). Required fields are
+# the sections `omi ticket validate` checks when `github.model: v2`.
+name: UserStory
+description: Yêu cầu người dùng (FR / NFR / CR).
+title: UserStory-NNNN-
+type: UserStory
+body:
+  - type: textarea
+    id: story
+    attributes: { label: User story, description: "As a … I want … so that …" }
+    validations: { required: true }
+  - type: dropdown
+    id: story-type
+    attributes:
+      label: Story Type
+      description: FR, NFR hoặc CR (CR bắt buộc có Changes là #<story cũ>).
+      options: [FR, NFR, CR]
+    validations: { required: true }
+  - type: textarea
+    id: acceptance
+    attributes: { label: Acceptance Criteria, description: Given / When / Then. }
+    validations: { required: true }
+  - type: textarea
+    id: business-rules
+    attributes: { label: Business rules, description: Quy tắc nghiệp vụ. }
+    validations: { required: false }
+  - type: textarea
+    id: out-of-scope
+    attributes: { label: Out of scope, description: Ngoài phạm vi. }
+    validations: { required: false }
+  - type: textarea
+    id: changes
+    attributes: { label: Changes, description: "Chỉ CR: #<story cũ> mà CR này thay đổi." }
+    validations: { required: false }
+  - type: textarea
+    id: adr
+    attributes: { label: ADR, description: "ADR: #" }
+    validations: { required: false }
