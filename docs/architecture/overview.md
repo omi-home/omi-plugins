@@ -32,6 +32,8 @@ Luồng chính ([ADR-0002](../decisions/ADR-0002-workspace-va-profile-thuc-thi-c
 
 **OMI Monitor** ([ADR-0004](../decisions/ADR-0004-omi-monitor-hai-repo-profile-va-token-ma-hoa.md)): web app local ở repo riêng `omi-home/omi-monitor`, chỉ là giao diện. Đọc qua `omi watch --output jsonl`, ghi qua CLI `--output json`, không mở `state.sqlite`; phân phối bằng `omi web` với bản `.tar.gz` ghim trong `config/web.json`. Profile nằm trong `state.sqlite`, token mã hóa AES-256-GCM bằng master key từ biến môi trường (thay ADR-0002 D6).
 
+**Quy trình GitHub Project mới** ([ADR-0005](../decisions/ADR-0005-quy-trinh-github-project-moi.md), Milestone-0013 #295): 8 issue type native thay label `type:*` (thay ADR-0001 D6); 10 status với state machine khai báo trong `workflow.yaml` (`by: po|coordinator|auto`) và `omi sync` đối soát tới fixpoint (thay phần status của ADR-0001 D7); 5 role agent, reviewer làm việc trên PR và CLI đăng PR review; Coordinator chịu trách nhiệm BA/Architect/DevOps, việc nặng vẫn chạy agent ẩn qua `omi task analyze` (làm rõ ADR-0003 D2); chỉ hỗ trợ organization. Các mục trên về role/agent và status mô tả bộ cũ cho tới khi Feature-0039–0042 hoàn tất.
+
 ## Hợp đồng thư mục gốc
 
 Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc mới cần ADR và cập nhật `ALLOWED_ROOT_DIRS` trong [tests/unit/directory-contract.test.ts](../../tests/unit/directory-contract.test.ts) — test này chặn mọi thư mục ngoài danh sách.
