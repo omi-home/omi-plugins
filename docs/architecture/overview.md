@@ -34,6 +34,8 @@ Luồng chính ([ADR-0002](../decisions/ADR-0002-workspace-va-profile-thuc-thi-c
 
 **Quy trình GitHub Project mới** ([ADR-0005](../decisions/ADR-0005-quy-trinh-github-project-moi.md), Milestone-0013 #295): 8 issue type native thay label `type:*` (thay ADR-0001 D6); 10 status với state machine khai báo trong `workflow.yaml` (`by: po|coordinator|auto`) và `omi sync` đối soát tới fixpoint (thay phần status của ADR-0001 D7); 5 role agent, reviewer làm việc trên PR và CLI đăng PR review; Coordinator chịu trách nhiệm BA/Architect/DevOps, việc nặng vẫn chạy agent ẩn qua `omi task analyze` (làm rõ ADR-0003 D2); chỉ hỗ trợ organization. Thiết lập một repo theo mô hình này: [runbook Project v2](../runbooks/github-project-v2-setup.md). Các mục trên về role/agent và status mô tả bộ cũ cho tới khi Feature-0039–0042 hoàn tất.
 
+**Kiến trúc feature module** ([ADR-0006](../decisions/ADR-0006-kien-truc-feature-module-va-contract.md), Feature-0043 #321): runtime chia theo chức năng với 4 lớp và contract kiến trúc kiểm tự động.
+
 ## Hợp đồng thư mục gốc
 
 Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc mới cần ADR và cập nhật `ALLOWED_ROOT_DIRS` trong [tests/unit/directory-contract.test.ts](../../tests/unit/directory-contract.test.ts) — test này chặn mọi thư mục ngoài danh sách.
