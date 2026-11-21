@@ -1,0 +1,288 @@
+# Architecture contract of omi-plugins (ADR-0006, Feature-0043 #321). Declares the TARGET structure;
+# every old folder is listed under legacy with the refactor task (R*) that moves it. Each R* removes
+# its own legacy entries; the Feature ends with legacy: [].
+schemaVersion: 1
+stack:
+  languages: [typescript]
+  importParser: ts-js
+  extensions: [".ts", ".js", ".mts", ".mjs"]
+sourceRoots: [runtime]
+layers:
+  - {
+      name: domain,
+      dir: domain,
+      mayImport: [],
+      forbidPackages: ["node:child_process", "node:fs", "node:sqlite"],
+    }
+  - { name: application, dir: application, mayImport: [domain] }
+  - { name: adapters, dir: adapters, mayImport: [application, domain] }
+  - { name: cli, dir: cli, mayImport: [adapters, application, domain] }
+modules:
+  - {
+      id: shared,
+      path: runtime/shared,
+      description: "Shared kernel: contracts, errors, redact, config, plugin-paths, process, sqlite, github client",
+      shared: true,
+    }
+  - {
+      id: reporting,
+      path: runtime/reporting,
+      description: "Report rendering, outbox and GitHub comment publishing",
+    }
+  - { id: profile, path: runtime/profile, description: "Execution profiles and sealed secrets" }
+  - {
+      id: monitor,
+      path: runtime/monitor,
+      description: "Monitor protocol and schemas read by omi-monitor",
+    }
+  - {
+      id: github,
+      path: runtime/github,
+      description: "GitHub Project, repository, issue and hierarchy configuration and adapters",
+    }
+  - {
+      id: ticket,
+      path: runtime/ticket,
+      description: "Ticket-first validation of an Issue before work starts",
+      dependsOn: [github],
+    }
+  - {
+      id: handoff,
+      path: runtime/handoff,
+      description: "Session handoff comments and task packet handoff",
+      dependsOn: [github, reporting],
+    }
+  - {
+      id: context,
+      path: runtime/context,
+      description: "Context usage measurement and session settings",
+      dependsOn: [github],
+    }
+  - {
+      id: harness,
+      path: runtime/harness,
+      description: "Agent harness: launches Claude Code per role and profile",
+      dependsOn: [profile, reporting],
+    }
+  - {
+      id: task-run,
+      path: runtime/task-run,
+      description: "Task run engine: FSM, plan, slice, commit, checks, setup, worktree, repository state",
+      dependsOn: [github, ticket, harness, reporting, profile, handoff, context],
+    }
+  - {
+      id: cleanup,
+      path: runtime/cleanup,
+      description: "Safe cleanup of merged tasks, worktrees and crashed attempts",
+      dependsOn: [task-run, github, reporting],
+    }
+  - {
+      id: release,
+      path: runtime/release,
+      description: "Release gate, tagging and PR merge",
+      dependsOn: [github, task-run, reporting],
+    }
+  - {
+      id: hook,
+      path: runtime/hook,
+      description: "Coordinator and agent-pack hooks",
+      dependsOn: [workspace],
+    }
+  - {
+      id: workspace,
+      path: runtime/workspace,
+      description: "OMI workspace layout, init and migration",
+    }
+  - {
+      id: architecture,
+      path: runtime/architecture,
+      description: "Architecture contract and the omi arch check/show commands",
+    }
+entrypoints:
+  - { path: runtime/cli/main.ts, mayImport: cli }
+placement:
+  - pattern: "**/*.test.ts"
+    allowedIn: ["tests/unit/**", "tests/integration/**", "tests/contract/**", "tests/e2e/**"]
+    message: "Tests live under tests/{unit,integration,contract,e2e}/<module>/, never next to the source."
+ignore: []
+legacy:
+  # R1 shared kernel -> runtime/shared/
+  - { path: runtime/core/contracts.ts, issue: 329, reason: "R1: moves to runtime/shared/" }
+  - { path: runtime/core/errors, issue: 329, reason: "R1: moves to runtime/shared/errors/" }
+  - {
+      path: runtime/reporting/redact.ts,
+      issue: 329,
+      reason: "R1: moves to runtime/shared/redact.ts",
+    }
+  - { path: runtime/core/config.ts, issue: 329, reason: "R1: moves to runtime/shared/config.ts" }
+  - {
+      path: runtime/core/workflow-engine/supervise.ts,
+      issue: 329,
+      reason: "R1: moves to runtime/shared/process/",
+    }
+  - {
+      path: runtime/core/workflow-engine/command-env.ts,
+      issue: 329,
+      reason: "R1: moves to runtime/shared/process/",
+    }
+  - { path: runtime/persistence/db.ts, issue: 329, reason: "R1: moves to runtime/shared/sqlite/" }
+  - {
+      path: runtime/persistence/migrations.ts,
+      issue: 329,
+      reason: "R1: moves to runtime/shared/sqlite/",
+    }
+  - {
+      path: runtime/adapters/github/client.ts,
+      issue: 329,
+      reason: "R1: moves to runtime/shared/github/",
+    }
+  # R2 reporting -> runtime/reporting/
+  - {
+      path: runtime/reporting/render.ts,
+      issue: 330,
+      reason: "R2: moves into the reporting module layers",
+    }
+  - {
+      path: runtime/reporting/outbox.ts,
+      issue: 330,
+      reason: "R2: moves into the reporting module layers",
+    }
+  # R3 profile + monitor
+  - { path: runtime/core/secrets.ts, issue: 331, reason: "R3: moves to runtime/profile/" }
+  - { path: runtime/persistence/profiles.ts, issue: 331, reason: "R3: moves to runtime/profile/" }
+  - { path: runtime/cli/profile.ts, issue: 331, reason: "R3: moves to runtime/profile/cli/" }
+  - { path: runtime/cli/secret.ts, issue: 331, reason: "R3: moves to runtime/profile/cli/" }
+  - {
+      path: runtime/monitor/protocol.ts,
+      issue: 331,
+      reason: "R3: moves into the monitor module layers",
+    }
+  - {
+      path: runtime/monitor/schemas.ts,
+      issue: 331,
+      reason: "R3: moves into the monitor module layers",
+    }
+  # R4 github
+  - { path: runtime/core/project-config.ts, issue: 332, reason: "R4: moves to runtime/github/" }
+  - { path: runtime/core/repo-config.ts, issue: 332, reason: "R4: moves to runtime/github/" }
+  - { path: runtime/core/workflow-config.ts, issue: 332, reason: "R4: moves to runtime/github/" }
+  - { path: runtime/core/hierarchy.ts, issue: 332, reason: "R4: moves to runtime/github/" }
+  - { path: runtime/core/issue-forms.ts, issue: 332, reason: "R4: moves to runtime/github/" }
+  - {
+      path: runtime/core/issue-type-config.ts,
+      issue: 332,
+      reason: "R4: not in the R* table; nearest group is github",
+    }
+  - {
+      path: runtime/adapters/github/project.ts,
+      issue: 332,
+      reason: "R4: moves to runtime/github/adapters/",
+    }
+  - {
+      path: runtime/adapters/github/project-fields.ts,
+      issue: 332,
+      reason: "R4: moves to runtime/github/adapters/",
+    }
+  - {
+      path: runtime/adapters/github/board.ts,
+      issue: 332,
+      reason: "R4: moves to runtime/github/adapters/",
+    }
+  - {
+      path: runtime/adapters/github/repo.ts,
+      issue: 332,
+      reason: "R4: moves to runtime/github/adapters/",
+    }
+  - {
+      path: runtime/adapters/github/issue.ts,
+      issue: 332,
+      reason: "R4: moves to runtime/github/adapters/",
+    }
+  - {
+      path: runtime/adapters/github/issue-types.ts,
+      issue: 332,
+      reason: "R4: not in the R* table; nearest group is github",
+    }
+  - {
+      path: runtime/adapters/github/dependency.ts,
+      issue: 332,
+      reason: "R4: moves to runtime/github/adapters/",
+    }
+  # R5 ticket + handoff + context
+  - { path: runtime/adapters/github/ticket.ts, issue: 333, reason: "R5: moves to runtime/ticket/" }
+  - {
+      path: runtime/adapters/github/handoff.ts,
+      issue: 333,
+      reason: "R5: moves to runtime/handoff/",
+    }
+  - {
+      path: runtime/adapters/github/context.ts,
+      issue: 333,
+      reason: "R5: moves to runtime/handoff/",
+    }
+  - { path: runtime/core/handoff, issue: 333, reason: "R5: moves to runtime/handoff/" }
+  - { path: runtime/core/context-usage.ts, issue: 333, reason: "R5: moves to runtime/context/" }
+  - { path: runtime/core/context-settings.ts, issue: 333, reason: "R5: moves to runtime/context/" }
+  - { path: runtime/cli/context.ts, issue: 333, reason: "R5: moves to runtime/context/cli/" }
+  # R6 task-run engine + harness
+  - {
+      path: runtime/core/workflow-engine/fsm.ts,
+      issue: 334,
+      reason: "R6: moves to runtime/task-run/",
+    }
+  - {
+      path: runtime/core/workflow-engine/plan.ts,
+      issue: 334,
+      reason: "R6: moves to runtime/task-run/",
+    }
+  - {
+      path: runtime/core/workflow-engine/slice.ts,
+      issue: 334,
+      reason: "R6: moves to runtime/task-run/",
+    }
+  - {
+      path: runtime/core/workflow-engine/commit.ts,
+      issue: 334,
+      reason: "R6: moves to runtime/task-run/",
+    }
+  - {
+      path: runtime/core/workflow-engine/checks.ts,
+      issue: 334,
+      reason: "R6: moves to runtime/task-run/",
+    }
+  - {
+      path: runtime/core/workflow-engine/setup.ts,
+      issue: 334,
+      reason: "R6: moves to runtime/task-run/",
+    }
+  - {
+      path: runtime/adapters/claude,
+      issue: 334,
+      reason: "R6: moves to the harness module (ADR-0006 D7)",
+    }
+  - { path: runtime/resources/worktree.ts, issue: 334, reason: "R6: moves to runtime/task-run/" }
+  - { path: runtime/resources/role-files.ts, issue: 334, reason: "R6: moves to runtime/task-run/" }
+  - { path: runtime/core/attempt-liveness.ts, issue: 334, reason: "R6: moves to runtime/task-run/" }
+  - {
+      path: runtime/persistence/repository.ts,
+      issue: 334,
+      reason: "R6: moves to runtime/task-run/",
+    }
+  # R7 task-run cli, cleanup, release, hook, workspace
+  - { path: runtime/cli/cleanup.ts, issue: 335, reason: "R7: moves to runtime/cleanup/cli/" }
+  - {
+      path: runtime/cli/config.ts,
+      issue: 335,
+      reason: "R7: cli not in the R* table; moves with the remaining cli",
+    }
+  - { path: runtime/cli/doctor.ts, issue: 335, reason: "R7: moves with the remaining cli" }
+  - { path: runtime/cli/hook.ts, issue: 335, reason: "R7: moves to runtime/hook/cli/" }
+  - { path: runtime/cli/init.ts, issue: 335, reason: "R7: moves with the remaining cli" }
+  - { path: runtime/cli/release.ts, issue: 335, reason: "R7: moves to runtime/release/cli/" }
+  - { path: runtime/cli/status.ts, issue: 335, reason: "R7: moves with the remaining cli" }
+  - { path: runtime/cli/task.ts, issue: 335, reason: "R7: moves to runtime/task-run/cli/" }
+  - { path: runtime/cli/workspace.ts, issue: 335, reason: "R7: moves to runtime/workspace/cli/" }
+  - { path: runtime/resources/cleanup.ts, issue: 335, reason: "R7: moves to runtime/cleanup/" }
+  - { path: runtime/adapters/github/pr.ts, issue: 335, reason: "R7: moves to runtime/release/" }
+  - { path: runtime/adapters/github/merge.ts, issue: 335, reason: "R7: moves to runtime/release/" }
+  - { path: runtime/core/workspace.ts, issue: 335, reason: "R7: moves to runtime/workspace/" }

@@ -17,6 +17,7 @@ import {
   type StatusDrift,
 } from "../adapters/github/project-fields.ts";
 import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/github/repo.ts";
+import { archCheck, archShow, humanReport, violationError } from "../architecture/cli/arch.ts";
 import { workflowModel } from "../core/config.ts";
 import {
   IssueType,
@@ -246,6 +247,14 @@ Commands:
   hook agent-pre-tool-use
                          Agent-pack hook (hook input JSON on stdin): exit 2 when an agent runs git
                          push or gh, or writes a file outside its task workspace (CLAUDE_PROJECT_DIR)
+  arch check [--repo <dir>] [--contract <relPath>] [--output text|json]
+                         Deterministic architecture check against omi-architecture.yaml: imports across
+                         module boundaries or layers, forbidden packages, files in the wrong place,
+                         files in no declared module. Exit 1 (ARCH_VIOLATION) with a fix per violation;
+                         a missing or invalid contract is CONTRACT_INVALID. No agent, no child process
+  arch show [--scope <relPath>…] [--repo <dir>] [--contract <relPath>] [--output json]
+                         Read-only: the layers, placement rules and the modules touching --scope (plus
+                         their dependsOn; all when no scope), at most 30
   version                Print the OMI version
   help                   Show this help
 
@@ -339,6 +348,8 @@ const REPO_WIDE = new Set([
   "hook pre-tool-use",
   "hook session-start",
   "hook agent-pre-tool-use",
+  "arch check",
+  "arch show",
 ]);
 
 /** Profile subcommands that take the profile name as their one positional. */
@@ -455,7 +466,8 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
       throw new OmiError("USAGE_INVALID", (e as Error).message);
     }
     const { values, positionals } = parsed;
-    if (values.output !== "human" && values.output !== "json") {
+    // `text` is an alias of `human` (omi arch check --output text|json).
+    if (values.output !== "human" && values.output !== "text" && values.output !== "json") {
       throw new OmiError("USAGE_INVALID", "--output must be human or json");
     }
     command = values.help ? "help" : (positionals[0] ?? "");
@@ -498,6 +510,7 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         "config",
         "profile",
         "secret",
+        "arch",
       ].includes(command)
     ) {
       throw new OmiError("USAGE_INVALID", `unknown ${command} action: ${rest[0] ?? "(none)"}`);
@@ -693,6 +706,20 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
             ...r.skills.map((s) => `${s.name.padEnd(30)} ${s.description}`),
           ]),
         );
+      }
+      case "arch check": {
+        const report = archCheck({ cwd, repo: values.repo, contract: values.contract });
+        if (!report.passed) throw violationError(report);
+        return ok(report, humanReport(report));
+      }
+      case "arch show": {
+        const excerpt = archShow({
+          cwd,
+          repo: values.repo,
+          contract: values.contract,
+          scope: values.scope,
+        });
+        return ok(excerpt, `${JSON.stringify(excerpt, null, 2)}\n`);
       }
       case "doctor": {
         const checks = doctor(cwd);
@@ -1084,6 +1111,8 @@ const parse = (args: string[]) =>
       milestone: { type: "string" },
       name: { type: "string" },
       repo: { type: "string" },
+      contract: { type: "string" },
+      scope: { type: "string", multiple: true },
       role: { type: "string" },
       remove: { type: "boolean" },
       bundled: { type: "boolean" },

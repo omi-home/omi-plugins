@@ -188,6 +188,14 @@ Commands:
   hook agent-pre-tool-use
                          Agent-pack hook (hook input JSON on stdin): exit 2 when an agent runs git
                          push or gh, or writes a file outside its task workspace (CLAUDE_PROJECT_DIR)
+  arch check [--repo <dir>] [--contract <relPath>] [--output text|json]
+                         Deterministic architecture check against omi-architecture.yaml: imports across
+                         module boundaries or layers, forbidden packages, files in the wrong place,
+                         files in no declared module. Exit 1 (ARCH_VIOLATION) with a fix per violation;
+                         a missing or invalid contract is CONTRACT_INVALID. No agent, no child process
+  arch show [--scope <relPath>…] [--repo <dir>] [--contract <relPath>] [--output json]
+                         Read-only: the layers, placement rules and the modules touching --scope (plus
+                         their dependsOn; all when no scope), at most 30
   version                Print the OMI version
   help                   Show this help
 
