@@ -3,15 +3,30 @@
 // transport failures retried as attempts, bad claims blocked, crash-resume without re-running.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { AgentLaunch } from "../../runtime/adapters/claude/launch.ts";
 import type { GhRunner } from "../../runtime/adapters/github/client.ts";
-import { parseConfig } from "../../runtime/core/config.ts";
+import { type CliIo, main } from "../../runtime/cli/main.ts";
+import {
+  loadProfiles,
+  parseConfig,
+  profileSecretResolver,
+  selectProfile,
+} from "../../runtime/core/config.ts";
 import type { TaskPacket } from "../../runtime/core/contracts.ts";
+import { generateMasterKey } from "../../runtime/core/secrets.ts";
 import type { DeliveryPlan, WorkflowPlan } from "../../runtime/core/workflow-engine/plan.ts";
 import {
   lastStepError,
@@ -277,9 +292,9 @@ function stubAgents(script: Script) {
   return { calls, packets, launches, runAgent };
 }
 
-function setup(script: Script = {}, plan?: WorkflowPlan) {
+function setup(script: Script = {}, plan?: WorkflowPlan, dbPath = ":memory:") {
   const { dir, base } = worktree();
-  const db = openState(":memory:");
+  const db = openState(dbPath);
   const run = repo.createRun(db, {
     id: "run",
     issue: { repository: "o/r", number: 9 },
@@ -876,6 +891,7 @@ const gatewaySelection = () => ({
   model: "claude-opus-5-5",
   effort: "high" as const,
   reason: "spread evenly",
+  secret: () => "k",
 });
 const subSelection = () => ({
   profile: {
@@ -889,6 +905,7 @@ const subSelection = () => ({
   model: "claude-sonnet-5-5",
   effort: "medium" as const,
   reason: "spread evenly",
+  secret: () => "t",
 });
 const hostEnv = { PATH: "/bin", OMI_GW: "k", OMI_SUB: "t" };
 
@@ -1001,6 +1018,138 @@ test("zeroWidthIn: untracked files and commit messages of an editing step", () =
   assert.deepEqual(zeroWidthIn(s.target, false, ["clean"]), []);
 });
 
+const CANARY_CASES = [
+  {
+    name: "subscription",
+    flags: ["--auth", "subscription", "--token-env", "OMI_T_CANARY"],
+    envVar: "CLAUDE_CODE_OAUTH_TOKEN",
+    canary: "omi-canary-7f3e9a1b2c4d5e6f",
+  },
+  {
+    name: "gateway bearer",
+    flags: [
+      "--auth",
+      "gateway",
+      "--base-url",
+      "https://gw.example.com",
+      "--scheme",
+      "bearer",
+      "--key-env",
+      "OMI_T_GW",
+    ],
+    envVar: "ANTHROPIC_AUTH_TOKEN",
+    canary: "omi-canary-8a1b2c3d4e5f6071",
+  },
+  {
+    name: "gateway x-api-key",
+    flags: [
+      "--auth",
+      "gateway",
+      "--base-url",
+      "https://gw.example.com",
+      "--scheme",
+      "x-api-key",
+      "--key-env",
+      "OMI_T_GW",
+    ],
+    envVar: "ANTHROPIC_API_KEY",
+    canary: "omi-canary-9b2c3d4e5f607182",
+  },
+] as const;
+
+for (const tc of CANARY_CASES) {
+  test(`token canary (${tc.name}): a decrypted token echoed by the agent reaches no evidence, outbox, comment, state.sqlite, stdout or envelope (AC-8)`, () => {
+    const CANARY: string = tc.canary;
+    const key = generateMasterKey();
+    const env = { OMI_SECRET_KEY: key };
+    const ws = mkdtempSync(join(tmpdir(), "omi-canary-ws-"));
+    mkdirSync(join(ws, ".omi-plugins"));
+    mkdirSync(join(ws, "repo", ".git"), { recursive: true });
+    const cli = (args: string[], stdin = "") =>
+      main([...args, "--output", "json"], ws, { env, stdin: () => stdin } satisfies CliIo);
+    const added = cli(
+      [
+        "profile",
+        "add",
+        "cc-sub",
+        ...tc.flags,
+        "--models",
+        "claude-sonnet-5-5",
+        "--efforts",
+        "medium",
+        "--token-stdin",
+      ],
+      CANARY,
+    );
+    assert.equal(added.code, 0, added.stdout);
+
+    const stateFile = join(ws, ".omi-plugins", "state.sqlite");
+    const s = setup({}, undefined, stateFile);
+    const selection = selectProfile(
+      loadProfiles(ws),
+      { profile: "cc-sub", reason: "canary" },
+      profileSecretResolver(ws, env),
+    );
+    assert.ok(selection);
+    assert.ok(!JSON.stringify(selection).includes(CANARY));
+
+    const real = s.deps.runAgent;
+    const runAgent = (l: AgentLaunch) => {
+      const token = l.env[tc.envVar] as string;
+      assert.equal(token, CANARY);
+      const lines = real(l).split("\n");
+      const i = lines.findIndex((x) => x.startsWith('{"type":"result"'));
+      const result = JSON.parse(lines[i] as string);
+      const inner = JSON.parse(result.result);
+      inner.summary = `echo ${token}`;
+      inner.nextAction = `rotate ${token}`;
+      inner.sectionUpdates = [{ section: "scratch", markdown: `leak ${token}` }];
+      if (inner.role === "code-reviewer") {
+        inner.findings = [{ id: "CR-001", severity: "info", observed: token, expected: token }];
+      }
+      result.result = JSON.stringify(inner);
+      lines[i] = JSON.stringify(result);
+      // The raw stream-json stdout carries it too.
+      lines.unshift(JSON.stringify({ type: "assistant", message: { text: token } }));
+      return lines.join("\n");
+    };
+    const ctx = runSlice({ ...s.deps, runAgent, hostEnv: { PATH: "/bin" }, selection }, s.target);
+    assert.equal(ctx.state, "PR_PENDING");
+
+    const files: string[] = [];
+    const walk = (d: string) => {
+      for (const f of readdirSync(d)) {
+        const p = join(d, f);
+        if (statSync(p).isDirectory()) walk(p);
+        else files.push(p);
+      }
+    };
+    walk(s.deps.evidenceDir);
+    assert.ok(files.length > 0);
+    for (const f of files) assert.ok(!readFileSync(f).includes(CANARY), f);
+    const rows = JSON.stringify([
+      s.db.prepare("SELECT body FROM outbox").all(),
+      s.db.prepare("SELECT result FROM step_run").all(),
+      s.db.prepare("SELECT context FROM workflow_run").all(),
+    ]);
+    assert.ok(!rows.includes(CANARY));
+    // The success path keeps no raw agent output in evidence; the scrubbed echo lives in the persisted result/report.
+    // The canary matches no static rule, so only the registered-secret path can have produced this marker.
+    assert.ok(rows.includes("[REDACTED:secret]"), "registered-secret redaction must have fired");
+    assert.ok(!JSON.stringify(s.gh.comments).includes(CANARY));
+    assert.ok(!JSON.stringify(ctx).includes(CANARY));
+    s.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    const disk = readdirSync(join(ws, ".omi-plugins"))
+      .filter((f) => f.startsWith("state.sqlite"))
+      .map((f) => readFileSync(join(ws, ".omi-plugins", f)).toString("latin1"))
+      .join("");
+    assert.ok(!disk.includes(CANARY));
+    for (const out of [cli(["profile", "list"]), main(["profile", "list"], ws, { env })]) {
+      assert.ok(!out.stdout.includes(CANARY) && !out.stderr.includes(CANARY));
+    }
+  });
+}
+
 test("no profile (#250): each role launches with its agents.routing; state and report match", () => {
   const s = setup();
   const config = parseConfig({
@@ -1072,6 +1221,7 @@ test("profile chosen (#217): every agent runs on it; state and report record the
     model: "claude-opus-5-5",
     effort: "high" as const,
     reason: "hard review",
+    secret: () => "k",
   };
   const ctx = runSlice({ ...s.deps, selection, hostEnv: { PATH: "/bin", OMI_GW: "k" } }, s.target);
   assert.equal(ctx.state, "PR_PENDING");

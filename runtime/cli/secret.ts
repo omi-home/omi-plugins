@@ -24,6 +24,7 @@ export interface SecretDeps {
   env: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   writeUserEnv?: WriteUserEnv;
+  readUserEnv?: ReadUserEnv;
   now?: () => Date;
 }
 
@@ -45,6 +46,31 @@ export const writeUserEnvWindows: WriteUserEnv = (name, value) => {
     );
   } catch {
     throw new OmiError("INTERNAL", `could not write ${name} to the user environment`);
+  }
+};
+
+/** Reads `name` from the user's persisted environment (not the process's), undefined when unset. */
+export type ReadUserEnv = (name: string) => string | undefined;
+
+/** Windows: a terminal opened before an earlier `init-key` does not see the User variable (CR-001). */
+export const readUserEnvWindows: ReadUserEnv = (name) => {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new OmiError("USAGE_INVALID", "expected an environment variable name");
+  }
+  try {
+    const out = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `[Console]::Out.Write([Environment]::GetEnvironmentVariable('${name}', 'User'))`,
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30_000 },
+    );
+    return out.trim() || undefined;
+  } catch {
+    throw new OmiError("INTERNAL", `could not read ${name} from the user environment`);
   }
 };
 
@@ -81,6 +107,12 @@ export function secretInitKey(d: SecretDeps): InitKeyResult {
     throw new OmiError(
       "USAGE_INVALID",
       `omi secret init-key writes the user environment on Windows only. Elsewhere create the key yourself and export ${keyEnv} (base64 of 32 random bytes, e.g. from \`openssl rand -base64 32\`) in your shell profile; the key is never printed here`,
+    );
+  }
+  if ((d.readUserEnv ?? readUserEnvWindows)(keyEnv)) {
+    throw new OmiError(
+      "SECRET_KEY_EXISTS",
+      `${keyEnv} is already set in the user environment (open a new terminal to see it): a new key would make stored tokens unreadable`,
     );
   }
   const key = generateMasterKey();

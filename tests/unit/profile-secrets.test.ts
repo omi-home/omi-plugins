@@ -158,6 +158,7 @@ test("secret init-key: writes the user env without printing the key; refuses whe
     workspace: ws,
     platform: "win32" as const,
     writeUserEnv: (n: string, v: string) => void writes.push([n, v]),
+    readUserEnv: () => undefined,
   };
   const r = secretInitKey({ ...deps, env: {} });
   assert.equal(writes.length, 1);
@@ -185,6 +186,45 @@ test("secret init-key: writes the user env without printing the key; refuses whe
   assert.throws(() => secretInitKey({ workspace: workspace(), env: {}, platform: "linux" }), {
     code: "USAGE_INVALID",
   });
+  // CR-001: a terminal opened before an earlier init does not see the User variable, but it exists.
+  const before = writes.length;
+  assert.throws(
+    () => secretInitKey({ ...deps, workspace: workspace(), env: {}, readUserEnv: () => KEY }),
+    { code: "SECRET_KEY_EXISTS" },
+  );
+  assert.equal(writes.length, before);
+});
+
+test("profile add/edit/import refuse the master key variable as a token variable (SEC-001)", () => {
+  const ws = workspace();
+  const env = { OMI_SECRET_KEY: KEY };
+  for (const v of ["OMI_SECRET_KEY", "OMI_SECRET_KEY_NEXT"]) {
+    const flags = SUB.map((f) => (f === "OMI_T_SUB" ? v : f));
+    assert.equal(errorCode(run(ws, ["profile", "add", "bad", ...flags], env)), "CONFIG_INVALID");
+  }
+  // A legacy file naming the master key variable is refused by import, nothing is changed.
+  const legacy = workspace();
+  writeFileSync(
+    join(legacy, ".omi-plugins", "omi.config.json"),
+    JSON.stringify({
+      profiles: [
+        {
+          name: "bad",
+          harness: "claudecode",
+          auth: { type: "subscription", tokenEnv: "OMI_SECRET_KEY" },
+          models: ["m1"],
+          efforts: ["high"],
+        },
+      ],
+    }),
+  );
+  assert.equal(errorCode(run(legacy, ["profile", "import"], env)), "CONFIG_INVALID");
+  assert.ok(existsSync(join(legacy, ".omi-plugins", "omi.config.json")));
+  okData(run(ws, ["profile", "add", "ok", ...SUB], env));
+  assert.equal(
+    errorCode(run(ws, ["profile", "edit", "ok", "--token-env", "OMI_SECRET_KEY"], env)),
+    "CONFIG_INVALID",
+  );
 });
 
 test("secret rotate-key: one transaction; a failure keeps the old key valid", () => {
@@ -406,6 +446,43 @@ test("profile import: seals tokens from the declared env, backs the file up, saf
     ),
     true,
   );
+});
+
+test("profile import: kept profiles whose declaration differs are reported, identical ones are not (CR-005)", () => {
+  const ws = workspace();
+  const legacy = join(ws, ".omi-plugins", "omi.config.json");
+  const env = { OMI_SECRET_KEY: KEY, OMI_T_SUB: CANARY };
+  const decl = {
+    name: "cc-sub",
+    harness: "claudecode",
+    auth: { type: "subscription", tokenEnv: "OMI_T_SUB" },
+    models: ["m1"],
+    efforts: ["high"],
+  };
+  writeFileSync(legacy, JSON.stringify({ profiles: [decl] }));
+  okData(run(ws, ["profile", "import"], env));
+  // Same declaration, other key order: no difference.
+  writeFileSync(
+    legacy,
+    JSON.stringify({
+      profiles: [
+        {
+          efforts: ["high"],
+          models: ["m1"],
+          auth: { tokenEnv: "OMI_T_SUB", type: "subscription" },
+          harness: "claudecode",
+          name: "cc-sub",
+        },
+      ],
+    }),
+  );
+  const same = okData(run(ws, ["profile", "import"], env));
+  assert.deepEqual([same.kept, same.differing], [["cc-sub"], []]);
+  // One field changed in the old file: reported, the database row is untouched.
+  writeFileSync(legacy, JSON.stringify({ profiles: [{ ...decl, models: ["m1", "m2"] }] }));
+  const diff = okData(run(ws, ["profile", "import"], env));
+  assert.deepEqual([diff.kept, diff.differing], [["cc-sub"], ["cc-sub"]]);
+  assert.deepEqual(okData(run(ws, ["profile", "list"], env)).profiles[0].models, ["m1"]);
 });
 
 test("profile import: a YAML profiles section moves too; the policy keys stay", () => {

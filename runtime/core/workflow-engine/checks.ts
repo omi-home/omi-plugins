@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { redact } from "../../reporting/redact.ts";
 import type { OmiConfig } from "../config.ts";
 import { type CheckOutcome, GateCheck } from "../contracts.ts";
+import { commandEnv } from "./command-env.ts";
 
 export interface GateResult {
   name: GateCheck;
@@ -63,6 +64,8 @@ export function runCommand(
   cmd: { run: string; timeoutSec: number },
   cwd: string,
   logPath: string,
+  /** Env of the command; defaults to the host's without the master key and auth variables. */
+  env: NodeJS.ProcessEnv = commandEnv(process.env),
 ): CommandResult {
   const fd = openSync(logPath, "w");
   const started = Date.now();
@@ -70,6 +73,7 @@ export function runCommand(
   try {
     r = spawnSync(process.execPath, [SUPERVISOR, String(cmd.timeoutSec * 1000), cmd.run], {
       cwd,
+      env,
       stdio: ["ignore", fd, fd], // to disk, not memory: output size never hits maxBuffer
       timeout: cmd.timeoutSec * 1000 + SUPERVISOR_GRACE_MS,
       windowsHide: true,
@@ -98,7 +102,13 @@ export function runCommand(
  * Each command runs under supervise.ts, which kills the whole process tree on timeout
  * (taskkill /T on Windows, the process group on POSIX), so no grandchild outlives its check.
  */
-export function runChecks(o: { worktree: string; checks: OmiConfig["checks"]; logDir: string }): {
+export function runChecks(o: {
+  worktree: string;
+  checks: OmiConfig["checks"];
+  logDir: string;
+  /** Already filtered by `commandEnv`; default filters the host's env with the default key name. */
+  env?: NodeJS.ProcessEnv;
+}): {
   passed: boolean;
   results: GateResult[];
 } {
@@ -116,7 +126,7 @@ export function runChecks(o: { worktree: string; checks: OmiConfig["checks"]; lo
       };
     }
     const logPath = join(o.logDir, `${name}.log`);
-    return { name, ...runCommand(cmd, o.worktree, logPath), logPath };
+    return { name, ...runCommand(cmd, o.worktree, logPath, o.env), logPath };
   });
   return { passed: results.every((r) => r.outcome === "pass" || r.outcome === "skipped"), results };
 }

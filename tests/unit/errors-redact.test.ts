@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseContract, StepResult } from "../../runtime/core/contracts.ts";
 import { isTransient, OmiError } from "../../runtime/core/errors/errors.ts";
-import { redact } from "../../runtime/reporting/redact.ts";
+import { redact, redactDeep, registerSecret } from "../../runtime/reporting/redact.ts";
 
 const cases: [string, string][] = [
   [`ghp_${"a".repeat(36)}`, "[REDACTED:github-token]"],
@@ -19,6 +19,15 @@ const cases: [string, string][] = [
 test("redact: known credential formats and user paths", () => {
   for (const [input, expected] of cases) assert.equal(redact(`x ${input} y`), `x ${expected} y`);
   assert.equal(redact("plain text, commit abcdef1"), "plain text, commit abcdef1");
+});
+
+test("registerSecret: registered values are scrubbed; values below the minimum are ignored", () => {
+  const secret = "omi-canary-unit-a1b2c3d4";
+  registerSecret(secret);
+  assert.equal(redact(`x ${secret} y`), "x [REDACTED:secret] y");
+  assert.ok(!JSON.stringify(redactDeep({ a: [`n ${secret}`] })).includes(secret));
+  registerSecret("abc12");
+  assert.equal(redact("abc12 xyz"), "abc12 xyz");
 });
 
 test("OmiError redacts message and nested details", () => {

@@ -613,6 +613,9 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
           ...(r.dryRun ? ["dry run  nothing changed"] : []),
           ...r.imported.map((n) => `imported  ${n}`),
           ...r.kept.map((n) => `kept      ${n} (already in the database)`),
+          ...r.differing.map(
+            (n) => `differs   ${n} (the file declares it differently: \`omi profile edit ${n}\`)`,
+          ),
           ...r.tokensStored.map((n) => `token     ${n} sealed`),
           ...r.tokensMissing.map(
             (n) => `no token  ${n} (its env variable is not set: \`profile set-token\`)`,

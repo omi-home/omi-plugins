@@ -72,6 +72,8 @@ export interface SliceDeps {
   runAgent?: (l: AgentLaunch) => string;
   /** Host env the agent env is filtered from (default `process.env`). */
   hostEnv?: NodeJS.ProcessEnv;
+  /** Env of the check commands, without the master key and auth variables (ARC-001). */
+  commandEnv?: NodeJS.ProcessEnv;
   /** Profile/model/effort the Coordinator chose for every agent step (#217); none = routing. */
   selection?: Selection;
   /** Skills the Coordinator chose per role (#199); every step also gets its role's defaults. */
@@ -529,15 +531,17 @@ function agentStep(
       if (next.context.state !== ctx.state) return null; // BLOCKED: attempts spent or not transient
       continue;
     }
+    // The agent may echo the decrypted token into its result: nothing unredacted reaches state.sqlite.
+    const safeResult = redactDeep(report.result);
     persistStepResult(db, {
       stepRunId: step.id,
       attempt,
-      result: report.result,
+      result: safeResult,
       actualModel: report.actualModel,
       report: { marker: report.marker, body: report.body },
     });
     publishPending(db, t.run.id, { gh: d.gh }); // a failure leaves it pending: the FSM holds
-    return report.result;
+    return safeResult;
   }
 }
 
@@ -555,6 +559,7 @@ function checksStep(
   const { passed, results } = runChecks({
     worktree: t.worktree,
     checks: d.config.checks,
+    env: d.commandEnv,
     logDir: join(d.evidenceDir, `${stepId}-r${ctx.round}-${n}`),
   });
   for (const r of results) {

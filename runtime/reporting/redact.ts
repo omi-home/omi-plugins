@@ -14,8 +14,19 @@ const RULES: [RegExp, string][] = [
   [/(\/(?:home|Users)\/)[^/\s"']+/g, "$1<user>"],
 ];
 
+/** Decrypted tokens of this process (ADR-0004 D4): scrubbed verbatim wherever they appear. */
+const known = new Set<string>();
+const MIN_SECRET_CHARS = 6;
+
+/** Adds a decrypted token to the process's redact list. Too short a value would mangle ordinary text. */
+export function registerSecret(value: string): void {
+  if (value.length >= MIN_SECRET_CHARS) known.add(value);
+}
+
 export function redact(text: string): string {
-  return RULES.reduce((s, [re, to]) => s.replace(re, to), text);
+  let out = text;
+  for (const s of known) out = out.replaceAll(s, "[REDACTED:secret]");
+  return RULES.reduce((s, [re, to]) => s.replace(re, to), out);
 }
 
 /** Deep-redacts every string inside a JSON-like value. */
