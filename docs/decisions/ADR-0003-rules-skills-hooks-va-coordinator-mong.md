@@ -1,6 +1,6 @@
 # ADR-0003 — Rules, skills, hooks và Coordinator mỏng
 
-- **Trạng thái:** Accepted. PO duyệt phạm vi qua ChangeRequest-0002 #184 (2026-11-19); điểm kỹ thuật đã kiểm chứng ở Spike-0010 #185. Thay ADR-0002 D4 và phần workflow tùy chọn của ADR-0001. Triển khai ở Feature-0026 #187, Feature-0027 #188, Feature-0028 #189, Feature-0029 #190 (Milestone-0010 #182).
+- **Trạng thái:** Accepted. PO duyệt phạm vi qua ChangeRequest-0002 #184 (2026-11-19); điểm kỹ thuật đã kiểm chứng ở Spike-0010 #185. Thay ADR-0002 D4 và phần workflow tùy chọn của ADR-0001. Triển khai ở Feature-0026 #187, Feature-0027 #188, Feature-0028 #189, Feature-0029 #190 (Milestone-0010 #182). D2 được làm rõ bởi [ADR-0005](./ADR-0005-quy-trinh-github-project-moi.md) D3: Coordinator chịu trách nhiệm BA/Architect/DevOps nhưng việc nặng (PRD, Architecture, ADR) vẫn chạy agent ẩn qua `omi task analyze`; bộ 11 role agent nhắc trong ADR này rút còn 5 role theo ADR-0005 D4.
 - **Ngày:** 2026-11-19
 - **Người quyết định:** Product Owner (qua phiên Coordinator)
 - **Nguồn:** [ChangeRequest-0002 #184](https://github.com/omi-home/omi-plugins/issues/184) (Feature-0025 #183)
