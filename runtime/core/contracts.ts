@@ -2,6 +2,7 @@
 // Every document is strict (unknown fields rejected) and versioned via `schemaVersion`.
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { ArchitectureExcerpt } from "../architecture/domain/contract.ts";
 import { type ErrorCode, OmiError } from "./errors/errors.ts";
 
 export const SCHEMA_VERSION = 1;
@@ -489,6 +490,8 @@ export const TaskPacket = z.strictObject({
   readOnlyArtifacts: z.array(relPath).max(50),
   /** Deterministic checks the runtime already ran on this worktree this round (review steps). */
   checkResults: z.array(CheckRun).max(10).optional(),
+  /** The architecture contract's part for this scope (ADR-0006); absent when the repo has none. */
+  architecture: ArchitectureExcerpt.optional(),
   /** An earlier attempt of this step was cut (quota, crash): its edits may be in the worktree. */
   priorAttemptCut: z.literal(true).optional(),
   outputSchema: z.literal(STEP_RESULT_SCHEMA),
