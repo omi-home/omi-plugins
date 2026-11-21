@@ -17,11 +17,13 @@ import { parseConfig } from "../../runtime/core/config.ts";
 import type { Role } from "../../runtime/core/contracts.ts";
 import {
   acceptStepResult,
+  acceptStepResultWithWarnings,
   buildTaskPacket,
   extractJson,
   MAX_RESULT_CHARS,
   packetPrompt,
   type TaskPacketInput,
+  TRUNCATION_SUFFIX,
 } from "../../runtime/core/handoff/packet.ts";
 
 const git = (cwd: string, ...args: string[]) =>
@@ -142,6 +144,62 @@ test("acceptStepResult: real changes, evidence and commit accepted, also from a 
   assert.equal(accepted.usage?.outputTokens, 5);
   assert.deepEqual(accepted.changedFiles, ["src/new.ts", "src/untracked.ts"]);
   assert.equal(acceptStepResult(p, `Done.\n\`\`\`json\n${raw}\n\`\`\`\n`).status, "PASSED");
+});
+
+test("acceptStepResult: an over-long free-text field is cut with a warning, not rejected (#318)", () => {
+  const { dir, base } = repo();
+  const p = buildTaskPacket(input(dir, base));
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "src", "a.ts"), "a");
+  const { result: r, warnings } = acceptStepResultWithWarnings(
+    p,
+    result({ summary: "x".repeat(2195), nextAction: "y".repeat(600) }),
+  );
+  assert.equal(r.summary.length, 2000);
+  assert.ok(r.summary.endsWith(TRUNCATION_SUFFIX));
+  assert.equal(r.nextAction?.length, 500);
+  assert.deepEqual(warnings, [
+    "summary: 2195 chars, cut to 2000",
+    "nextAction: 600 chars, cut to 500",
+  ]);
+  assert.equal(acceptStepResult(p, result({ summary: "x".repeat(2195) })).summary.length, 2000);
+  const f = { id: "BE-001", severity: "low", observed: "o".repeat(1500), expected: "e" };
+  const cutFinding = acceptStepResultWithWarnings(p, result({ findings: [f] }));
+  assert.equal(cutFinding.result.findings[0]?.observed.length, 1000);
+  assert.deepEqual(cutFinding.warnings, ["findings.0.observed: 1500 chars, cut to 1000"]);
+});
+
+test("acceptStepResult: a long summary does not excuse any other contract violation (#318)", () => {
+  const { dir, base } = repo();
+  const p = buildTaskPacket(input(dir, base));
+  const long = "x".repeat(2195);
+  assert.equal(
+    codeOf(() => acceptStepResult(p, result({ summary: long, surprise: 1 }))),
+    "CONTRACT_INVALID",
+  );
+  assert.equal(
+    codeOf(() => acceptStepResult(p, result({ summary: long, status: "DONE" }))),
+    "CONTRACT_INVALID",
+  );
+  assert.equal(
+    codeOf(() => acceptStepResult(p, result({ summary: long, round: "1" }))),
+    "CONTRACT_INVALID",
+  );
+  assert.equal(
+    codeOf(() =>
+      acceptStepResult(p, result({ summary: long, evidencePaths: new Array(101).fill("a.txt") })),
+    ),
+    "CONTRACT_INVALID",
+  );
+});
+
+test("packetPrompt: states the text length limits taken from the schema (#318)", () => {
+  const { dir, base } = repo();
+  const prompt = packetPrompt(buildTaskPacket(input(dir, base)));
+  assert.match(
+    prompt,
+    /summary <= 2000, nextAction <= 500, blockerReason <= 1000, findings\[\]\.observed <= 1000, findings\[\]\.expected <= 1000/,
+  );
 });
 
 test("acceptStepResult: changedFiles come from git, not from the agent's claim (#272)", () => {

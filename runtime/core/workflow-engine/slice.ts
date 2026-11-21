@@ -55,7 +55,7 @@ import {
   type WorkflowContext,
 } from "../contracts.ts";
 import { OmiError } from "../errors/errors.ts";
-import { acceptStepResult, buildTaskPacket, packetPrompt } from "../handoff/packet.ts";
+import { acceptStepResultWithWarnings, buildTaskPacket, packetPrompt } from "../handoff/packet.ts";
 import { runChecks } from "./checks.ts";
 import { commitWork } from "./commit.ts";
 import { policyFrom, type WorkflowEvent } from "./fsm.ts";
@@ -387,7 +387,19 @@ function agentStep(
       if (obs.isError) throw new OmiError("INTERNAL", `${spec.role} run ended in an error`);
       // Token usage is what the host observed, never what the agent claims.
       rawOutput = obs.result;
-      const { usage: _claimed, ...claimed } = acceptStepResult(packet, obs.result);
+      const accepted = acceptStepResultWithWarnings(packet, obs.result);
+      const { usage: _claimed, ...claimed } = accepted.result;
+      const warnings = accepted.warnings.map((w) => cut(`step result field cut: ${w}`, 300));
+      if (warnings.length) {
+        // The full output stays in evidence (redacted) when a field was cut.
+        mkdirSync(d.evidenceDir, { recursive: true });
+        const outFile = join(
+          d.evidenceDir,
+          `${spec.stepId}-r${ctx.round}-a${attempt}${OUTPUT_SUFFIX}`,
+        );
+        writeFileSync(outFile, redact(cut(obs.result, MAX_RAW_OUTPUT_CHARS)));
+        addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "log", path: outFile });
+      }
       rawOutput = undefined;
       let result: StepResult = obs.usage ? { ...claimed, usage: obs.usage } : claimed;
       if (spec.edits && result.status === "PASSED") {
@@ -436,6 +448,7 @@ function agentStep(
           evidencePaths: result.evidencePaths,
           findings: result.findings,
           ...(denials.length ? { permissionDenials: denials } : {}),
+          ...(warnings.length ? { warnings } : {}),
           usage: result.usage,
           durationMs,
           nextAction: result.nextAction ?? "The OMI runtime decides the next step.",
