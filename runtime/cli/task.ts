@@ -35,10 +35,14 @@ import {
 } from "../adapters/github/project.ts";
 import { fetchTicket, type Ticket, validateTicket } from "../adapters/github/ticket.ts";
 import {
+  keyEnvName,
   loadConfig,
   loadProfiles,
   type OmiConfig,
+  profileSecretResolver,
+  readLegacyProfiles,
   type Selection,
+  secretEnv,
   selectProfile,
 } from "../core/config.ts";
 import {
@@ -62,6 +66,7 @@ import {
   titleCheck,
 } from "../core/hierarchy.ts";
 import { sectionsCheck } from "../core/issue-forms.ts";
+import { commandEnv } from "../core/workflow-engine/command-env.ts";
 import { PRE_MERGE, PROJECT_STATUS, transition } from "../core/workflow-engine/fsm.ts";
 import { planWorkflow, type WorkflowPlan } from "../core/workflow-engine/plan.ts";
 import { runSetup } from "../core/workflow-engine/setup.ts";
@@ -99,11 +104,35 @@ import { applyRetention, cleanupRun } from "../resources/cleanup.ts";
 import { parseSkillChoice } from "../resources/role-files.ts";
 import { branchName, ensureTaskWorkspace, git, type Workspace } from "../resources/worktree.ts";
 
+/**
+ * Env of the repo's check/setup commands: the host's without the master key and any auth variable,
+ * including the token variables the machine's profiles name (ARC-001).
+ */
+export function commandEnvFor(workspace: string, host: NodeJS.ProcessEnv): Record<string, string> {
+  const tokenEnvs: string[] = [];
+  try {
+    tokenEnvs.push(...loadProfiles(workspace).map(secretEnv));
+  } catch {
+    // a legacy file is still declared: its variables are dropped below
+  }
+  try {
+    const legacy = readLegacyProfiles(workspace);
+    for (const p of [...(legacy.json?.profiles ?? []), ...(legacy.yaml?.profiles ?? [])]) {
+      tokenEnvs.push(secretEnv(p));
+    }
+  } catch {
+    // an unreadable legacy file declares nothing usable
+  }
+  return commandEnv(host, { keyEnv: keyEnvName(workspace), tokenEnvs });
+}
+
 export interface TaskDeps {
   cwd: string;
   gh?: GhRunner;
   /** Identifies this CLI invocation for the per-Issue start lease. */
   session?: string;
+  /** Host env (tests); default `process.env`. */
+  hostEnv?: NodeJS.ProcessEnv;
 }
 
 /** Types that own a branch + worktree. Containers and Release (develop → main) do not. */
@@ -275,6 +304,7 @@ export function taskStart(deps: TaskDeps, issue: number): StartResult {
         gitDir: git(["rev-parse", "--absolute-git-dir"], workspace.path),
         setup: config.setup,
         logDir: join(dirname(statePath(deps.cwd)), "evidence", run.id, "setup"),
+        env: commandEnvFor(omiWorkspace, deps.hostEnv ?? process.env),
       });
       if (run.state === "TICKET_VALIDATED") run = step(db, run, "WORKSPACE_CREATED");
 
@@ -440,7 +470,11 @@ export function taskRun(
   const gh = deps.gh ?? spawnGh;
   const { workspace, config } = repo(deps.cwd);
   // A bad choice is refused before anything starts.
-  const selection = selectProfile(loadProfiles(workspace), deps.pick ?? {}, deps.hostEnv);
+  const selection = selectProfile(
+    loadProfiles(workspace),
+    deps.pick ?? {},
+    profileSecretResolver(workspace, deps.hostEnv ?? process.env),
+  );
   const skills = parseSkillChoice(PLUGIN_ROOT, deps.pick?.skills, deps.pick?.reason);
   // Plan first: a bad role label or a non-delivery type fails before any worktree exists.
   const plan = planFor(config, fetchTicket(config, issue, gh), gh);
@@ -466,6 +500,7 @@ export function taskRun(
           evidenceDir,
           runAgent: deps.runAgent,
           hostEnv: deps.hostEnv,
+          commandEnv: commandEnvFor(workspace, deps.hostEnv ?? process.env),
           selection,
           skills,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),
@@ -542,7 +577,11 @@ export function taskAnalyze(
 ): RunResult {
   const gh = deps.gh ?? spawnGh;
   const { root, workspace, config } = repo(deps.cwd);
-  const selection = selectProfile(loadProfiles(workspace), deps.pick ?? {}, deps.hostEnv);
+  const selection = selectProfile(
+    loadProfiles(workspace),
+    deps.pick ?? {},
+    profileSecretResolver(workspace, deps.hostEnv ?? process.env),
+  );
   const skills = parseSkillChoice(PLUGIN_ROOT, deps.pick?.skills, deps.pick?.reason);
   const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
   const ticket = fetchTicket(config, issue, gh);
@@ -582,6 +621,7 @@ export function taskAnalyze(
           evidenceDir: evidenceOf(run.id),
           runAgent: deps.runAgent,
           hostEnv: deps.hostEnv,
+          commandEnv: commandEnvFor(workspace, deps.hostEnv ?? process.env),
           selection,
           skills,
           writeSection: (section, md) => writeSection(config, issue, section, md, gh),

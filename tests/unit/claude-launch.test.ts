@@ -11,6 +11,7 @@ import {
   observeRun,
 } from "../../runtime/adapters/claude/launch.ts";
 import type { Selection } from "../../runtime/core/config.ts";
+import { OmiError } from "../../runtime/core/errors/errors.ts";
 import { spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
 
 const win = process.platform === "win32";
@@ -197,7 +198,7 @@ test("observeRun: thinking tokens from usage.output_tokens_details (Spike-0010),
   assert.equal(think({}), undefined);
 });
 
-const profile = (auth: Selection["profile"]["auth"]): Selection => ({
+const profile = (auth: Selection["profile"]["auth"], secret?: string): Selection => ({
   profile: {
     name: "p1",
     harness: "claudecode",
@@ -209,6 +210,10 @@ const profile = (auth: Selection["profile"]["auth"]): Selection => ({
   model: "claude-opus-5-5",
   effort: "high",
   reason: "complex task",
+  secret: () => {
+    if (secret === undefined) throw new OmiError("CONFIG_INVALID", "no token");
+    return secret;
+  },
 });
 
 test("profile (#217): model/effort passed; auth env from the profile only, host auth stays out", () => {
@@ -222,7 +227,7 @@ test("profile (#217): model/effort passed; auth env from the profile only, host 
   };
   const sub = buildAgentLaunch({
     ...base,
-    selection: profile({ type: "subscription", tokenEnv: "OMI_SUB" }),
+    selection: profile({ type: "subscription", tokenEnv: "OMI_SUB" }, "sub-tok"),
   });
   assert.deepEqual(sub.args.slice(sub.args.indexOf("--model"), sub.args.indexOf("--model") + 4), [
     "--model",
@@ -237,22 +242,29 @@ test("profile (#217): model/effort passed; auth env from the profile only, host 
     CLAUDE_CONFIG_DIR: join(task, ".omi-home", "claude"),
   });
   const gw = { type: "gateway", baseUrl: "https://gw.example.com", keyEnv: "OMI_GW" } as const;
-  const key = buildAgentLaunch({ ...base, selection: profile({ ...gw, scheme: "x-api-key" }) });
+  const key = buildAgentLaunch({
+    ...base,
+    selection: profile({ ...gw, scheme: "x-api-key" }, "gw-key"),
+  });
   assert.equal(key.env.ANTHROPIC_API_KEY, "gw-key");
   assert.equal(key.env.ANTHROPIC_BASE_URL, "https://gw.example.com");
   assert.equal(key.env.CLAUDE_CODE_OAUTH_TOKEN, undefined); // the host token would not win, but stays out
-  const bearer = buildAgentLaunch({ ...base, selection: profile({ ...gw, scheme: "bearer" }) });
+  const bearer = buildAgentLaunch({
+    ...base,
+    selection: profile({ ...gw, scheme: "bearer" }, "gw-key"),
+  });
   assert.equal(bearer.env.ANTHROPIC_AUTH_TOKEN, "gw-key");
   assert.equal(bearer.env.ANTHROPIC_API_KEY, undefined); // host sk-host never passes
   assert.throws(
     () =>
       buildAgentLaunch({
         ...base,
-        hostEnv: host,
         selection: profile({ type: "subscription", tokenEnv: "OMI_SUB" }),
       }),
-    { code: "CONFIG_INVALID", message: /OMI_SUB is not set/ },
+    { code: "CONFIG_INVALID", message: /no token/ },
   );
+  // The host's own copy of the token variable is not the source any more.
+  assert.ok(!("OMI_SUB" in sub.env));
   // No selection: unchanged (no --model, host token inherited).
   assert.ok(!buildAgentLaunch(base).args.includes("--model"));
 });

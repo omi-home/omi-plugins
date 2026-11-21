@@ -15,15 +15,17 @@ import {
 } from "../adapters/claude/launch.ts";
 import { type GhRunner, graphql, spawnGh } from "../adapters/github/client.ts";
 import {
+  keyEnvName,
   loadConfig,
   loadProfiles,
   type OmiConfig,
+  profileSecretResolver,
   type Selection,
-  secretEnv,
 } from "../core/config.ts";
 import { parseContext } from "../core/context-usage.ts";
 import type { Check } from "../core/contracts.ts";
 import { OmiError } from "../core/errors/errors.ts";
+import { keyFingerprint, loadMasterKey } from "../core/secrets.ts";
 import {
   CONFIG_FILE,
   locate,
@@ -468,27 +470,58 @@ export function profilesCheck(workspace: string, env: NodeJS.ProcessEnv = proces
       },
     ];
   }
-  return active.flatMap((p): Check[] => [
-    env[secretEnv(p)]
-      ? { name: `profile ${p.name}`, status: "pass", detail: `${p.auth.type}, ${secretEnv(p)} set` }
-      : {
-          name: `profile ${p.name}`,
-          status: "fail",
-          detail: `${secretEnv(p)} is not set (or mark the profile disabled)`,
-        },
-    ...(p.auth.type === "gateway"
-      ? [
-          {
-            name: `gateway ${p.name}`,
-            status: "warn" as const,
-            detail: [
-              `${p.auth.baseUrl} is a third party: it sees the code and prompts and may alter model output (zero-width watermark, Spike-0009); OMI blocks zero-width characters`,
-              ...(p.auth.scheme === "bearer" ? ["scheme bearer is not verified yet"] : []),
-            ].join("; "),
-          },
-        ]
-      : []),
-  ]);
+  const keyEnv = keyEnvName(workspace);
+  let fingerprint: string | undefined;
+  const keyCheck: Check = (() => {
+    try {
+      fingerprint = keyFingerprint(loadMasterKey(env, keyEnv));
+      return {
+        name: "master key",
+        status: "pass",
+        detail: `${keyEnv} set, fingerprint ${fingerprint}`,
+      };
+    } catch (e) {
+      return {
+        name: "master key",
+        status: "fail",
+        detail: e instanceof OmiError ? e.message : "master key check crashed",
+      };
+    }
+  })();
+  const resolve = profileSecretResolver(workspace, env);
+  return [
+    keyCheck,
+    ...active.flatMap((p): Check[] => [
+      (() => {
+        try {
+          resolve(p); // decrypts: right key, untouched ciphertext; the value is never shown
+          return {
+            name: `profile ${p.name}`,
+            status: "pass" as const,
+            detail: `${p.auth.type}, token decrypts`,
+          };
+        } catch (e) {
+          return {
+            name: `profile ${p.name}`,
+            status: "fail" as const,
+            detail: `${e instanceof OmiError ? e.message : "token check crashed"} (or mark the profile disabled)`,
+          };
+        }
+      })(),
+      ...(p.auth.type === "gateway"
+        ? [
+            {
+              name: `gateway ${p.name}`,
+              status: "warn" as const,
+              detail: [
+                `${p.auth.baseUrl} is a third party: it sees the code and prompts and may alter model output (zero-width watermark, Spike-0009); OMI blocks zero-width characters`,
+                ...(p.auth.scheme === "bearer" ? ["scheme bearer is not verified yet"] : []),
+              ].join("; "),
+            },
+          ]
+        : []),
+    ]),
+  ];
 }
 
 /** One HTTP GET: status and body (0 = no response). */
@@ -547,9 +580,10 @@ export function probeProfiles(
   io: { http?: HttpGet; claude?: ClaudeRun } = {},
 ): Check[] {
   const checks: Check[] = [];
+  const resolve = profileSecretResolver(workspace, env);
   for (const p of loadProfiles(workspace).filter((x) => !x.disabled)) {
     const name = `probe ${p.name}`;
-    const secret = env[secretEnv(p)];
+    let secret: string | undefined;
     // A gateway may echo the key back in an error body: drop the known value, then the patterns.
     const fail = (detail: string) =>
       checks.push({
@@ -557,16 +591,19 @@ export function probeProfiles(
         status: "fail",
         detail: redact(secret ? detail.replaceAll(secret, "[REDACTED]") : detail),
       });
-    if (!secret) {
-      fail(`${secretEnv(p)} is not set`);
+    try {
+      secret = resolve(p);
+    } catch (e) {
+      fail(e instanceof OmiError ? e.message : "token cannot be read");
       continue;
     }
+    const token = secret;
     const [model, effort] = [p.models[0] as string, p.efforts[0] as Selection["effort"]];
     if (p.auth.type === "gateway") {
       const auth: Record<string, string> =
         p.auth.scheme === "x-api-key"
-          ? { "x-api-key": secret }
-          : { authorization: `Bearer ${secret}` };
+          ? { "x-api-key": token }
+          : { authorization: `Bearer ${token}` };
       const r = (io.http ?? httpGet)(`${p.auth.baseUrl.replace(/\/+$/, "")}/v1/models`, {
         ...auth,
         "anthropic-version": "2023-06-01",
@@ -592,7 +629,13 @@ export function probeProfiles(
     }
     const dir = mkdtempSync(join(tmpdir(), "omi-probe-"));
     try {
-      const sel: Selection = { profile: p, model, effort, reason: "omi doctor --probe" };
+      const sel: Selection = {
+        profile: p,
+        model,
+        effort,
+        reason: "omi doctor --probe",
+        secret: () => token,
+      };
       const out = (io.claude ?? claudeRun)({
         args: [
           "-p",

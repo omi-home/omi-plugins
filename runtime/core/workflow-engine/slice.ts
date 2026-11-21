@@ -72,6 +72,8 @@ export interface SliceDeps {
   runAgent?: (l: AgentLaunch) => string;
   /** Host env the agent env is filtered from (default `process.env`). */
   hostEnv?: NodeJS.ProcessEnv;
+  /** Env of the check commands, without the master key and auth variables (ARC-001). */
+  commandEnv?: NodeJS.ProcessEnv;
   /** Profile/model/effort the Coordinator chose for every agent step (#217); none = routing. */
   selection?: Selection;
   /** Skills the Coordinator chose per role (#199); every step also gets its role's defaults. */
@@ -555,6 +557,7 @@ function checksStep(
   const { passed, results } = runChecks({
     worktree: t.worktree,
     checks: d.config.checks,
+    env: d.commandEnv,
     logDir: join(d.evidenceDir, `${stepId}-r${ctx.round}-${n}`),
   });
   for (const r of results) {

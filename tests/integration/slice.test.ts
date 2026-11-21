@@ -876,6 +876,7 @@ const gatewaySelection = () => ({
   model: "claude-opus-5-5",
   effort: "high" as const,
   reason: "spread evenly",
+  secret: () => "k",
 });
 const subSelection = () => ({
   profile: {
@@ -889,6 +890,7 @@ const subSelection = () => ({
   model: "claude-sonnet-5-5",
   effort: "medium" as const,
   reason: "spread evenly",
+  secret: () => "t",
 });
 const hostEnv = { PATH: "/bin", OMI_GW: "k", OMI_SUB: "t" };
 
@@ -1072,6 +1074,7 @@ test("profile chosen (#217): every agent runs on it; state and report record the
     model: "claude-opus-5-5",
     effort: "high" as const,
     reason: "hard review",
+    secret: () => "k",
   };
   const ctx = runSlice({ ...s.deps, selection, hostEnv: { PATH: "/bin", OMI_GW: "k" } }, s.target);
   assert.equal(ctx.state, "PR_PENDING");

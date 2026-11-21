@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 import { openState } from "../persistence/db.ts";
-import { listProfileRecords } from "../persistence/profiles.ts";
+import { getProfileRecord, listProfileRecords } from "../persistence/profiles.ts";
+import { registerSecret } from "../reporting/redact.ts";
 import {
   GateCheck,
   LegacyProfilesFile,
@@ -16,7 +17,7 @@ import {
   Role,
 } from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
-import { DEFAULT_KEY_ENV } from "./secrets.ts";
+import { DEFAULT_KEY_ENV, decryptSecret, loadMasterKey } from "./secrets.ts";
 import { CONFIG_FILE, PROFILES_FILE, STATE_FILE } from "./workspace.ts";
 
 const ModelAlias = z.enum(["sonnet", "opus", "haiku"]);
@@ -285,18 +286,56 @@ export interface Selection {
   model: string;
   effort: ProfileEffort;
   reason: string;
+  /**
+   * The decrypted token, only on call (ADR-0004 D4). A function, so JSON.stringify of a selection
+   * (packet, state, log) can never carry it; each call registers the value with `redact`.
+   */
+  secret: () => string;
+}
+
+/** Decrypts a profile's token (throws an OmiError when it cannot). */
+export type SecretResolver = (profile: Profile) => string;
+
+/**
+ * Resolver over `state.sqlite`: master key from the variable `secrets.keyEnv` names in `env`, the
+ * sealed token of the profile from the database. The plaintext is registered with `redact`.
+ */
+export function profileSecretResolver(workspace: string, env: NodeJS.ProcessEnv): SecretResolver {
+  return (profile) => {
+    const file = existingState(workspace);
+    const db = file ? openState(file) : undefined;
+    let sealed: ReturnType<typeof getProfileRecord>;
+    try {
+      sealed = db ? getProfileRecord(db, profile.name) : undefined;
+    } finally {
+      db?.close();
+    }
+    if (!sealed?.sealed) {
+      throw new OmiError(
+        "CONFIG_INVALID",
+        `profile ${profile.name} has no token: pipe it to \`omi profile set-token ${profile.name}\``,
+      );
+    }
+    const plain = decryptSecret(
+      loadMasterKey(env, keyEnvName(workspace)),
+      profile.name,
+      sealed.sealed,
+    );
+    registerSecret(plain);
+    return plain;
+  };
 }
 
 /**
  * Validates `--profile/--model/--effort/--reason` against the machine's profiles (#217). No
  * `--profile` means no selection: steps keep the `agents.routing` defaults. Model and effort
  * default to the first the profile lists; the reason is required and recorded; the profile's
- * secret must be set, so nothing starts that cannot authenticate.
+ * token must decrypt now, so nothing starts that cannot authenticate.
  */
 export function selectProfile(
   profiles: Profile[],
   o: { profile?: string; model?: string; effort?: string; reason?: string },
-  env: NodeJS.ProcessEnv = process.env,
+  resolveSecret?: SecretResolver,
 ): Selection | undefined {
   if (o.profile === undefined) {
     if (o.model !== undefined || o.effort !== undefined) {
@@ -312,12 +351,8 @@ export function selectProfile(
     );
   }
   if (profile.disabled) throw new OmiError("USAGE_INVALID", `profile ${profile.name} is disabled`);
-  if (!env[secretEnv(profile)]) {
-    throw new OmiError(
-      "CONFIG_INVALID",
-      `profile ${profile.name}: ${secretEnv(profile)} is not set`,
-    );
-  }
+  if (!resolveSecret) throw new OmiError("INTERNAL", "no secret resolver for a profile selection");
+  resolveSecret(profile); // fails early: missing key, no token, wrong key
   const model = o.model ?? profile.models[0];
   if (!model || !profile.models.includes(model)) {
     throw new OmiError(
@@ -335,5 +370,5 @@ export function selectProfile(
   }
   const reason = o.reason?.trim();
   if (!reason) throw new OmiError("USAGE_INVALID", "--reason is required with --profile");
-  return { profile, model, effort: parsed.data, reason };
+  return { profile, model, effort: parsed.data, reason, secret: () => resolveSecret(profile) };
 }

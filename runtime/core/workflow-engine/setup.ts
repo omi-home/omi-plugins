@@ -58,6 +58,8 @@ export function runSetup(o: {
   gitDir: string;
   setup: OmiConfig["setup"];
   logDir: string;
+  /** Already filtered by `commandEnv`; default filters the host's env with the default key name. */
+  env?: NodeJS.ProcessEnv;
 }): SetupResult {
   if (!o.setup) return { status: "skipped", durationMs: 0, logPath: null };
   const fingerprint = setupFingerprint(o.worktree, o.setup.run);
@@ -66,7 +68,7 @@ export function runSetup(o: {
 
   mkdirSync(o.logDir, { recursive: true });
   const logPath = join(o.logDir, "setup.log");
-  const r = runCommand(o.setup, o.worktree, logPath);
+  const r = runCommand(o.setup, o.worktree, logPath, o.env);
   // Evidence is kept redacted: rewrite the raw log (bounded) before anything else reads it.
   const raw = readFileSync(logPath);
   writeFileSync(logPath, redact(raw.subarray(-MAX_LOG_BYTES).toString("utf8")));

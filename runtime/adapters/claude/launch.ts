@@ -3,7 +3,7 @@
 // a fresh CLAUDE_CONFIG_DIR per run and an env built from an allowlist, never the host's env.
 import { spawnSync } from "node:child_process";
 import { isAbsolute, join, relative } from "node:path";
-import { type Selection, secretEnv } from "../../core/config.ts";
+import type { Selection } from "../../core/config.ts";
 import type { Harness, QuotaSignal, Role, TokenUsage } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 
@@ -122,11 +122,8 @@ export function agentEnv(host: NodeJS.ProcessEnv): Record<string, string> {
  * under the one name Claude Code reads for that auth; the host's own auth variables never pass
  * (`ANTHROPIC_API_KEY` would win over an OAuth token, Spike-0009 Q3).
  */
-export function profileEnv(sel: Selection, host: NodeJS.ProcessEnv): Record<string, string> {
-  const name = secretEnv(sel.profile);
-  const secret = host[name];
-  if (!secret)
-    throw new OmiError("CONFIG_INVALID", `profile ${sel.profile.name}: ${name} is not set`);
+export function profileEnv(sel: Selection): Record<string, string> {
+  const secret = sel.secret(); // decrypted now, for the child's env only
   const a = sel.profile.auth;
   if (a.type === "subscription") return { [AUTH_ENV]: secret };
   return a.scheme === "x-api-key"
@@ -138,7 +135,7 @@ export function profileEnv(sel: Selection, host: NodeJS.ProcessEnv): Record<stri
 export function selectionEnv(sel: Selection, host: NodeJS.ProcessEnv): Record<string, string> {
   const base = agentEnv(host);
   for (const k of Object.keys(base)) if (k.toUpperCase() === AUTH_ENV) delete base[k];
-  return { ...base, ...profileEnv(sel, host) };
+  return { ...base, ...profileEnv(sel) };
 }
 
 export function buildAgentLaunch(o: {

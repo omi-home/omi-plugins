@@ -91,6 +91,18 @@ function readToken(d: ProfileDeps): string {
 
 const masterKey = (d: ProfileDeps) => loadMasterKey(d.env, keyEnvName(d.workspace));
 
+/** A profile's token variable must not be the master key variable (or its `_NEXT`): SEC-001. */
+function assertNotMasterKeyVar(d: ProfileDeps, p: Profile): void {
+  const keyEnv = keyEnvName(d.workspace).toUpperCase();
+  const name = secretEnv(p).toUpperCase();
+  if (name === keyEnv || name === `${keyEnv}_NEXT`) {
+    throw new OmiError(
+      "CONFIG_INVALID",
+      `profile ${p.name}: ${secretEnv(p)} is the master key variable, not a token variable`,
+    );
+  }
+}
+
 export function profileList(d: ProfileDeps): ProfileView[] {
   assertNoLegacyProfiles(d.workspace);
   if (!existsSync(join(d.workspace, STATE_FILE))) return [];
@@ -138,6 +150,7 @@ export function profileAdd(
     },
     "profile",
   );
+  assertNotMasterKeyVar(d, profile);
   let sealed: SealedSecret | null = null;
   if (withToken) sealed = encryptSecret(masterKey(d), profile.name, readToken(d));
   const now = nowIso(d);
@@ -188,6 +201,7 @@ export function profileEdit(
       throw new OmiError("USAGE_INVALID", "nothing to change: pass at least one field");
     }
     const next = parseContract(ProfileWrite, { ...current, ...edit }, "profile");
+    assertNotMasterKeyVar(d, next);
     updateProfile(db, next, nowIso(d));
     return toView(requireProfile(db, name));
   });
@@ -217,6 +231,8 @@ export interface ImportResult {
   imported: string[];
   /** Profiles already in the database (kept as they are). */
   kept: string[];
+  /** Kept profiles whose legacy declaration differs from the database: fix with `omi profile edit`. */
+  differing: string[];
   /** Profiles whose token was sealed from the env variable they declared. */
   tokensStored: string[];
   /** Profiles left without a token: their declared env variable is not set. */
@@ -243,10 +259,12 @@ export function profileImport(d: ProfileDeps, dryRun: boolean): ImportResult {
   if (new Set(names).size !== names.length) {
     throw new OmiError("CONFIG_INVALID", "duplicate profile name across the legacy files");
   }
+  for (const p of declared) assertNotMasterKeyVar(d, p);
   const result: ImportResult = {
     dryRun,
     imported: [],
     kept: [],
+    differing: [],
     tokensStored: [],
     tokensMissing: [],
     backups: [],
@@ -263,8 +281,13 @@ export function profileImport(d: ProfileDeps, dryRun: boolean): ImportResult {
     return { profile: p, exists: current !== undefined, token: value || undefined };
   });
   for (const x of plan) {
-    if (x.exists) result.kept.push(x.profile.name);
-    else result.imported.push(x.profile.name);
+    if (x.exists) {
+      result.kept.push(x.profile.name);
+      const current = byName.get(x.profile.name)?.profile;
+      if (JSON.stringify(current) !== JSON.stringify(x.profile)) {
+        result.differing.push(x.profile.name);
+      }
+    } else result.imported.push(x.profile.name);
     if (x.token) result.tokensStored.push(x.profile.name);
     else if (!byName.get(x.profile.name)?.sealed) result.tokensMissing.push(x.profile.name);
   }
