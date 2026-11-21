@@ -174,7 +174,8 @@ Commands:
                          filter and layout (updateProjectV2View); group/sort/columns, the Type field and
                          built-in workflows stay manual. \`project apply\` is an alias
   github project validate
-                         The same diff as checks (extra fields/views/issue types and Insights: warnings)
+                         The same diff as checks (extra fields/views/issue types and Insights: warnings;
+                         github.model v2: the manual steps with no API are one warning, \`manual-steps\`)
   github repo plan       Diff the repository's labels, main/develop protection and merge methods against
                          config/github/repository.yaml (github.model v2: the flag labels of
                          repository-v2.yaml). Read-only; exits 1 while anything differs
