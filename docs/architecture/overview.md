@@ -152,6 +152,7 @@ omi-plugins/
 │       ├── issue-types.yaml
 │       ├── issue-hierarchy.yaml        # allowed parent → child matrix
 │       ├── status-transitions.yaml     # Status lifecycle per type, drift in `omi github project plan`
+│       ├── workflow.yaml               # state machine v2 (ADR-0005 D2); override: key `github.workflow` of omi.config.yaml, validated when the config loads
 │       ├── views.yaml                  # views, built-in workflows, Insights (`omi github project`)
 │       └── repository.yaml             # labels, branch protection, merge methods (`omi github repo`)
 ├── schemas/
