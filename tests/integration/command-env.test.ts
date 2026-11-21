@@ -1,13 +1,16 @@
 // DevTask-0094 #283 (ARC-001): the repo's check/setup commands never see the master key or auth
 // variables; the agent gets the decrypted token in its child env only. Real processes.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { buildAgentLaunch } from "../../runtime/adapters/claude/launch.ts";
+import { main } from "../../runtime/cli/main.ts";
+import { commandEnvFor } from "../../runtime/cli/task.ts";
 import { parseConfig, type Selection } from "../../runtime/core/config.ts";
 import { Profile } from "../../runtime/core/contracts.ts";
+import { generateMasterKey } from "../../runtime/core/secrets.ts";
 import { runChecks } from "../../runtime/core/workflow-engine/checks.ts";
 import { commandEnv } from "../../runtime/core/workflow-engine/command-env.ts";
 import { runSetup } from "../../runtime/core/workflow-engine/setup.ts";
@@ -37,6 +40,42 @@ test("commandEnv drops the master key, its _NEXT, auth variables and profile tok
   // Default key name when none is configured; matching is case-insensitive (Windows).
   const dflt = commandEnv({ omi_secret_key: CANARY, KEEP_ME: "x" });
   assert.deepEqual(Object.keys(dflt), ["KEEP_ME"]);
+});
+
+test("commandEnvFor: a custom secrets.keyEnv and the DB profiles' token variables are dropped (CR-003)", () => {
+  const ws = dir();
+  mkdirSync(join(ws, ".omi-plugins"));
+  mkdirSync(join(ws, "repo", ".git"), { recursive: true });
+  writeFileSync(join(ws, ".omi-plugins", "omi.config.yaml"), "secrets:\n  keyEnv: MY_KEY\n");
+  const key = generateMasterKey();
+  const added = main(
+    [
+      "profile",
+      "add",
+      "p1",
+      "--auth",
+      "subscription",
+      "--token-env",
+      "OMI_T_SUB",
+      "--models",
+      "m1",
+      "--efforts",
+      "high",
+      "--output",
+      "json",
+    ],
+    ws,
+    { env: { MY_KEY: key } },
+  );
+  assert.equal(added.code, 0, added.stdout);
+  const env = commandEnvFor(ws, {
+    MY_KEY: key,
+    OMI_T_SUB: CANARY,
+    ANTHROPIC_API_KEY: CANARY,
+    KEEP_ME: "visible",
+    PATH: "/bin",
+  });
+  assert.deepEqual(Object.keys(env).sort(), ["KEEP_ME", "PATH"]);
 });
 
 test("checks run by default without the master key and auth variables of the host", () => {

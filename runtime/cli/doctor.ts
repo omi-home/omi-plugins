@@ -34,6 +34,7 @@ import {
   WORKSPACE_DIR,
 } from "../core/workspace.ts";
 import { openState } from "../persistence/db.ts";
+import { listProfileRecords } from "../persistence/profiles.ts";
 import { openRuns, ownedRefs } from "../persistence/repository.ts";
 import { redact } from "../reporting/redact.ts";
 import { same } from "../resources/worktree.ts";
@@ -461,8 +462,59 @@ export function profilesCheck(workspace: string, env: NodeJS.ProcessEnv = proces
     ];
   }
   const active = profiles.filter((p) => !p.disabled);
+  const keyEnv = keyEnvName(workspace);
+  // Fingerprints the sealed tokens were written with; only the fingerprint is read, never a token.
+  const sealedPrints = new Set<string>();
+  const stateFile = join(workspace, STATE_FILE);
+  if (existsSync(stateFile)) {
+    try {
+      const db = openState(stateFile);
+      try {
+        for (const r of listProfileRecords(db)) {
+          if (r.sealed) sealedPrints.add(r.sealed.keyFingerprint);
+        }
+      } finally {
+        db.close();
+      }
+    } catch {
+      // an unreadable state is reported by the state check
+    }
+  }
+  const keyCheck: Check = (() => {
+    try {
+      const fingerprint = keyFingerprint(loadMasterKey(env, keyEnv));
+      if (sealedPrints.size && !sealedPrints.has(fingerprint)) {
+        return {
+          name: "master key",
+          status: "fail" as const,
+          detail: `wrong key: ${keyEnv} (fingerprint ${fingerprint}) did not seal the stored tokens: set the right key, or re-enter the tokens with \`omi profile set-token\``,
+        };
+      }
+      if (sealedPrints.size > 1) {
+        return {
+          name: "master key",
+          status: "warn" as const,
+          detail: `${keyEnv} set, fingerprint ${fingerprint}; some stored tokens were sealed with another key: run \`omi secret rotate-key\` or re-enter them`,
+        };
+      }
+      return {
+        name: "master key",
+        status: "pass" as const,
+        detail: `${keyEnv} set, fingerprint ${fingerprint}`,
+      };
+    } catch (e) {
+      const detail = e instanceof OmiError ? e.message : "master key check crashed";
+      return {
+        name: "master key",
+        // Without any stored token nothing needs the key yet.
+        status: active.length || sealedPrints.size ? ("fail" as const) : ("warn" as const),
+        detail,
+      };
+    }
+  })();
   if (!active.length) {
     return [
+      keyCheck,
       {
         name: "profiles",
         status: "pass",
@@ -470,24 +522,6 @@ export function profilesCheck(workspace: string, env: NodeJS.ProcessEnv = proces
       },
     ];
   }
-  const keyEnv = keyEnvName(workspace);
-  let fingerprint: string | undefined;
-  const keyCheck: Check = (() => {
-    try {
-      fingerprint = keyFingerprint(loadMasterKey(env, keyEnv));
-      return {
-        name: "master key",
-        status: "pass",
-        detail: `${keyEnv} set, fingerprint ${fingerprint}`,
-      };
-    } catch (e) {
-      return {
-        name: "master key",
-        status: "fail",
-        detail: e instanceof OmiError ? e.message : "master key check crashed",
-      };
-    }
-  })();
   const resolve = profileSecretResolver(workspace, env);
   return [
     keyCheck,

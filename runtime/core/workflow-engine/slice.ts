@@ -531,15 +531,17 @@ function agentStep(
       if (next.context.state !== ctx.state) return null; // BLOCKED: attempts spent or not transient
       continue;
     }
+    // The agent may echo the decrypted token into its result: nothing unredacted reaches state.sqlite.
+    const safeResult = redactDeep(report.result);
     persistStepResult(db, {
       stepRunId: step.id,
       attempt,
-      result: report.result,
+      result: safeResult,
       actualModel: report.actualModel,
       report: { marker: report.marker, body: report.body },
     });
     publishPending(db, t.run.id, { gh: d.gh }); // a failure leaves it pending: the FSM holds
-    return report.result;
+    return safeResult;
   }
 }
 

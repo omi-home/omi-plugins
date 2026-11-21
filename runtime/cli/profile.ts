@@ -241,6 +241,21 @@ export interface ImportResult {
   backups: string[];
 }
 
+/** JSON with sorted keys: two equal declarations compare equal whatever their key order. */
+function canonical(v: unknown): string {
+  const sort = (x: unknown): unknown =>
+    Array.isArray(x)
+      ? x.map(sort)
+      : x && typeof x === "object"
+        ? Object.fromEntries(
+            Object.entries(x as Record<string, unknown>)
+              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+              .map(([k, val]) => [k, sort(val)]),
+          )
+        : x;
+  return JSON.stringify(sort(v));
+}
+
 const stamp = (d: Date) =>
   d
     .toISOString()
@@ -284,7 +299,7 @@ export function profileImport(d: ProfileDeps, dryRun: boolean): ImportResult {
     if (x.exists) {
       result.kept.push(x.profile.name);
       const current = byName.get(x.profile.name)?.profile;
-      if (JSON.stringify(current) !== JSON.stringify(x.profile)) {
+      if (canonical(current) !== canonical(x.profile)) {
         result.differing.push(x.profile.name);
       }
     } else result.imported.push(x.profile.name);

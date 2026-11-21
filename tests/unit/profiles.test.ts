@@ -185,7 +185,29 @@ test("doctor: secret env must be set for every active profile", () => {
   assert.match(none[0]?.detail ?? "", /omi secret init-key/);
   const wrong = profilesCheck(ws, { OMI_SECRET_KEY: generateMasterKey() });
   assert.match(wrong[1]?.detail ?? "", /not the one that sealed/);
-  assert.equal(profilesCheck(workspace())[0]?.status, "pass");
+  // CR-004: the key's fingerprint is compared with the stored one; never a value in the output.
+  const otherKey = generateMasterKey();
+  assert.deepEqual([wrong[0]?.name, wrong[0]?.status], ["master key", "fail"]);
+  assert.match(wrong[0]?.detail ?? "", /wrong key/);
+  assert.ok(!JSON.stringify(wrong).includes(otherKey));
+  // Reported even with no active profile: a missing key warns, a wrong key still fails.
+  const empty = profilesCheck(workspace(), {});
+  assert.deepEqual(
+    empty.map((c) => [c.name, c.status]),
+    [
+      ["master key", "warn"],
+      ["profiles", "pass"],
+    ],
+  );
+  const offOnly = seeded([{ ...sub, disabled: true }], ["cc-sub"]);
+  assert.deepEqual(
+    profilesCheck(offOnly, {}).map((c) => [c.name, c.status]),
+    [
+      ["master key", "fail"],
+      ["profiles", "pass"],
+    ],
+  );
+  assert.match(profilesCheck(offOnly, { OMI_SECRET_KEY: otherKey })[0]?.detail ?? "", /wrong key/);
   assert.equal(profilesCheck(workspace({ profiles: [{ ...sub, x: 1 }] }))[0]?.status, "fail");
 });
 
