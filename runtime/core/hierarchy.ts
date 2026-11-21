@@ -3,7 +3,13 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
-import { type Check, IssueType, type ProjectStatus, parseContract } from "./contracts.ts";
+import {
+  type Check,
+  IssueType,
+  IssueTypeV2,
+  type ProjectStatus,
+  parseContract,
+} from "./contracts.ts";
 
 export const Hierarchy = z.strictObject({
   maxDepth: z.int().min(1),
@@ -21,16 +27,40 @@ export const loadHierarchy = (): Hierarchy =>
     "issue hierarchy",
   ));
 
-/** One issue of a parent chain, nearest first; `type` undefined when its label is invalid. */
-export interface Link {
+/** Model v2 tree (`issue-hierarchy-v2.yaml`): `roots` have no parent, every other type needs one. */
+export const HierarchyV2 = z.strictObject({
+  maxDepth: z.int().min(1),
+  roots: z.array(IssueTypeV2).min(1),
+  children: z.partialRecord(IssueTypeV2, z.array(IssueTypeV2)),
+});
+export type HierarchyV2 = z.infer<typeof HierarchyV2>;
+
+let cachedV2: HierarchyV2 | undefined;
+export const loadHierarchyV2 = (): HierarchyV2 =>
+  (cachedV2 ??= parseContract(
+    HierarchyV2,
+    parse(
+      readFileSync(new URL("../../config/github/issue-hierarchy-v2.yaml", import.meta.url), "utf8"),
+    ),
+    "issue hierarchy v2",
+  ));
+
+/** One issue of a parent chain, nearest first; `type` undefined when its type is invalid. */
+export interface Link<T extends string = IssueType> {
   number: number;
-  type: IssueType | undefined;
+  type: T | undefined;
   /** `owner/repo` when the chain crosses repositories; numbers alone collide there. */
   repo?: string;
 }
 
 /** `self` (number 0: not created yet) and its ancestors (nearest parent first) against the matrix, depth and cycles. */
-export function hierarchyChecks(self: Link, ancestors: Link[], h: Hierarchy): Check[] {
+export function hierarchyChecks<T extends string = IssueType>(
+  self: Link<T>,
+  ancestors: Link<T>[],
+  h: { maxDepth: number; children: Partial<Record<T, readonly T[]>>; roots?: readonly T[] },
+  /** Whether the Issue really has a parent; `ancestors` is cut at the repository boundary. */
+  hasParent: boolean = ancestors.length > 0,
+): Check[] {
   const chain = [self, ...ancestors];
   const seen = new Set<string>();
   for (const l of chain) {
@@ -41,7 +71,7 @@ export function hierarchyChecks(self: Link, ancestors: Link[], h: Hierarchy): Ch
     seen.add(key);
   }
   for (let i = 1; i < chain.length; i++) {
-    const [child, parent] = [chain[i - 1] as Link, chain[i] as Link];
+    const [child, parent] = [chain[i - 1] as Link<T>, chain[i] as Link<T>];
     if (!child.type || !parent.type) continue; // the type gate reports bad labels
     if (!(h.children[parent.type] ?? []).includes(child.type)) {
       return [
@@ -51,6 +81,14 @@ export function hierarchyChecks(self: Link, ancestors: Link[], h: Hierarchy): Ch
         ),
       ];
     }
+  }
+  if (h.roots && self.type && !h.roots.includes(self.type) && !hasParent) {
+    return [
+      fail(
+        "hierarchy",
+        `${self.number ? `#${self.number}` : "the new Issue"} (${self.type}) needs a parent: only ${h.roots.join(", ")} have none`,
+      ),
+    ];
   }
   return chain.length > h.maxDepth
     ? [fail("hierarchy", `depth ${chain.length} exceeds ${h.maxDepth} levels`)]
@@ -68,10 +106,21 @@ export const titleType = (t: IssueType): string =>
 
 export const TITLE_PREFIX = /^([A-Za-z]+)-(\d{4})-/;
 
+/** The `<x>` of every `type:<x>` label: the one place that reads the legacy type label. */
+export const typeLabels = (labels: { name: string }[]): string[] =>
+  labels.map((l) => /^type:(.+)$/.exec(l.name)?.[1]).filter((s): s is string => s !== undefined);
+
 /** The one valid `type:*` label of an Issue; undefined when missing, several or unknown. */
 export function labelType(labels: { name: string }[]): IssueType | undefined {
-  const t = labels.map((l) => /^type:(.+)$/.exec(l.name)?.[1]).filter(Boolean);
+  const t = typeLabels(labels);
   return t.length === 1 ? IssueType.safeParse(t[0]).data : undefined;
+}
+
+/** Title check of model v2: the prefix is the native type name (`UserStory-0001-…`). */
+export function titleCheckV2(title: string, type: IssueTypeV2): Check {
+  const m = TITLE_PREFIX.exec(title);
+  if (m?.[1] === type) return { name: "title", status: "pass", detail: `${type}-${m[2]}` };
+  return fail("title", `title must start with ${type}-<NNNN>- (issue type ${type})`);
 }
 
 /** `TITLE_PREFIX` match of `title` when its prefix is `type`'s. */

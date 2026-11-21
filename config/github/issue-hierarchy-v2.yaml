@@ -1,0 +1,11 @@
+# Model v2 issue tree (DevTask-0100 #309, ChangeRequest-0013 §2.2). Read by `omi ticket validate`
+# when `github.model: v2`; `issue-hierarchy.yaml` stays the legacy tree until Feature-0042 #301.
+# `roots` have no parent; every other type must have one. A type with no entry takes no children
+# (DesignTask, DevTask, QATask, Doc, ADR are leaves). Depth counts the Issue itself:
+# Epic → UserStory → Bug → DevTask is 4.
+maxDepth: 4
+roots: [Epic, Doc, ADR]
+children:
+  Epic: [UserStory, Bug]
+  UserStory: [DesignTask, DevTask, QATask, Bug]
+  Bug: [DevTask, QATask]

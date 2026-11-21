@@ -1,0 +1,25 @@
+# OMI Issue Form, model v2 (DevTask-0100 #309; frame: ChangeRequest-0013 §11). Required fields are
+# the sections `omi ticket validate` checks when `github.model: v2`.
+name: QATask
+description: Việc kiểm thử, tiêu chí Done của Story.
+title: QATask-NNNN-
+type: QATask
+body:
+  - type: textarea
+    id: ac-coverage
+    attributes: { label: AC coverage, description: AC nào được kiểm. }
+    validations: { required: true }
+  - type: textarea
+    id: test-cases
+    attributes:
+      label: Test cases
+      description: "Bảng ID | AC | Steps | Expected | Auto (Y/N) | Regression (Y/N)."
+    validations: { required: true }
+  - type: textarea
+    id: regression-scope
+    attributes: { label: Regression scope, description: Suite tự động và khu vực manual trong Doc. }
+    validations: { required: true }
+  - type: textarea
+    id: environment
+    attributes: { label: Environment, description: Môi trường chạy. }
+    validations: { required: true }

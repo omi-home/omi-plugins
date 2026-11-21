@@ -1,0 +1,36 @@
+# OMI Issue Form, model v2 (DevTask-0100 #309; frame: ChangeRequest-0013 §11). Required fields are
+# the sections `omi ticket validate` checks when `github.model: v2`. A Doc has one form per
+# variant; the `Doc kind` section of the body picks which one applies.
+name: Doc - Architecture
+description: Tài liệu sống của dự án.
+title: Doc-NNNN-
+type: Doc
+body:
+  - type: input
+    id: doc-kind
+    attributes: { label: Doc kind, description: Biến thể của Doc., value: Architecture }
+    validations: { required: true }
+  - type: textarea
+    id: context
+    attributes: { label: Context, description: Mermaid C4. }
+    validations: { required: true }
+  - type: textarea
+    id: components
+    attributes: { label: Components, description: Thành phần. }
+    validations: { required: true }
+  - type: textarea
+    id: data-model
+    attributes: { label: Data model, description: Mermaid ER. }
+    validations: { required: true }
+  - type: textarea
+    id: integrations
+    attributes: { label: Integrations, description: Tích hợp. }
+    validations: { required: true }
+  - type: textarea
+    id: deployment
+    attributes: { label: Deployment / Environments, description: Triển khai và môi trường. }
+    validations: { required: true }
+  - type: textarea
+    id: adr-index
+    attributes: { label: ADR index, description: Danh mục ADR. }
+    validations: { required: false }

@@ -1,0 +1,36 @@
+# OMI Issue Form, model v2 (DevTask-0100 #309; frame: ChangeRequest-0013 §11). Required fields are
+# the sections `omi ticket validate` checks when `github.model: v2`. A Doc has one form per
+# variant; the `Doc kind` section of the body picks which one applies.
+name: Doc - Vision & Scope
+description: Tài liệu sống của dự án.
+title: Doc-NNNN-
+type: Doc
+body:
+  - type: input
+    id: doc-kind
+    attributes: { label: Doc kind, description: Biến thể của Doc., value: Vision & Scope }
+    validations: { required: true }
+  - type: textarea
+    id: problem
+    attributes: { label: Problem, description: Vấn đề. }
+    validations: { required: true }
+  - type: textarea
+    id: users
+    attributes: { label: Target users / Personas, description: Người dùng mục tiêu. }
+    validations: { required: true }
+  - type: textarea
+    id: goals
+    attributes: { label: Goals & Success metrics, description: Mục tiêu và thước đo. }
+    validations: { required: true }
+  - type: textarea
+    id: scope
+    attributes: { label: In scope / Out of scope, description: Phạm vi. }
+    validations: { required: true }
+  - type: textarea
+    id: constraints
+    attributes: { label: Constraints, description: Ràng buộc. }
+    validations: { required: false }
+  - type: textarea
+    id: open-questions
+    attributes: { label: Open questions, description: Câu hỏi mở. }
+    validations: { required: false }

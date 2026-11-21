@@ -1,0 +1,39 @@
+# OMI Issue Form, model v2 (DevTask-0100 #309; frame: ChangeRequest-0013 §11). Required fields are
+# the sections `omi ticket validate` checks when `github.model: v2`.
+name: Epic
+description: PRD của một nhóm tính năng; đơn vị của Roadmap.
+title: Epic-NNNN-
+type: Epic
+body:
+  - type: textarea
+    id: goal
+    attributes: { label: Goal, description: Mục tiêu của nhóm tính năng. }
+    validations: { required: true }
+  - type: textarea
+    id: users-value
+    attributes: { label: Users & value, description: Ai dùng và giá trị mang lại. }
+    validations: { required: true }
+  - type: textarea
+    id: scope
+    attributes: { label: Scope / Out of scope, description: Trong và ngoài phạm vi. }
+    validations: { required: true }
+  - type: textarea
+    id: key-flows
+    attributes: { label: Key flows, description: Luồng chính (Mermaid). }
+    validations: { required: true }
+  - type: textarea
+    id: story-list
+    attributes: { label: Story list, description: Danh sách UserStory. }
+    validations: { required: false }
+  - type: textarea
+    id: clarifications
+    attributes: { label: Clarifications, description: Hỏi đáp với PO. }
+    validations: { required: false }
+  - type: textarea
+    id: success-metrics
+    attributes: { label: Success metrics, description: Cách đo thành công. }
+    validations: { required: true }
+  - type: textarea
+    id: adr
+    attributes: { label: ADR, description: "ADR: #" }
+    validations: { required: false }

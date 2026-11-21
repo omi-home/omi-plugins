@@ -1,0 +1,31 @@
+# OMI Issue Form, model v2 (DevTask-0100 #309; frame: ChangeRequest-0013 §11). Required fields are
+# the sections `omi ticket validate` checks when `github.model: v2`.
+name: ADR
+description: Architecture Decision Record.
+title: ADR-NNNN-
+type: ADR
+body:
+  - type: textarea
+    id: status
+    attributes: { label: Status, description: Proposed / Accepted / Superseded. }
+    validations: { required: true }
+  - type: textarea
+    id: context
+    attributes: { label: Context, description: Bối cảnh. }
+    validations: { required: true }
+  - type: textarea
+    id: options
+    attributes: { label: Options considered, description: Các phương án. }
+    validations: { required: true }
+  - type: textarea
+    id: decision
+    attributes: { label: Decision, description: Quyết định. }
+    validations: { required: true }
+  - type: textarea
+    id: consequences
+    attributes: { label: Consequences, description: Hệ quả. }
+    validations: { required: true }
+  - type: textarea
+    id: related
+    attributes: { label: Related, description: "Related: Epic / Story #" }
+    validations: { required: false }

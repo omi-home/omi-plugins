@@ -1,0 +1,31 @@
+# OMI Issue Form, model v2 (DevTask-0100 #309; frame: ChangeRequest-0013 §11). Required fields are
+# the sections `omi ticket validate` checks when `github.model: v2`.
+name: DevTask
+description: Việc lập trình, một PR.
+title: DevTask-NNNN-
+type: DevTask
+body:
+  - type: textarea
+    id: objective
+    attributes: { label: Objective, description: Kết quả cần đạt. }
+    validations: { required: true }
+  - type: textarea
+    id: technical-approach
+    attributes: { label: Technical approach, description: Cách làm. }
+    validations: { required: true }
+  - type: textarea
+    id: affected-areas
+    attributes: { label: Affected areas, description: Vùng code bị ảnh hưởng. }
+    validations: { required: true }
+  - type: textarea
+    id: api-data-changes
+    attributes: { label: API / data changes, description: Thay đổi API, dữ liệu. }
+    validations: { required: false }
+  - type: textarea
+    id: verification
+    attributes: { label: Verification, description: Cách kiểm chứng. }
+    validations: { required: true }
+  - type: textarea
+    id: blocked-by
+    attributes: { label: Blocked by, description: "Blocked by #" }
+    validations: { required: false }
