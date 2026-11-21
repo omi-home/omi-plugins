@@ -589,6 +589,8 @@ export const StepComment = z
     findings: z.array(Finding).max(100).default([]),
     /** Host-observed `<tool>:<command|path>` the agent was refused (#252); shown under Evidence. */
     permissionDenials: z.array(text(300)).max(50).optional(),
+    /** Runtime notes, e.g. a text field cut to its limit; shown under Evidence. */
+    warnings: z.array(text(300)).max(20).optional(),
     /** Host-observed tokens and wall time of the step (spec §14 cost measurement). */
     usage: TokenUsage.optional(),
     durationMs: z.int().min(0).optional(),

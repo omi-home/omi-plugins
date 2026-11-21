@@ -42,7 +42,35 @@ export function buildTaskPacket(input: TaskPacketInput): TaskPacket {
 }
 
 /** JSON Schema of what the agent writes (defaults optional, `usage` filled by the runtime). */
-const RESULT_SCHEMA = JSON.stringify(z.toJSONSchema(StepResult, { io: "input" }));
+type LimitProps = Record<string, { maxLength?: number }>;
+const RESULT_JSON_SCHEMA = z.toJSONSchema(StepResult, { io: "input" }) as unknown as {
+  properties: Record<string, { maxLength?: number; items?: { properties?: LimitProps } }>;
+};
+const RESULT_SCHEMA = JSON.stringify(RESULT_JSON_SCHEMA);
+
+/** Free-text fields an over-long value is cut for, not rejected. */
+const TRUNCATABLE = ["summary", "nextAction", "blockerReason"] as const;
+const TRUNCATABLE_FINDING = ["observed", "expected"] as const;
+
+/** Length limits of the free-text fields, read from the zod schema (never written down twice). */
+export function textLimits(): string {
+  const p = RESULT_JSON_SCHEMA.properties;
+  const f: LimitProps = p.findings?.items?.properties ?? {};
+  const parts: [string, number | undefined][] = [
+    ...TRUNCATABLE.map((k): [string, number | undefined] => [k, p[k]?.maxLength]),
+    ...TRUNCATABLE_FINDING.map((k): [string, number | undefined] => [
+      `findings[].${k}`,
+      f[k]?.maxLength,
+    ]),
+  ];
+  return parts
+    .filter(([, n]) => n !== undefined)
+    .map(([k, n]) => `${k} <= ${n}`)
+    .join(", ");
+}
+
+/** Suffix appended to a field the runtime cut; the whole raw output is kept in evidence. */
+export const TRUNCATION_SUFFIX = "… [cắt bớt, bản đầy đủ trong evidence]";
 
 /** The agent's whole input: the packet plus the exact output contract. No chat history. */
 export function packetPrompt(packet: TaskPacket): string {
@@ -65,6 +93,8 @@ export function packetPrompt(packet: TaskPacket): string {
     "",
     "When done, reply with ONLY one JSON object (no prose) matching this JSON Schema:",
     RESULT_SCHEMA,
+    "",
+    `Text length limits in characters (keep each field within its limit; the runtime cuts an over-long one): ${textLimits()}.`,
     "",
     `Copy workflowRunId, issue, stepId, round, attempt and role exactly from the packet; schemaVersion is ${SCHEMA_VERSION}.`,
     "The runtime computes `changedFiles` from git itself; leave it empty and do not run git to list files. Your nextAction is advice; the OMI runtime decides what happens next.",
@@ -158,13 +188,58 @@ const inScope = (f: string, s: string) =>
  * changes stay inside the packet scope.
  */
 export function acceptStepResult(packet: TaskPacket, raw: string): StepResult {
+  return acceptStepResultWithWarnings(packet, raw).result;
+}
+
+/**
+ * When every contract error is an over-long free-text field (summary, nextAction, blockerReason,
+ * finding observed/expected), returns the object with those fields cut plus one warning each.
+ * Any other error (unknown field, wrong type, missing field, bad status) returns undefined.
+ */
+function cutOverlong(input: unknown): { fixed: unknown; warnings: string[] } | undefined {
+  const r = StepResult.safeParse(input);
+  if (r.success || !input || typeof input !== "object") return undefined;
+  const fixed = structuredClone(input) as Record<string, unknown>;
+  const warnings: string[] = [];
+  for (const i of r.error.issues) {
+    const path = i.path;
+    const topLevel = path.length === 1 && (TRUNCATABLE as readonly unknown[]).includes(path[0]);
+    const inFinding =
+      path.length === 3 &&
+      path[0] === "findings" &&
+      typeof path[1] === "number" &&
+      (TRUNCATABLE_FINDING as readonly unknown[]).includes(path[2]);
+    if (i.code !== "too_big" || i.origin !== "string" || !(topLevel || inFinding)) return undefined;
+    const max = Number(i.maximum);
+    const findings = fixed.findings;
+    const holder = (
+      topLevel ? fixed : Array.isArray(findings) ? findings[path[1] as number] : undefined
+    ) as Record<string, unknown> | undefined;
+    const key = String(path[path.length - 1]);
+    const value = holder?.[key];
+    if (!holder || typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    holder[key] = trimmed.slice(0, max - TRUNCATION_SUFFIX.length).trimEnd() + TRUNCATION_SUFFIX;
+    warnings.push(`${path.join(".")}: ${trimmed.length} chars, cut to ${max}`);
+  }
+  return { fixed, warnings };
+}
+
+/** Like `acceptStepResult`, also returning the warnings the runtime raised (fields it cut). */
+export function acceptStepResultWithWarnings(
+  packet: TaskPacket,
+  raw: string,
+): { result: StepResult; warnings: string[] } {
   if (raw.length > MAX_RESULT_CHARS) {
     throw new OmiError(
       "CONTRACT_INVALID",
       `step result: ${raw.length} chars exceeds the ${MAX_RESULT_CHARS} limit`,
     );
   }
-  const r = parseContract(StepResult, extractJson(raw), "step result");
+  const parsed = extractJson(raw);
+  const cutDown = cutOverlong(parsed);
+  const r = parseContract(StepResult, cutDown ? cutDown.fixed : parsed, "step result");
+  const warnings = cutDown?.warnings ?? [];
 
   const mismatch: string[] = (
     ["workflowRunId", "stepId", "round", "attempt", "role"] as const
@@ -241,12 +316,14 @@ export function acceptStepResult(packet: TaskPacket, raw: string): StepResult {
       issues,
     });
   }
-  if (!unchanged.length || READ_ONLY_ROLES.includes(r.role)) return { ...r, changedFiles };
+  if (!unchanged.length || READ_ONLY_ROLES.includes(r.role)) {
+    return { result: { ...r, changedFiles }, warnings };
+  }
   const note = ` [runtime: claimed but not changed since baseSha: ${unchanged.join(", ")}]`;
   const room = 2000 - note.length;
   const summary =
     room > 0
       ? r.summary.slice(0, room) + note
       : `${r.summary.slice(0, 1900)} [runtime: ${unchanged.length} claimed file(s) not changed]`;
-  return { ...r, changedFiles, summary: summary.slice(0, 2000) };
+  return { result: { ...r, changedFiles, summary: summary.slice(0, 2000) }, warnings };
 }
