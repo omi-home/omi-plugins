@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
+import { type OmiConfig, workflowModel } from "./config.ts";
 import { IssueType, parseContract } from "./contracts.ts";
 
 export const Rule = z.enum([
@@ -25,7 +26,7 @@ export type Label = z.infer<typeof Label>;
 
 const key = (s: string) => s.toLowerCase();
 
-export const RepoConfig = z
+const Governance = z
   .strictObject({
     labels: z.array(Label),
     protection: z.strictObject({ release: z.array(Rule), base: z.array(Rule) }),
@@ -35,12 +36,16 @@ export const RepoConfig = z
     (c) => new Set(c.labels.map((l) => key(l.name))).size === c.labels.length,
     "duplicate label name",
   )
-  .refine(
-    (c) => IssueType.options.every((t) => c.labels.some((l) => l.name === `type:${t}`)),
-    "every OMI type needs its type:* label",
-  )
   .refine((c) => c.merge.squash || c.merge.mergeCommit || c.merge.rebase, "no merge method");
+
+export const RepoConfig = Governance.refine(
+  (c) => IssueType.options.every((t) => c.labels.some((l) => l.name === `type:${t}`)),
+  "every OMI type needs its type:* label",
+);
 export type RepoConfig = z.infer<typeof RepoConfig>;
+
+/** Model v2 labels (repository-v2.yaml): the flags only, no `type:*` (the type is native). */
+const LabelsV2 = z.strictObject({ labels: z.array(Label).min(1) });
 
 export const RiskPolicy = z
   .strictObject({
@@ -63,6 +68,27 @@ export const loadRepoConfig = (): RepoConfig =>
     "repository config",
     "CONFIG_INVALID",
   ));
+
+let repoV2: RepoConfig | undefined;
+/** Model v2: protection and merge methods of repository.yaml, the labels of repository-v2.yaml. */
+export const loadRepoConfigV2 = (): RepoConfig =>
+  (repoV2 ??= parseContract(
+    Governance,
+    {
+      ...loadRepoConfig(),
+      ...parseContract(
+        LabelsV2,
+        read("github/repository-v2.yaml"),
+        "repository config v2",
+        "CONFIG_INVALID",
+      ),
+    },
+    "repository config (model v2)",
+    "CONFIG_INVALID",
+  ));
+/** The governance desired state of the configured model. */
+export const loadRepoConfigFor = (c: Pick<OmiConfig, "github">): RepoConfig =>
+  workflowModel(c) === "v2" ? loadRepoConfigV2() : loadRepoConfig();
 export const loadRiskPolicy = (): RiskPolicy =>
   (risk ??= parseContract(RiskPolicy, read("risk-policy.yaml"), "risk policy", "CONFIG_INVALID"));
 

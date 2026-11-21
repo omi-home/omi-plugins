@@ -1,0 +1,44 @@
+# Desired views of the Project, model v2 (DevTask-0102 #311; ChangeRequest-0013 #302 §4.3, §4.4).
+# Read instead of views.yaml when `github.model: v2`.
+#
+# What the API can do (Spike-0012 #304): create a view by name + layout and set its filter and layout
+# (updateProjectV2View: read → diff → write). It cannot set group by, sort, board columns, the fields a
+# view shows (`show`), nor toggle built-in workflows: `plan` prints those as manual steps. groupBy,
+# columns and sort are read back, so a done step stops being reported; `show` cannot be read and is
+# always printed. Views GitHub has but this file does not are reported, never deleted.
+#
+# Built-in workflows (Auto-add, Item added, Item closed, Item reopened, Pull request merged,
+# Auto-close, Auto-archive) must all be off: `omi` is the only writer. Not listed here: every
+# workflow found enabled is reported, whatever its name.
+
+views:
+  - name: "🗺 Roadmap"
+    layout: roadmap
+    filter: "type:Epic"
+    groupBy: Milestone
+    show: [Start, Target, Sub-issues progress]
+  - name: "📥 PO Inbox"
+    layout: table
+    filter: 'status:"Awaiting PO",Acceptance'
+    sort: Type asc
+  - name: "📖 Stories"
+    layout: board
+    filter: "type:UserStory"
+    columns: Status
+    show: [Story Type, Sub-issues progress]
+  - name: "📋 Work Board"
+    layout: board
+    filter: "type:DesignTask,DevTask,QATask"
+    groupBy: Type
+  - name: "🐞 Bugs"
+    layout: table
+    filter: "type:Bug is:open"
+    sort: Severity asc, Priority asc
+  - name: "📚 Knowledge"
+    layout: table
+    filter: "type:Doc,ADR"
+    groupBy: Type
+  - name: "🌳 Tree"
+    layout: table
+    filter: "no:parent-issue -type:Epic,Doc,ADR"
+    groupBy: Parent issue

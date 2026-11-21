@@ -8,7 +8,7 @@ import { OmiError } from "../../core/errors/errors.ts";
 import {
   type ActualBranch,
   type Label,
-  loadRepoConfig,
+  loadRepoConfigFor,
   planRepo,
   type RepoAction,
   type RepoConfig,
@@ -170,7 +170,7 @@ function readRepo(c: OmiConfig, run: GhRunner) {
 export function repoPlan(
   c: OmiConfig,
   run: GhRunner = spawnGh,
-  desired: RepoConfig = loadRepoConfig(),
+  desired: RepoConfig = loadRepoConfigFor(c),
 ): RepoPlan {
   return planRepo(desired, readRepo(c, run).actual, branchesOf(c));
 }
@@ -239,7 +239,7 @@ export function repoApply(
   c: OmiConfig,
   approved: unknown[],
   run: GhRunner = spawnGh,
-  desired: RepoConfig = loadRepoConfig(),
+  desired: RepoConfig = loadRepoConfigFor(c),
 ): { applied: RepoAction[]; plan: RepoPlan } {
   const { admin, protections, actual } = readRepo(c, run);
   const plan = planRepo(desired, actual, branchesOf(c));
@@ -295,7 +295,7 @@ export function repoApply(
 export function repoValidate(
   c: OmiConfig,
   run: GhRunner = spawnGh,
-  desired: RepoConfig = loadRepoConfig(),
+  desired: RepoConfig = loadRepoConfigFor(c),
 ): Check[] {
   const plan = repoPlan(c, run, desired);
   const fail = (name: string, detail: string): Check => ({

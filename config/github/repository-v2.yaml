@@ -1,0 +1,15 @@
+# Labels of model v2 (DevTask-0102 #311; ChangeRequest-0013 #302 §4.2, ADR-0005 D7). Read instead of
+# the `labels` of repository.yaml when `github.model: v2`; protection and merge methods stay those of
+# repository.yaml. Labels are flags only: the type is the native issue type, never a `type:*` label.
+# Labels GitHub has but this file does not (legacy `type:*`, `role:*`, `risk:*`…) are reported, never deleted.
+
+labels:
+  - { name: ui, color: "c5def5", description: "Cần DesignTask + UIUX review trên PR" }
+  - { name: security, color: "ee0701", description: "Cần Security review trên PR" }
+  - {
+      name: needs-po,
+      color: "d93f0b",
+      description: "Cần PO quyết định (DesignTask lớn, ADR/Doc quan trọng, câu hỏi mở)",
+    }
+  - { name: superseded, color: "cfd3d7", description: "ADR đã bị thay thế" }
+  - { name: spike, color: "fbca04", description: "DevTask điều tra (thay type Spike)" }

@@ -26,13 +26,48 @@ interface P {
   title: string;
 }
 
-function fakeGh(projects: P[] = [], linked: string[] = []) {
+interface OrgType {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string | null;
+  isEnabled: boolean;
+}
+
+function fakeGh(
+  projects: P[] = [],
+  linked: string[] = [],
+  /** Model v2: the owner (an organization or a personal account) and its issue types. */
+  owner: { typename: string; types: OrgType[] } = { typename: "Organization", types: [] },
+) {
   const calls: string[] = [];
   const out = (data: unknown) => ({ status: 0, stdout: JSON.stringify({ data }), stderr: "" });
   const arg = (args: string[], k: string) =>
     args.find((a) => a.startsWith(`${k}=`))?.slice(k.length + 1) ?? "";
-  const run: GhRunner = (args) => {
+  const run: GhRunner = (args, input) => {
+    if (args[0] === "api" && args[1] === "--include") return { status: 0, stdout: "", stderr: "" };
+    if (input?.includes("createIssueType")) {
+      const { input: i } = JSON.parse(input).variables as { input: { name: string } };
+      owner.types.push({
+        id: `IT${owner.types.length}`,
+        name: i.name,
+        description: (i as { description?: string }).description ?? null,
+        color: (i as { color?: string }).color ?? null,
+        isEnabled: true,
+      });
+      calls.push(`create-type ${i.name}`);
+      return out({});
+    }
     const q = arg(args, "query");
+    if (q.includes("issueTypes(first:25)")) {
+      return out({
+        repositoryOwner: {
+          __typename: owner.typename,
+          id: "ORG",
+          ...(owner.typename === "Organization" ? { issueTypes: { nodes: owner.types } } : {}),
+        },
+      });
+    }
     if (args[0] === "project" && args[1] === "create") {
       const title = args[args.indexOf("--title") + 1] as string;
       projects.push({ id: "PVT7", number: 7, title });
@@ -148,4 +183,52 @@ test("refused, nothing written: ambiguous title, missing configured Project, oth
     (e: OmiError) => e.code === "CONFIG_INVALID" && /'app', not 'Other'/.test(e.message),
   );
   assert.equal(existsSync(join(gone, ".github")), false);
+});
+
+// --- model v2 (DevTask-0102 #311, carried from DevTask-0101 #310 CR-001) ---------------------------
+
+const v2Checkout = () => {
+  const dir = checkout();
+  writeFileSync(
+    join(dir, ".omi-plugins", "omi.config.yaml"),
+    "github:\n  owner: acme\n  repo: app\n  projectNumber: 9\n  model: v2\n",
+  );
+  return dir;
+};
+
+test("model v2: first run creates the 8 issue types before linking; second run writes nothing", () => {
+  const dir = v2Checkout();
+  const owner = { typename: "Organization", types: [] as OrgType[] };
+  const gh = fakeGh([{ id: "A", number: 9, title: "app" }], [], owner);
+
+  const first = projectInit({ cwd: dir }, gh.run);
+  const creates = gh.calls.filter((c) => c.startsWith("create-type"));
+  assert.equal(creates.length, 8);
+  assert.equal(first.issueTypes?.applied.length, 8);
+  assert.deepEqual(first.issueTypes?.manual, []);
+  const link = gh.calls.findIndex((c) => c.startsWith("link"));
+  assert.equal(link, 8, "the 8 types are written before the link");
+
+  const before = gh.calls.length;
+  const second = projectInit({ cwd: dir }, gh.run);
+  assert.equal(gh.calls.length, before, "nothing written the second time");
+  assert.deepEqual(second.issueTypes?.applied, []);
+});
+
+test("model v2: a personal account is refused before the Project is linked", () => {
+  const dir = v2Checkout();
+  const gh = fakeGh([{ id: "A", number: 9, title: "app" }], [], { typename: "User", types: [] });
+  assert.throws(
+    () => projectInit({ cwd: dir }, gh.run),
+    (e: OmiError) => e.code === "CONFIG_INVALID" && /personal account/.test(e.message),
+  );
+  assert.deepEqual(gh.calls, [], "no create, no link");
+});
+
+test("legacy: init does not touch issue types", () => {
+  const dir = checkout();
+  const gh = fakeGh([{ id: "A", number: 3, title: "app" }]);
+  const r = projectInit({ cwd: dir }, gh.run);
+  assert.equal(r.issueTypes, undefined);
+  assert.deepEqual(gh.calls, ["link 3 acme/app"]);
 });
