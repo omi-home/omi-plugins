@@ -43,6 +43,13 @@
             "legacy",
             "v2"
           ]
+        },
+        "workflow": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
         }
       },
       "required": [

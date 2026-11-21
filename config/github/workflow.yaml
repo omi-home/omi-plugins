@@ -1,0 +1,160 @@
+# State machine of model v2 (ADR-0005 D2, DevTask-0099 #308). Single source of the statuses and
+# transitions each issue type may have; `omi move` / `omi sync` read it (Feature-0039 #298).
+# Workspace override: `github.workflow` in .omi-plugins/omi.config.yaml (merge rules: runtime/core/workflow-config.ts).
+#
+# transition: from = status or "*"; to = status or list; by = po | coordinator | auto;
+# `when` (list of predicates, all must hold) is required for `auto` and forbidden otherwise.
+statuses:
+  - Draft
+  - Awaiting PO
+  - Ready
+  - In progress
+  - In review
+  - Testing
+  - Acceptance
+  - Rework
+  - Blocked
+  - Done
+
+# Statuses in which the Issue is closed on GitHub.
+closed_states: [Done]
+# Types whose Issue `omi sync` never closes by itself, even in a closed state.
+never_close: [Epic]
+
+types:
+  Doc:
+    initial: Draft
+    blocked_returns_to: Draft
+    transitions:
+      - { from: Draft, to: Awaiting PO, by: coordinator }
+      - { from: Awaiting PO, to: Draft, by: po }
+      - { from: Awaiting PO, to: Done, by: po }
+      - { from: "*", to: Blocked, by: coordinator }
+      - { from: Blocked, to: Draft, by: auto, when: [{ blockers_done: true }] }
+
+  ADR:
+    initial: Draft
+    blocked_returns_to: Draft
+    transitions:
+      - { from: Draft, to: Awaiting PO, by: coordinator }
+      - { from: Awaiting PO, to: Draft, by: po }
+      - { from: Awaiting PO, to: Done, by: po }
+      - { from: "*", to: Blocked, by: coordinator }
+      - { from: Blocked, to: Draft, by: auto, when: [{ blockers_done: true }] }
+
+  Epic:
+    initial: Draft
+    blocked_returns_to: Ready
+    transitions:
+      - { from: Draft, to: Awaiting PO, by: coordinator }
+      - { from: Awaiting PO, to: Draft, by: po }
+      - { from: Awaiting PO, to: Ready, by: po }
+      - {
+          from: Ready,
+          to: In progress,
+          by: auto,
+          when: [{ any_child_in: [In progress, In review, Testing, Acceptance, Done] }],
+        }
+      - { from: In progress, to: Acceptance, by: auto, when: [{ all_children_done: true }] }
+      - { from: Acceptance, to: Done, by: po }
+      - { from: Acceptance, to: In progress, by: po }
+      - { from: "*", to: Blocked, by: coordinator }
+      - { from: Blocked, to: Ready, by: auto, when: [{ blockers_done: true }] }
+
+  UserStory:
+    initial: Draft
+    blocked_returns_to: Ready
+    transitions:
+      - { from: Draft, to: Awaiting PO, by: coordinator }
+      - { from: Awaiting PO, to: Draft, by: po }
+      - { from: Awaiting PO, to: Ready, by: po }
+      - {
+          from: Ready,
+          to: In progress,
+          by: auto,
+          when: [{ any_child_in: [In progress, In review, Testing, Done] }],
+        }
+      - { from: In progress, to: Acceptance, by: auto, when: [{ all_children_done: true }] }
+      - { from: Acceptance, to: Done, by: po }
+      - { from: Acceptance, to: Rework, by: po }
+      - {
+          from: Rework,
+          to: In progress,
+          by: auto,
+          when: [{ any_child_in: [In progress, In review, Testing] }],
+        }
+      - { from: "*", to: Blocked, by: coordinator }
+      - { from: Blocked, to: Ready, by: auto, when: [{ blockers_done: true }] }
+
+  DesignTask:
+    initial: Draft
+    blocked_returns_to: Ready
+    transitions:
+      - { from: Draft, to: Awaiting PO, by: coordinator }
+      - { from: Awaiting PO, to: Draft, by: po }
+      - { from: Awaiting PO, to: Ready, by: po }
+      - { from: Ready, to: In progress, by: coordinator }
+      - { from: In progress, to: In review, by: coordinator }
+      - { from: In review, to: Rework, by: coordinator }
+      - { from: In review, to: Done, by: coordinator }
+      - { from: Rework, to: In review, by: coordinator }
+      - { from: "*", to: Blocked, by: coordinator }
+      - { from: Blocked, to: Ready, by: auto, when: [{ blockers_done: true }] }
+
+  DevTask:
+    initial: Draft
+    blocked_returns_to: Ready
+    transitions:
+      - { from: Draft, to: Awaiting PO, by: coordinator }
+      - { from: Awaiting PO, to: Draft, by: po }
+      - { from: Awaiting PO, to: Ready, by: po }
+      - { from: Ready, to: In progress, by: coordinator }
+      - { from: In progress, to: In review, by: auto, when: [{ linked_pr: open }] }
+      - { from: In review, to: Rework, by: coordinator }
+      - { from: Rework, to: In review, by: coordinator }
+      - { from: In review, to: Done, by: auto, when: [{ issue_closed_by_pr: true }] }
+      - { from: "*", to: Blocked, by: coordinator }
+      - { from: Blocked, to: Ready, by: auto, when: [{ blockers_done: true }] }
+
+  QATask:
+    initial: Draft
+    blocked_returns_to: Ready
+    transitions:
+      - { from: Draft, to: Awaiting PO, by: coordinator }
+      - { from: Awaiting PO, to: Draft, by: po }
+      - { from: Awaiting PO, to: Ready, by: po }
+      - { from: Ready, to: In progress, by: auto, when: [{ siblings_done: true }] }
+      - { from: Ready, to: In progress, by: coordinator }
+      - { from: In progress, to: Testing, by: coordinator }
+      - { from: Testing, to: Done, by: coordinator }
+      - { from: Testing, to: Rework, by: coordinator }
+      - { from: Rework, to: Testing, by: coordinator }
+      - { from: "*", to: Blocked, by: coordinator }
+      - { from: Blocked, to: Ready, by: auto, when: [{ blockers_done: true }] }
+
+  Bug:
+    initial: Draft
+    blocked_returns_to: Ready
+    transitions:
+      - { from: Draft, to: Awaiting PO, by: coordinator }
+      - { from: Awaiting PO, to: Draft, by: po }
+      - { from: Awaiting PO, to: Ready, by: po }
+      - {
+          from: Ready,
+          to: In progress,
+          by: auto,
+          when: [{ any_child_in: [In progress, In review, Testing, Done] }],
+        }
+      - { from: In progress, to: Testing, by: auto, when: [{ all_children_done: true }] }
+      - { from: Testing, to: Acceptance, by: coordinator }
+      - { from: Testing, to: Rework, by: coordinator }
+      - { from: Acceptance, to: Done, by: po }
+      - { from: Acceptance, to: Rework, by: po }
+      - {
+          from: Rework,
+          to: In progress,
+          by: auto,
+          when: [{ any_child_in: [In progress, In review, Testing] }],
+        }
+      - { from: "*", to: Blocked, by: coordinator }
+      - { from: Blocked, to: Ready, by: auto, when: [{ blockers_done: true }] }
