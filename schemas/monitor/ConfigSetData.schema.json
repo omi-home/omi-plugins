@@ -46,13 +46,22 @@
             "privateRepoRiskAccepted": {
               "default": false,
               "type": "boolean"
+            },
+            "model": {
+              "default": "legacy",
+              "type": "string",
+              "enum": [
+                "legacy",
+                "v2"
+              ]
             }
           },
           "required": [
             "owner",
             "repo",
             "projectNumber",
-            "privateRepoRiskAccepted"
+            "privateRepoRiskAccepted",
+            "model"
           ],
           "additionalProperties": false
         },

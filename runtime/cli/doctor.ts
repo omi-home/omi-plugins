@@ -21,6 +21,7 @@ import {
   type OmiConfig,
   profileSecretResolver,
   type Selection,
+  workflowModel,
 } from "../core/config.ts";
 import { parseContext } from "../core/context-usage.ts";
 import type { Check } from "../core/contracts.ts";
@@ -754,6 +755,7 @@ export function doctor(cwd: string): Check[] {
     if (!loc) throw locErr;
     config = loadConfig(loc.workspace);
     checks.push({ name: "config", status: "pass", detail: join(loc.workspace, CONFIG_FILE) });
+    checks.push({ name: "model", status: "pass", detail: workflowModel(config) });
     checks.push({
       name: "setup",
       status: "pass",

@@ -90,6 +90,48 @@ export const IssueType = z.enum([
 ]);
 export type IssueType = z.infer<typeof IssueType>;
 
+// ---- Model v2 (ADR-0005 D1/D2/D4): lives beside the legacy enums until Feature-0042 #301 ----
+
+/** Which workflow model a workspace uses (`github.model`); `legacy` until the Project migrates. */
+export const WorkflowModel = z.enum(["legacy", "v2"]);
+export type WorkflowModel = z.infer<typeof WorkflowModel>;
+
+/** The native GitHub issue type names of model v2. */
+export const IssueTypeV2 = z.enum([
+  "Doc",
+  "ADR",
+  "Epic",
+  "UserStory",
+  "DesignTask",
+  "DevTask",
+  "QATask",
+  "Bug",
+]);
+export type IssueTypeV2 = z.infer<typeof IssueTypeV2>;
+
+export const ProjectStatusV2 = z.enum([
+  "Draft",
+  "Awaiting PO",
+  "Ready",
+  "In progress",
+  "In review",
+  "Testing",
+  "Acceptance",
+  "Rework",
+  "Blocked",
+  "Done",
+]);
+export type ProjectStatusV2 = z.infer<typeof ProjectStatusV2>;
+
+export const RoleV2 = z.enum([
+  "software-engineer",
+  "qa-engineer",
+  "uiux-designer",
+  "code-reviewer",
+  "security-reviewer",
+]);
+export type RoleV2 = z.infer<typeof RoleV2>;
+
 /** GitHub's relation of a comment author to the repository (GraphQL authorAssociation). */
 export const AuthorAssociation = z.enum([
   "OWNER",
