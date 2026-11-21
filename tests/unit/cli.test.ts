@@ -104,17 +104,22 @@ Commands:
   github project plan    Diff the Project's custom fields (config/github/project.yaml), views, built-in
                          workflows and Insights (views.yaml) and list items whose Status their type does
                          not use (status-transitions.yaml). github.model v2: also the organization's issue
-                         types (config/github/issue-types.yaml). Read-only; exits 1 while anything is
+                         types (config/github/issue-types.yaml), and reads project-v2.yaml + views-v2.yaml
+                         (7 views, Status of 10 options) instead; lists every enabled built-in workflow
+                         with the manual step to turn it off. Read-only; exits 1 while anything is
                          pending, manual or drifting. \`project plan\` is an alias
   github project apply   Create missing fields, options and views (by name + layout); never deletes. View
                          filters/grouping/sort, workflows, iteration fields and conflicts are printed as
                          manual steps (exit 1); Insights as unsupported. github.model v2: creates missing
                          issue types and updates their name/description/color, never deletes or disables
-                         one; no admin:org scope: \`gh auth refresh -s admin:org\`. \`project apply\` is an alias
+                         one; no admin:org scope: \`gh auth refresh -s admin:org\`. Also sets each view's
+                         filter and layout (updateProjectV2View); group/sort/columns, the Type field and
+                         built-in workflows stay manual. \`project apply\` is an alias
   github project validate
                          The same diff as checks (extra fields/views/issue types and Insights: warnings)
   github repo plan       Diff the repository's labels, main/develop protection and merge methods against
-                         config/github/repository.yaml. Read-only; exits 1 while anything differs
+                         config/github/repository.yaml (github.model v2: the flag labels of
+                         repository-v2.yaml). Read-only; exits 1 while anything differs
   github repo apply --approved-plan <file>
                          Apply exactly the plan the PO approved (\`github repo plan --output json\`
                          saved to <file>): adds labels, tightens protection, sets merge methods; never

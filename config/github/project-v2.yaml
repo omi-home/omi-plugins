@@ -1,0 +1,52 @@
+# Desired state of the Project's custom fields, model v2 (DevTask-0102 #311; ChangeRequest-0013 #302
+# §4.1 + §5.1, ADR-0005 D2). Read instead of project.yaml when `github.model: v2`; project.yaml stays
+# for `legacy` until Feature-0042 #301. Same apply rules: only adds, option IDs are kept, extras are
+# reported and never deleted.
+# Status options are exactly the ProjectStatusV2 enum, in this order (runtime/core/contracts.ts).
+# The status an Issue starts in is not here: it is `types.<IssueType>.initial` of workflow.yaml.
+
+fields:
+  - name: Status
+    type: single_select
+    options:
+      - { name: Draft, color: GRAY, description: "Coordinator đang soạn / phân loại" }
+      - { name: Awaiting PO, color: RED, description: "Cổng 1: chờ PO duyệt trước khi làm" }
+      - {
+          name: Ready,
+          color: BLUE,
+          description: "Đã duyệt, có thể giao việc (Doc: phiên bản hiện hành)",
+        }
+      - { name: In progress, color: YELLOW, description: "Đang thực hiện" }
+      - { name: In review, color: PURPLE, description: "PR / deliverable đang được review" }
+      - { name: Testing, color: PINK, description: "QA đang kiểm thử / retest" }
+      - { name: Acceptance, color: RED, description: "Cổng 2: chờ PO nghiệm thu" }
+      - { name: Rework, color: ORANGE, description: "Bị trả lại: Coordinator phải xử lý" }
+      - { name: Blocked, color: GRAY, description: "Chờ issue khác" }
+      - { name: Done, color: GREEN, description: "Hoàn tất (issue đóng)" }
+  - name: Priority
+    type: single_select
+    options:
+      - { name: P0, color: RED, description: "Story, Bug: blocked foundation" }
+      - { name: P1, color: ORANGE, description: "Story, Bug: MVP critical" }
+      - { name: P2, color: YELLOW, description: "Story, Bug: production hardening" }
+  - name: Story Type
+    type: single_select
+    options:
+      - { name: FR, color: BLUE, description: "UserStory: functional requirement" }
+      - { name: NFR, color: PURPLE, description: "UserStory: non-functional requirement" }
+      - { name: CR, color: ORANGE, description: "UserStory: change request" }
+  - name: Severity
+    type: single_select
+    options:
+      - { name: S1, color: RED, description: "Bug: critical" }
+      - { name: S2, color: ORANGE, description: "Bug: major" }
+      - { name: S3, color: YELLOW, description: "Bug: minor" }
+  - { name: Start, type: date }
+  - { name: Target, type: date }
+
+# GitHub's own fields the views rely on. No API adds or shows them: `plan` prints the manual step
+# while one is missing (warning, never a failure).
+builtinFields:
+  - Type
+  - Parent issue
+  - Sub-issues progress

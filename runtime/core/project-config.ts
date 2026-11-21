@@ -4,7 +4,14 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
-import { IssueType, ProjectStatus, parseContract } from "./contracts.ts";
+import {
+  IssueType,
+  IssueTypeV2,
+  ProjectStatus,
+  ProjectStatusV2,
+  parseContract,
+} from "./contracts.ts";
+import { initialStatus, loadDefaultWorkflow, type Workflow } from "./workflow-config.ts";
 
 const Color = z.enum(["GRAY", "BLUE", "GREEN", "YELLOW", "ORANGE", "RED", "PINK", "PURPLE"]);
 const Option = z.strictObject({
@@ -14,7 +21,7 @@ const Option = z.strictObject({
 });
 export type Option = z.infer<typeof Option>;
 
-const Field = z.discriminatedUnion("type", [
+export const Field = z.discriminatedUnion("type", [
   z.strictObject({
     name: z.string().min(1),
     type: z.literal("single_select"),
@@ -161,7 +168,7 @@ const DATA_TYPE: Record<Field["type"], string> = {
 /** Custom data types; the rest are GitHub's built-in fields. */
 const CUSTOM = new Set(Object.values(DATA_TYPE).concat("MULTI_SELECT"));
 
-export function planFields(desired: ProjectConfig, actual: ActualField[]): FieldPlan {
+export function planFields(desired: { fields: Field[] }, actual: ActualField[]): FieldPlan {
   const actions: FieldAction[] = [];
   const key = (n: string) => n.toLowerCase();
   for (const want of desired.fields) {
@@ -262,6 +269,8 @@ const View = z.strictObject({
     .string()
     .regex(/^[^,]+ (asc|desc)(, [^,]+ (asc|desc))*$/)
     .optional(),
+  /** Fields the view shows (model v2): no API reads or sets them, so `plan` always prints them. */
+  show: z.array(z.string().min(1)).optional(),
 });
 export type View = z.infer<typeof View>;
 
@@ -280,10 +289,20 @@ export const loadViewsConfig = (): ViewsConfig =>
   (views ??= parseContract(ViewsConfig, read("views.yaml"), "views config", "CONFIG_INVALID"));
 
 /** A view as GitHub reports it, settings already flattened to the View shape. */
-export type ActualView = { id: string } & Required<Omit<View, "layout">> & { layout: string };
+export type ActualView = { id: string } & Required<Omit<View, "layout" | "show">> & {
+    layout: string;
+  };
 
 export type ViewAction =
   | { kind: "create-view"; view: View }
+  /** Model v2: `updateProjectV2View` sets the filter and the layout of an existing view. */
+  | {
+      kind: "update-view";
+      id: string;
+      name: string;
+      set: { filter?: string; layout?: ViewLayout };
+      changes: string[];
+    }
   /** UI-only change: a setting, a layout, a name or a duplicate. */
   | { kind: "manual"; name: string; reason: string }
   /** A built-in workflow to toggle in Project settings (no API). */
@@ -306,8 +325,12 @@ const LABEL: Record<ViewSetting, string> = {
 const shown = (v: string) => (v === "" ? "(none)" : `'${v}'`);
 
 /** Settings of `want` that `have` (absent: a view about to be created) does not match. */
-function settingsToSet(want: View, have?: ActualView): ViewAction[] {
-  return VIEW_SETTINGS.flatMap((s): ViewAction[] => {
+function settingsToSet(
+  want: View,
+  have?: ActualView,
+  skip: readonly ViewSetting[] = [],
+): ViewAction[] {
+  return VIEW_SETTINGS.filter((s) => !skip.includes(s)).flatMap((s): ViewAction[] => {
     const w = want[s];
     if (w === undefined || (have && have[s].trim() === w.trim())) return [];
     // A new view has no filter, and a new board already uses Status columns (verified 2026-11-18).
@@ -378,5 +401,134 @@ export function planViews(
       .filter((a) => !desired.views.some((v) => key(v.name) === key(a.name)))
       .map((a) => a.name),
     unsupported: desired.insights.map((i) => `Insights chart: ${i} (no API: create it by hand)`),
+  };
+}
+
+// --- model v2 (DevTask-0102 #311) --------------------------------------------------------------
+
+const REQUIRED_V2: [string, Field["type"]][] = [
+  ["Status", "single_select"],
+  ["Priority", "single_select"],
+  ["Story Type", "single_select"],
+  ["Severity", "single_select"],
+  ["Start", "date"],
+  ["Target", "date"],
+];
+
+export const ProjectConfigV2 = z
+  .strictObject({ fields: z.array(Field), builtinFields: z.array(z.string().min(1)).default([]) })
+  .refine((c) => unique(c.fields.map((f) => f.name)), "duplicate field name")
+  .refine(
+    (c) =>
+      c.fields.every((f) => f.type !== "single_select" || unique(f.options.map((o) => o.name))),
+    "duplicate option name",
+  )
+  .refine(
+    (c) =>
+      REQUIRED_V2.every(([name, type]) => c.fields.some((f) => f.name === name && f.type === type)),
+    `fields must include ${REQUIRED_V2.map(([n]) => n).join(", ")}`,
+  )
+  .refine((c) => {
+    const status = c.fields.find((f) => f.name === "Status");
+    const names = status?.type === "single_select" ? status.options.map((o) => o.name) : [];
+    return names.join("|") === ProjectStatusV2.options.join("|");
+  }, "Status options must be exactly the ProjectStatusV2 enum, in order");
+export type ProjectConfigV2 = z.infer<typeof ProjectConfigV2>;
+
+let projectV2: ProjectConfigV2 | undefined;
+let viewsV2: ViewsConfig | undefined;
+export const loadProjectConfigV2 = (): ProjectConfigV2 =>
+  (projectV2 ??= parseContract(
+    ProjectConfigV2,
+    read("project-v2.yaml"),
+    "project config v2",
+    "CONFIG_INVALID",
+  ));
+export const loadViewsConfigV2 = (): ViewsConfig =>
+  (viewsV2 ??= parseContract(
+    ViewsConfig,
+    read("views-v2.yaml"),
+    "views config v2",
+    "CONFIG_INVALID",
+  ));
+
+/** The Status an Issue of each type starts in: `types.<type>.initial` of workflow.yaml. */
+export const initialStatuses = (w: Workflow = loadDefaultWorkflow()) =>
+  Object.fromEntries(IssueTypeV2.options.map((t) => [t, initialStatus(t, w)])) as Record<
+    IssueTypeV2,
+    ProjectStatusV2
+  >;
+
+/**
+ * Views of model v2 against GitHub. Filter and layout are written (`update-view`); group by, sort
+ * and board columns are read back and reported manual while they differ. What no API reads (`show`,
+ * built-in fields missing from the Project) is listed in `unsupported`, a guide and not a failure.
+ * Every enabled built-in workflow is reported, named in the file or not: `omi` is the only writer.
+ */
+export function planViewsV2(
+  desired: ViewsConfig,
+  actual: ActualView[],
+  workflows: { name: string; enabled: boolean }[],
+  fields: ActualField[] = [],
+  builtinFields: string[] = [],
+): ViewPlan {
+  const actions: ViewAction[] = [];
+  const unsupported: string[] = [];
+  const key = (n: string) => n.toLowerCase();
+  for (const want of desired.views) {
+    const found = actual.filter((a) => key(a.name) === key(want.name));
+    const have = found[0];
+    if (found.length > 1) {
+      actions.push({
+        kind: "manual",
+        name: want.name,
+        reason: `${found.length} views share this name: delete the extra ones in the Project UI`,
+      });
+    } else if (!have) {
+      // The filter is written once the view exists (apply reads it back for its ID).
+      actions.push(
+        { kind: "create-view", view: want },
+        ...settingsToSet(want, undefined, ["filter"]),
+      );
+    } else {
+      const set: { filter?: string; layout?: ViewLayout } = {};
+      const changes: string[] = [];
+      if (have.layout !== want.layout) {
+        set.layout = want.layout;
+        changes.push(`layout ${have.layout} → ${want.layout}`);
+      }
+      if (want.filter !== undefined && have.filter.trim() !== want.filter.trim()) {
+        set.filter = want.filter;
+        changes.push(`filter ${shown(have.filter)} → ${shown(want.filter)}`);
+      }
+      if (changes.length) {
+        actions.push({ kind: "update-view", id: have.id, name: have.name, set, changes });
+      }
+      actions.push(...settingsToSet(want, have, ["filter"]));
+    }
+    if (want.show?.length) {
+      unsupported.push(
+        `view ${want.name}: show ${want.show.join(", ")} (no API: Project UI → view → Fields)`,
+      );
+    }
+  }
+  for (const w of workflows.filter((x) => x.enabled)) {
+    actions.push({
+      kind: "workflow",
+      name: `workflow ${w.name}`,
+      reason: "disable it in Project settings → Workflows (no API; omi is the only writer)",
+    });
+  }
+  for (const name of builtinFields) {
+    if (!fields.some((f) => key(f.name) === key(name))) {
+      unsupported.push(`field ${name}: add it to the Project in the UI (no API)`);
+    }
+  }
+  return {
+    actions,
+    extraViews: actual
+      .filter((a) => !desired.views.some((v) => key(v.name) === key(a.name)))
+      .map((a) => a.name),
+    unsupported,
   };
 }
