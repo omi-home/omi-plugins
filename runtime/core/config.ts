@@ -15,6 +15,7 @@ import {
   ProfileEffort,
   parseContract,
   Role,
+  relPath,
   WorkflowModel,
 } from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
@@ -109,6 +110,12 @@ export const OmiConfig = z.strictObject({
   setup: GateCommand.optional(),
   /** Unset checks are skipped; a repo with none configured has no deterministic gate. */
   checks: GateChecks.prefault({}),
+  /** Architecture contract of the target repo (Feature-0043 #321); checked by the gate and doctor. */
+  architecture: z
+    .strictObject({
+      contract: relPath.default("omi-architecture.yaml"),
+    })
+    .optional(),
   context: z
     .strictObject({
       /** Context items the PO keeps (`omi context plan`): plugin/skill/MCP server names, paths. */

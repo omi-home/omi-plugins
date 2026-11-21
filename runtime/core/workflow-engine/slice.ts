@@ -572,6 +572,7 @@ function checksStep(
   const { passed, results } = runChecks({
     worktree: t.worktree,
     checks: d.config.checks,
+    architecture: d.config.architecture,
     env: d.commandEnv,
     logDir: join(d.evidenceDir, `${stepId}-r${ctx.round}-${n}`),
   });

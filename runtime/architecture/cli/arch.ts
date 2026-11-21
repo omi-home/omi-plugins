@@ -6,7 +6,7 @@ import { parse } from "yaml";
 import { parseContract } from "../../core/contracts.ts";
 import { OmiError } from "../../core/errors/errors.ts";
 import { scanImports } from "../adapters/imports.ts";
-import { isRegularFile, scanTree } from "../adapters/scan.ts";
+import { insideRepo, isRegularFile, scanTree } from "../adapters/scan.ts";
 import {
   ArchitectureContract,
   ArchitectureExcerpt,
@@ -61,10 +61,10 @@ export function loadContract(dir: string, rel: string): ArchitectureContract {
   } catch {
     throw new OmiError("CONTRACT_INVALID", `architecture contract not found: ${rel}`);
   }
-  if (!st.isFile() || st.size > MAX_CONTRACT_BYTES) {
+  if (!st.isFile() || st.size > MAX_CONTRACT_BYTES || !insideRepo(dir, rel)) {
     throw new OmiError(
       "CONTRACT_INVALID",
-      `architecture contract ${rel} must be a regular file (no symlink) under 1 MB`,
+      `architecture contract ${rel} must be a regular file (no symlink, inside the repo) under 1 MB`,
     );
   }
   let data: unknown;

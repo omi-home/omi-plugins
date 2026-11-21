@@ -381,6 +381,7 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
     [
       ["format", "skipped"],
       ["lint", "skipped"],
+      ["architecture", "skipped"],
       ["build", "skipped"],
       ["test", "pass"],
       ["scan", "skipped"],

@@ -574,6 +574,27 @@
               ],
               "additionalProperties": false
             },
+            "architecture": {
+              "type": "object",
+              "properties": {
+                "run": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "timeoutSec": {
+                  "default": 600,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3600
+                }
+              },
+              "required": [
+                "run",
+                "timeoutSec"
+              ],
+              "additionalProperties": false
+            },
             "build": {
               "type": "object",
               "properties": {
@@ -638,6 +659,21 @@
               "additionalProperties": false
             }
           },
+          "additionalProperties": false
+        },
+        "architecture": {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "default": "omi-architecture.yaml",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "contract"
+          ],
           "additionalProperties": false
         },
         "context": {

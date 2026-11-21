@@ -269,7 +269,7 @@ export const ArtifactKind = z.enum(["task-packet", "step-result", "evidence", "l
 export type ArtifactKind = z.infer<typeof ArtifactKind>;
 
 /** Deterministic gate commands run before each cognitive review (spec §10), in this order. */
-export const GateCheck = z.enum(["format", "lint", "build", "test", "scan"]);
+export const GateCheck = z.enum(["format", "lint", "architecture", "build", "test", "scan"]);
 export type GateCheck = z.infer<typeof GateCheck>;
 
 /** `omi doctor` check outcome: only `fail` makes the command exit non-zero. */
@@ -413,7 +413,7 @@ const attempt = z.int().min(1);
 const text = (max: number) => z.string().trim().min(1).max(max);
 
 /** Repo-relative path from untrusted agent output: no absolute paths, no traversal. */
-const relPath = z
+export const relPath = z
   .string()
   .min(1)
   .max(500)

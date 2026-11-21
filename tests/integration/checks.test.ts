@@ -8,6 +8,8 @@ import { test } from "node:test";
 import { parseConfig } from "../../runtime/core/config.ts";
 import { runChecks, SUMMARY_CHARS } from "../../runtime/core/workflow-engine/checks.ts";
 
+import { makeRepo } from "../unit/architecture/helpers.ts";
+
 const dir = () => mkdtempSync(join(tmpdir(), "omi-checks-"));
 const node = (code: string) => `node -e "${code}"`;
 const checks = (c: Record<string, unknown>) =>
@@ -34,8 +36,74 @@ test("all configured checks pass, unset ones are skipped, nothing summarized on 
   assert.equal(readFileSync(lint?.logPath ?? "", "utf8").trim(), "1");
   assert.deepEqual(
     r.results.filter((x) => x.outcome === "skipped").map((x) => x.name),
-    ["format", "build", "test", "scan"],
+    ["format", "architecture", "build", "test", "scan"],
   );
+});
+
+const GOOD_REPO = {
+  "src/kernel/k.ts": "export const k = 1;\n",
+  "src/billing/domain/a.ts": 'import { k } from "../../kernel/k.ts";\nexport const a = k;\n',
+};
+
+test("architecture gate: no contract is skipped; valid passes; violation fails (AC-4)", () => {
+  const none = runChecks({ worktree: dir(), logDir: dir(), checks: checks({}) });
+  assert.equal(none.results.find((x) => x.name === "architecture")?.outcome, "skipped");
+  assert.equal(none.passed, true);
+
+  const ok = makeRepo(GOOD_REPO);
+  const bad = makeRepo({
+    ...GOOD_REPO,
+    "src/billing/domain/bad.ts": 'import "node:fs";\n',
+    "src/mystery/m.ts": "export {};\n",
+  });
+  try {
+    const pass = runChecks({ worktree: ok.dir, logDir: dir(), checks: checks({}) });
+    const a = pass.results.find((x) => x.name === "architecture");
+    assert.equal(a?.outcome, "pass");
+    assert.equal(pass.passed, true);
+    assert.ok(a?.logPath);
+
+    const fail = runChecks({ worktree: bad.dir, logDir: dir(), checks: checks({}) });
+    const b = fail.results.find((x) => x.name === "architecture");
+    assert.equal(b?.outcome, "fail");
+    assert.equal(fail.passed, false);
+    assert.match(b?.summary ?? "", /\[forbidden-package\]/);
+    assert.match(b?.summary ?? "", /\[undeclared-module\]/);
+  } finally {
+    ok.cleanup();
+    bad.cleanup();
+  }
+});
+
+test("architecture gate: configured checks.architecture wins; config.architecture.contract is honored", () => {
+  const bad = makeRepo({ "src/mystery/m.ts": "export {};\n" });
+  try {
+    const own = runChecks({
+      worktree: bad.dir,
+      logDir: dir(),
+      checks: checks({ architecture: { run: node("console.log('mine')") } }),
+    });
+    assert.equal(own.results.find((x) => x.name === "architecture")?.outcome, "pass");
+    // A contract at another path: the default file is absent there, so nothing runs.
+    const elsewhere = runChecks({
+      worktree: bad.dir,
+      logDir: dir(),
+      checks: checks({}),
+      architecture: { contract: "docs/arch.yaml" },
+    });
+    assert.equal(elsewhere.results.find((x) => x.name === "architecture")?.outcome, "skipped");
+  } finally {
+    bad.cleanup();
+  }
+});
+
+test("config: architecture.contract defaults, rejects '..' and unknown fields", () => {
+  const cfg = (a: unknown) =>
+    parseConfig({ github: { owner: "o", repo: "r", projectNumber: 1 }, architecture: a });
+  assert.equal(cfg({}).architecture?.contract, "omi-architecture.yaml");
+  assert.equal(cfg({ contract: "docs/a.yaml" }).architecture?.contract, "docs/a.yaml");
+  assert.throws(() => cfg({ contract: "../x.yaml" }), { code: "CONFIG_INVALID" });
+  assert.throws(() => cfg({ other: 1 }), { code: "CONFIG_INVALID" });
 });
 
 test("failed command fails the gate but later checks still run; summary is redacted", () => {

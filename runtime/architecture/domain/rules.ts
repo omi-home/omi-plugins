@@ -83,10 +83,26 @@ const forbids = (list: readonly string[], spec: string) =>
 
 const cut = (s: string, n = 500) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
+/** C0/C1 control characters (ANSI escapes, newlines) from source text become `?`: output stays one safe line. */
+export function stripControl(s: string): string {
+  let out = "";
+  for (const ch of s) {
+    const c = ch.codePointAt(0) as number;
+    out += c < 0x20 || (c >= 0x7f && c <= 0x9f) ? "?" : ch;
+  }
+  return out;
+}
+
 export function checkArchitecture(input: ArchInput): ArchViolation[] {
   const { contract: c } = input;
   const out: ArchViolation[] = [];
-  const add = (v: ArchViolation) => out.push({ ...v, message: cut(v.message), fix: cut(v.fix) });
+  const add = (v: ArchViolation) =>
+    out.push({
+      ...v,
+      path: stripControl(v.path),
+      message: cut(stripControl(v.message)),
+      fix: cut(stripControl(v.fix)),
+    });
 
   for (const file of input.files) {
     const p = classify(file, c);

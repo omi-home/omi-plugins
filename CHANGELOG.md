@@ -9,6 +9,9 @@ Mọi thay đổi đáng kể của plugin `omi-coordinator` (trước 0.2.0: `o
 - `omi config get|set`: validated, comment-preserving, atomic edits of `omi.config.yaml` (`--if-match`, `--confirm-commands` for `checks`/`setup`; errors `CONFIG_INVALID`, `CONFIG_CONFLICT`, `POLICY_VIOLATION`) — DevTask-0095 #284.
 - `--output json` envelope carries `protocolVersion` (`MONITOR_PROTOCOL_VERSION`, bump rules in `runtime/monitor/protocol.ts`); JSON Schemas for omi-monitor in `schemas/monitor/` (a test fails on drift; regenerate with `npm run schemas:monitor`).
 
+- Architecture check in the gate: new `GateCheck` `architecture` (order format, lint, architecture, build, test, scan), runs `omi arch check` when the worktree has a contract and `checks.architecture` is not configured, `skipped` without a contract; `omi doctor` check `architecture` (`CONTRACT_INVALID`, `ARCH_VIOLATION`, warn for missing contract or remaining `legacy`); `OmiConfig.architecture.contract` (default `omi-architecture.yaml`) — DevTask-0106 #327.
+- Monitor schema change (additive only, regenerated with `npm run schemas:monitor`): `architecture` in `OmiConfig.schema.json` and `ConfigSetData.schema.json`, `checks.architecture` in the same files — DevTask-0106 #327.
+
 ### Fixed
 
 - Without `--profile`, `agents.routing[role]` now decides the `--model`/`--effort` each step runs with (agent frontmatter is only the default, matching the schema default), and the step report records the values actually passed — DevTask-0082 #250, Bug-0005 #245.

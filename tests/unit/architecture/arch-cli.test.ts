@@ -160,6 +160,56 @@ test("a symlinked sourceRoot is refused, not followed", (t) => {
   }
 });
 
+test("a symlinked PARENT directory cannot pull files from outside the repo (SEC-001)", (t) => {
+  const outside = makeRepo({ "billing/x.ts": "export {};\n", "conf/c.yaml": "a: 1\n" });
+  const { dir, cleanup } = makeRepo(
+    { "src/kernel/k.ts": "export {};\n" },
+    { ...validContract(), sourceRoots: ["src/kernel", "lnk/billing"] },
+  );
+  try {
+    try {
+      symlinkSync(outside.dir, join(dir, "lnk"), "dir");
+    } catch {
+      t.skip("symlinks not permitted on this machine");
+      return;
+    }
+    const root = check(dir);
+    assert.equal(root.code, 1);
+    assert.match(root.stderr, /sourceRoots entry lnk\/billing is outside repo/);
+    const contract = check(dir, "--contract", "lnk/conf/c.yaml");
+    assert.equal(contract.code, 1);
+    assert.match(contract.stderr, /CONTRACT_INVALID/);
+    assert.doesNotMatch(contract.stderr, /a: 1/);
+  } finally {
+    cleanup();
+    outside.cleanup();
+  }
+});
+
+test("control characters in a specifier never reach the output (SEC-002)", () => {
+  const { dir, cleanup } = makeRepo({
+    ...GOOD,
+    "src/billing/domain/esc.ts": 'import "./\x1b[31mred.ts";\n',
+  });
+  try {
+    const r = check(dir);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /unresolved-import/);
+    assert.ok(!r.stderr.includes("\x1b"));
+  } finally {
+    cleanup();
+  }
+});
+
+test("--output with a bad value names human, text and json (CR-001)", () => {
+  const { dir, cleanup } = makeRepo(GOOD);
+  try {
+    assert.match(check(dir, "--output", "xml").stderr, /--output must be human, text or json/);
+  } finally {
+    cleanup();
+  }
+});
+
 test("imports inside comments, strings and templates are ignored by the check", () => {
   const { dir, cleanup } = makeRepo({
     ...GOOD,
