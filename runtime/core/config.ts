@@ -19,6 +19,7 @@ import {
 } from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
 import { DEFAULT_KEY_ENV, decryptSecret, loadMasterKey } from "./secrets.ts";
+import { resolveWorkflow } from "./workflow-config.ts";
 import { CONFIG_FILE, PROFILES_FILE, STATE_FILE } from "./workspace.ts";
 
 const ModelAlias = z.enum(["sonnet", "opus", "haiku"]);
@@ -68,7 +69,17 @@ export const OmiConfig = z.strictObject({
     /** Workflow model: `legacy` (type:* labels) until Project #2 migrates to `v2` (ADR-0005 D8). */
     model: WorkflowModel.default("legacy"),
     /** Override of config/github/workflow.yaml; merged and validated by workflow-config.ts. */
-    workflow: z.record(z.string(), z.unknown()).optional(),
+    workflow: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .superRefine((override, ctx) => {
+        if (override === undefined) return;
+        try {
+          resolveWorkflow(override);
+        } catch (e) {
+          ctx.addIssue({ code: "custom", message: (e as Error).message });
+        }
+      }),
   }),
   git: z
     .strictObject({

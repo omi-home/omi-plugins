@@ -12,19 +12,20 @@ export const TransitionBy = z.enum(["po", "coordinator", "auto"]);
 export type TransitionBy = z.infer<typeof TransitionBy>;
 
 const Statuses = z.array(ProjectStatusV2).min(1);
+const Types = z.array(IssueTypeV2).min(1);
 
 /** The closed set of `when` predicates; each entry holds exactly one, with its typed parameter. */
 export const Predicate = z.union([
   z.strictObject({ any_child_in: Statuses }),
   z.strictObject({ all_children_done: z.literal(true) }),
-  z.strictObject({ children_done: z.literal(true) }),
-  z.strictObject({ no_open_child: z.literal(true) }),
+  z.strictObject({ children_done: Types }),
+  z.strictObject({ no_open_child: Types }),
   z.strictObject({ parent_status_in: Statuses }),
   z.strictObject({ blockers_done: z.literal(true) }),
-  z.strictObject({ linked_pr: z.enum(["open", "merged"]) }),
+  z.strictObject({ linked_pr: z.enum(["open_ready", "changes_requested"]) }),
   z.strictObject({ issue_closed_by_pr: z.literal(true) }),
-  z.strictObject({ siblings_done: z.literal(true) }),
-  z.strictObject({ no_open_sibling: z.literal(true) }),
+  z.strictObject({ siblings_done: Types }),
+  z.strictObject({ no_open_sibling: Types }),
 ]);
 export type Predicate = z.infer<typeof Predicate>;
 
@@ -64,7 +65,8 @@ export type Transition = z.infer<typeof Transition>;
 
 const TypeFlow = z.strictObject({
   initial: ProjectStatusV2,
-  blocked_returns_to: ProjectStatusV2,
+  /** Only for types that can be Blocked; absent means the type has no Blocked status. */
+  blocked_returns_to: ProjectStatusV2.optional(),
   transitions: z.array(Transition),
 });
 export type TypeFlow = z.infer<typeof TypeFlow>;
@@ -101,13 +103,40 @@ export const Workflow = z
           message: "initial cannot be Done",
         });
       }
+      const back = flow.blocked_returns_to;
+      if (back === "Blocked" || back === "Done") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["types", t, "blocked_returns_to"],
+          message: "blocked_returns_to cannot be Blocked or Done",
+        });
+      }
       flow.transitions.forEach((tr, i) => {
         const targets = Array.isArray(tr.to) ? tr.to : [tr.to];
+        const path = ["types", t, "transitions", i];
         if (targets.includes(tr.from as ProjectStatusV2)) {
           ctx.addIssue({
             code: "custom",
-            path: ["types", t, "transitions", i],
+            path,
             message: "a transition cannot target its own `from`",
+          });
+        }
+        if (back === undefined && (tr.from === "Blocked" || targets.includes("Blocked"))) {
+          ctx.addIssue({
+            code: "custom",
+            path,
+            message: "a type without blocked_returns_to has no Blocked status",
+          });
+        }
+        if (
+          back !== undefined &&
+          tr.from === "Blocked" &&
+          (targets.length !== 1 || targets[0] !== back)
+        ) {
+          ctx.addIssue({
+            code: "custom",
+            path,
+            message: `a transition from Blocked must go to blocked_returns_to (${back})`,
           });
         }
       });
@@ -186,7 +215,8 @@ export function statusesOf(
   w: Workflow = loadDefaultWorkflow(),
 ): ProjectStatusV2[] {
   const flow = w.types[type];
-  const seen = new Set<ProjectStatusV2>([flow.initial, flow.blocked_returns_to]);
+  const seen = new Set<ProjectStatusV2>([flow.initial]);
+  if (flow.blocked_returns_to) seen.add("Blocked");
   for (const t of flow.transitions) {
     if (t.from !== "*") seen.add(t.from);
     for (const to of targets(t)) seen.add(to);
@@ -198,6 +228,34 @@ export function statusesOf(
 export const initialStatus = (type: IssueTypeV2, w: Workflow = loadDefaultWorkflow()) =>
   w.types[type].initial;
 
+const matching = (list: Transition[], from: ProjectStatusV2, to: ProjectStatusV2) =>
+  list.filter((t) => (t.from === "*" || t.from === from) && targets(t).includes(to));
+
+/**
+ * Explicit transitions plus the implicit Blocked ones: into Blocked from every status that does not
+ * close the Issue (coordinator), and out of it to `blocked_returns_to` (auto, blockers_done) unless
+ * the type declares a transition from Blocked (the explicit one wins).
+ */
+export function effectiveTransitions(
+  type: IssueTypeV2,
+  w: Workflow = loadDefaultWorkflow(),
+): Transition[] {
+  const flow = w.types[type];
+  const out = [...flow.transitions];
+  const back = flow.blocked_returns_to;
+  if (!back) return out;
+  const open = statusesOf(type, w).filter((s) => s !== "Blocked" && !w.closed_states.includes(s));
+  for (const from of open) {
+    if (!matching(out, from, "Blocked").length) {
+      out.push({ from, to: "Blocked", by: "coordinator" });
+    }
+  }
+  if (!out.some((t) => t.from === "Blocked")) {
+    out.push({ from: "Blocked", to: back, by: "auto", when: [{ blockers_done: true }] });
+  }
+  return out;
+}
+
 /** Transitions of `type` that take `from` to `to` (`from: "*"` matches every status). */
 export function transitionsBetween(
   type: IssueTypeV2,
@@ -206,9 +264,7 @@ export function transitionsBetween(
   w: Workflow = loadDefaultWorkflow(),
 ): Transition[] {
   if (from === to) return [];
-  return w.types[type].transitions.filter(
-    (t) => (t.from === "*" || t.from === from) && targets(t).includes(to),
-  );
+  return matching(effectiveTransitions(type, w), from, to);
 }
 
 /** Whether `by` may move an Issue of `type` from `from` to `to`. */
