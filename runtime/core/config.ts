@@ -67,6 +67,8 @@ export const OmiConfig = z.strictObject({
     privateRepoRiskAccepted: z.boolean().default(false),
     /** Workflow model: `legacy` (type:* labels) until Project #2 migrates to `v2` (ADR-0005 D8). */
     model: WorkflowModel.default("legacy"),
+    /** Override of config/github/workflow.yaml; merged and validated by workflow-config.ts. */
+    workflow: z.record(z.string(), z.unknown()).optional(),
   }),
   git: z
     .strictObject({
