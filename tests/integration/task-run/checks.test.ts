@@ -156,17 +156,27 @@ test("timeout kills the whole process tree: no grandchild outlives its check (#3
   });
   assert.equal(r.results.find((x) => x.name === "test")?.outcome, "timeout");
   const pid = Number(readFileSync(pidFile, "utf8"));
+  // SIGKILL'd grandchild is orphaned to init and stays a zombie (state Z) until reaped; on CI
+  // containers the reaper can lag, and kill(pid, 0) succeeds on a zombie. A zombie is dead, so
+  // treat it as gone, and poll (bounded) for the reap/exit instead of probing once.
   const alive = () => {
     try {
       process.kill(pid, 0);
-      return true;
     } catch {
       return false;
     }
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      return stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3) !== "Z";
+    } catch {
+      return true; // no /proc (macOS, Windows): the signal probe is all we have
+    }
   };
-  if (alive())
-    process.kill(pid); // never leak the sleeper, even when the assertion fails
-  else return;
+  const deadline = Date.now() + 2000;
+  while (alive() && Date.now() < deadline)
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  if (!alive()) return;
+  process.kill(pid); // never leak the sleeper, even when the assertion fails
   assert.fail(`grandchild ${pid} survived the timeout`);
 });
 
