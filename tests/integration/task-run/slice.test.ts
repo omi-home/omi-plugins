@@ -1067,8 +1067,8 @@ for (const tc of CANARY_CASES) {
   test(`token canary (${tc.name}): a decrypted token echoed by the agent reaches no evidence, outbox, comment, state.sqlite, stdout or envelope (AC-8)`, () => {
     const CANARY: string = tc.canary;
     const key = generateMasterKey();
-    const env = { OMI_SECRET_KEY: key };
     const ws = mkdtempSync(join(tmpdir(), "omi-canary-ws-"));
+    const env = { OMI_SECRET_KEY: key, OMI_PROFILE_DB: join(ws, "profiles.sqlite") };
     mkdirSync(join(ws, ".omi-plugins"));
     mkdirSync(join(ws, "repo", ".git"), { recursive: true });
     const cli = (args: string[], stdin = "") =>
@@ -1092,7 +1092,7 @@ for (const tc of CANARY_CASES) {
     const stateFile = join(ws, ".omi-plugins", "state.sqlite");
     const s = setup({}, undefined, stateFile);
     const selection = selectProfile(
-      loadProfiles(ws),
+      loadProfiles(ws, env),
       { profile: "cc-sub", reason: "canary" },
       profileSecretResolver(ws, env),
     );
@@ -1150,6 +1150,11 @@ for (const tc of CANARY_CASES) {
       .map((f) => readFileSync(join(ws, ".omi-plugins", f)).toString("latin1"))
       .join("");
     assert.ok(!disk.includes(CANARY));
+    const machine = readdirSync(ws)
+      .filter((f) => f.startsWith("profiles.sqlite"))
+      .map((f) => readFileSync(join(ws, f)).toString("latin1"))
+      .join("");
+    assert.ok(machine.length > 0 && !machine.includes(CANARY));
     for (const out of [cli(["profile", "list"]), main(["profile", "list"], ws, { env })]) {
       assert.ok(!out.stdout.includes(CANARY) && !out.stderr.includes(CANARY));
     }

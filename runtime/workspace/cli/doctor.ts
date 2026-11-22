@@ -24,6 +24,7 @@ import {
   loadProfiles,
   profileSecretResolver,
 } from "../../profile/adapters/profile-config.ts";
+import { withExistingProfileDb } from "../../profile/adapters/profile-store.ts";
 import { listProfileRecords } from "../../profile/adapters/profiles.ts";
 import { keyFingerprint, loadMasterKey } from "../../profile/domain/secrets.ts";
 import type { Selection } from "../../profile/domain/selection.ts";
@@ -507,7 +508,7 @@ export function issueTypeChecks(config: OmiConfig, run: GhRunner = spawnGh): Che
 export function profilesCheck(workspace: string, env: NodeJS.ProcessEnv = process.env): Check[] {
   let profiles: ReturnType<typeof loadProfiles>;
   try {
-    profiles = loadProfiles(workspace);
+    profiles = loadProfiles(workspace, env);
   } catch (e) {
     const err = e instanceof OmiError ? e : new OmiError("INTERNAL", "profiles check crashed");
     const issues = (err.details as { issues?: { path: string; message: string }[] })?.issues;
@@ -523,20 +524,18 @@ export function profilesCheck(workspace: string, env: NodeJS.ProcessEnv = proces
   const keyEnv = keyEnvName(workspace);
   // Fingerprints the sealed tokens were written with; only the fingerprint is read, never a token.
   const sealedPrints = new Set<string>();
-  const stateFile = join(workspace, STATE_FILE);
-  if (existsSync(stateFile)) {
-    try {
-      const db = openState(stateFile);
-      try {
+  try {
+    withExistingProfileDb(
+      env,
+      (db) => {
         for (const r of listProfileRecords(db)) {
           if (r.sealed) sealedPrints.add(r.sealed.keyFingerprint);
         }
-      } finally {
-        db.close();
-      }
-    } catch {
-      // an unreadable state is reported by the state check
-    }
+      },
+      undefined,
+    );
+  } catch {
+    // an unreadable machine DB is reported by the profile store check
   }
   const keyCheck: Check = (() => {
     try {
@@ -673,7 +672,7 @@ export function probeProfiles(
 ): Check[] {
   const checks: Check[] = [];
   const resolve = profileSecretResolver(workspace, env);
-  for (const p of loadProfiles(workspace).filter((x) => !x.disabled)) {
+  for (const p of loadProfiles(workspace, env).filter((x) => !x.disabled)) {
     const name = `probe ${p.name}`;
     let secret: string | undefined;
     // A gateway may echo the key back in an error body: drop the known value, then the patterns.

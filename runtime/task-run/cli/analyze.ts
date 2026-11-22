@@ -36,7 +36,7 @@ export function taskAnalyze(deps: AgentRunDeps, issue: number): RunResult {
   const gh = deps.gh ?? spawnGh;
   const { root, workspace, config } = repo(deps.cwd);
   const selection = selectProfile(
-    loadProfiles(workspace),
+    loadProfiles(workspace, deps.hostEnv ?? process.env),
     deps.pick ?? {},
     profileSecretResolver(workspace, deps.hostEnv ?? process.env),
   );

@@ -56,7 +56,7 @@ export function taskRun(deps: AgentRunDeps, issue: number): RunResult {
   const { workspace, config } = repo(deps.cwd);
   // A bad choice is refused before anything starts.
   const selection = selectProfile(
-    loadProfiles(workspace),
+    loadProfiles(workspace, deps.hostEnv ?? process.env),
     deps.pick ?? {},
     profileSecretResolver(workspace, deps.hostEnv ?? process.env),
   );

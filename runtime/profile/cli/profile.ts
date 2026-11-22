@@ -1,6 +1,6 @@
 // `omi profile list|add|edit|remove|set-token|import` (ADR-0004 D3). Tokens arrive on stdin only,
 // are sealed (AES-256-GCM) before they touch the database, and are never returned by any command.
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
 import {
@@ -11,13 +11,17 @@ import {
   parseContract,
 } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
-import { type Db, openState, tx } from "../../shared/sqlite/db.ts";
-import { STATE_FILE } from "../../shared/workspace.ts";
+import { type Db, tx } from "../../shared/sqlite/db.ts";
 import {
   assertNoLegacyProfiles,
   keyEnvName,
   readLegacyProfiles,
 } from "../adapters/profile-config.ts";
+import {
+  existingProfileDb,
+  withExistingProfileDb,
+  withProfileDb,
+} from "../adapters/profile-store.ts";
 import {
   addProfile,
   getProfileRecord,
@@ -64,13 +68,15 @@ export const toView = (r: ProfileRecord): ProfileView =>
     updatedAt: r.updatedAt,
   });
 
-const withDb = <T>(d: ProfileDeps, fn: (db: Db) => T): T => {
-  const db = openState(join(d.workspace, STATE_FILE));
-  try {
-    return fn(db);
-  } finally {
-    db.close();
+/** Writers: the machine DB, created when missing. */
+const withDb = <T>(d: ProfileDeps, fn: (db: Db) => T): T => withProfileDb(d.env, fn);
+
+/** Changes to an existing profile: no machine DB means no such profile, and nothing is created. */
+const withDbOf = <T>(d: ProfileDeps, name: string, fn: (db: Db) => T): T => {
+  if (!existingProfileDb(d.env)) {
+    throw new OmiError("USAGE_INVALID", `no profile ${name}: see \`omi profile list\``);
   }
+  return withDb(d, fn);
 };
 
 const csv = (v: string | undefined) =>
@@ -105,8 +111,7 @@ function assertNotMasterKeyVar(d: ProfileDeps, p: Profile): void {
 
 export function profileList(d: ProfileDeps): ProfileView[] {
   assertNoLegacyProfiles(d.workspace);
-  if (!existsSync(join(d.workspace, STATE_FILE))) return [];
-  return withDb(d, (db) => listProfileRecords(db).map(toView));
+  return withExistingProfileDb(d.env, (db) => listProfileRecords(db).map(toView), []);
 }
 
 /** Merges auth flags over the current auth (edit) or builds it from nothing (add). */
@@ -184,7 +189,7 @@ export function profileEdit(
   if (f.disabled && f.enabled) {
     throw new OmiError("USAGE_INVALID", "--disabled and --enabled are exclusive");
   }
-  return withDb(d, (db) => {
+  return withDbOf(d, name, (db) => {
     const current = requireProfile(db, name).profile;
     const auth = authFrom(f, current.auth);
     const edit = parseContract(
@@ -210,14 +215,14 @@ export function profileEdit(
 export function profileRemove(d: ProfileDeps, name: string | undefined): { removed: string } {
   assertNoLegacyProfiles(d.workspace);
   if (!name) throw new OmiError("USAGE_INVALID", "expected a profile name");
-  withDb(d, (db) => removeProfile(db, name));
+  withDbOf(d, name, (db) => removeProfile(db, name));
   return { removed: name };
 }
 
 export function profileSetToken(d: ProfileDeps, name: string | undefined): ProfileView {
   assertNoLegacyProfiles(d.workspace);
   if (!name) throw new OmiError("USAGE_INVALID", "expected a profile name");
-  return withDb(d, (db) => {
+  return withDbOf(d, name, (db) => {
     requireProfile(db, name);
     const sealed = encryptSecret(masterKey(d), name, readToken(d));
     setSealedSecret(db, name, sealed, nowIso(d));
@@ -286,8 +291,7 @@ export function profileImport(d: ProfileDeps, dryRun: boolean): ImportResult {
   };
   if (!declared.length && !legacy.json && !legacy.yaml) return result;
 
-  const file = join(d.workspace, STATE_FILE);
-  const existing = existsSync(file) ? withDb(d, (db) => listProfileRecords(db)) : [];
+  const existing = withExistingProfileDb(d.env, (db) => listProfileRecords(db), []);
   const byName = new Map(existing.map((r) => [r.profile.name, r]));
 
   const plan = declared.map((p) => {

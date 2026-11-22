@@ -1,11 +1,9 @@
 // `omi secret init-key|rotate-key` (ADR-0004 D4). The master key never goes through argv or stdout.
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { OmiError } from "../../shared/errors/errors.ts";
-import { openState, tx } from "../../shared/sqlite/db.ts";
-import { STATE_FILE } from "../../shared/workspace.ts";
+import { tx } from "../../shared/sqlite/db.ts";
 import { keyEnvName } from "../adapters/profile-config.ts";
+import { withExistingProfileDb } from "../adapters/profile-store.ts";
 import { hasAnySealedSecret, listProfileRecords, writeSealed } from "../adapters/profiles.ts";
 import {
   decryptSecret,
@@ -89,19 +87,11 @@ export function secretInitKey(d: SecretDeps): InitKeyResult {
       `${keyEnv} is already set: a new key would make stored tokens unreadable (rotate with \`omi secret rotate-key\`)`,
     );
   }
-  const file = join(d.workspace, STATE_FILE);
-  if (existsSync(file)) {
-    const db = openState(file);
-    try {
-      if (hasAnySealedSecret(db)) {
-        throw new OmiError(
-          "SECRET_KEY_EXISTS",
-          `the database already holds sealed tokens but ${keyEnv} is not set: restore the key, or re-enter every token (\`omi profile set-token\`) after removing the profiles`,
-        );
-      }
-    } finally {
-      db.close();
-    }
+  if (withExistingProfileDb(d.env, hasAnySealedSecret, false)) {
+    throw new OmiError(
+      "SECRET_KEY_EXISTS",
+      `the machine profile database already holds sealed tokens but ${keyEnv} is not set: restore the key, or re-enter every token (\`omi profile set-token\`) after removing the profiles`,
+    );
   }
   if ((d.platform ?? process.platform) !== "win32") {
     throw new OmiError(
@@ -150,28 +140,24 @@ export function secretRotateKey(d: SecretDeps): RotateKeyResult {
   if (keyFingerprint(newKey) === keyFingerprint(oldKey)) {
     throw new OmiError("USAGE_INVALID", `${nextEnv} holds the same key as ${keyEnv}`);
   }
-  const file = join(d.workspace, STATE_FILE);
-  if (!existsSync(file)) {
-    return { keyEnv, rotated: 0, fingerprint: keyFingerprint(newKey), next: nextStep(keyEnv) };
-  }
   const now = (d.now?.() ?? new Date()).toISOString();
-  const db = openState(file);
-  try {
-    const rotated = tx(db, "rotate key", () => {
-      let n = 0;
-      for (const r of listProfileRecords(db)) {
-        if (!r.sealed) continue;
-        const plain = decryptSecret(oldKey, r.profile.name, r.sealed);
-        writeSealed(db, r.profile.name, encryptSecret(newKey, r.profile.name, plain), now);
-        n++;
-      }
-      return n;
-    });
-    return { keyEnv, rotated, fingerprint: keyFingerprint(newKey), next: nextStep(keyEnv) };
-  } finally {
-    db.close();
-  }
+  const rotated = withExistingProfileDb(
+    d.env,
+    (db) =>
+      tx(db, "rotate key", () => {
+        let n = 0;
+        for (const r of listProfileRecords(db)) {
+          if (!r.sealed) continue;
+          const plain = decryptSecret(oldKey, r.profile.name, r.sealed);
+          writeSealed(db, r.profile.name, encryptSecret(newKey, r.profile.name, plain), now);
+          n++;
+        }
+        return n;
+      }),
+    0,
+  );
+  return { keyEnv, rotated, fingerprint: keyFingerprint(newKey), next: nextStep(keyEnv) };
 }
 
 const nextStep = (keyEnv: string) =>
-  `tokens now need the new key: set ${keyEnv} to the value of ${keyEnv}_NEXT, then remove ${keyEnv}_NEXT`;
+  `tokens now need the new key, for every workspace on this machine (the profile database is shared): set ${keyEnv} to the value of ${keyEnv}_NEXT, then remove ${keyEnv}_NEXT`;

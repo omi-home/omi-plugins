@@ -10,12 +10,14 @@ export interface CommandEnvOptions {
   keyEnv?: string;
   /** Names of the variables the profiles declared for their tokens (legacy `tokenEnv`/`keyEnv`). */
   tokenEnvs?: string[];
+  /** Other variables to drop (e.g. the machine profile DB path). */
+  extra?: string[];
 }
 
 /** Names to drop: master key, its `_NEXT`, the auth variables and the profiles' token variables. */
 export function secretEnvNames(o: CommandEnvOptions = {}): string[] {
   const keyEnv = o.keyEnv ?? DEFAULT_KEY_ENV;
-  return [keyEnv, `${keyEnv}_NEXT`, ...AUTH_VARS, ...(o.tokenEnvs ?? [])];
+  return [keyEnv, `${keyEnv}_NEXT`, ...AUTH_VARS, ...(o.tokenEnvs ?? []), ...(o.extra ?? [])];
 }
 
 /** `host` without the secret variables (names matched case-insensitively, as Windows does). */

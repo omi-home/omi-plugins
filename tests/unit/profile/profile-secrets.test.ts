@@ -14,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { type CliIo, main } from "../../../runtime/cli/main.ts";
 import { loadProfiles } from "../../../runtime/profile/adapters/profile-config.ts";
+import { openProfileDb } from "../../../runtime/profile/adapters/profile-store.ts";
 import { getProfileRecord } from "../../../runtime/profile/adapters/profiles.ts";
 import { secretInitKey, secretRotateKey } from "../../../runtime/profile/cli/secret.ts";
 import {
@@ -39,9 +40,18 @@ function workspace() {
   return ws;
 }
 const stateFile = (ws: string) => join(ws, ".omi-plugins", "state.sqlite");
+/** The machine profile DB of this test workspace: never the real one (Feature-0044 #337). */
+const machineDb = (ws: string) => join(ws, "profiles.sqlite");
+const penv = (ws: string, env: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+  OMI_PROFILE_DB: machineDb(ws),
+  ...env,
+});
 
 const run = (ws: string, args: string[], env: NodeJS.ProcessEnv = {}, stdin = "") =>
-  main([...args, "--output", "json"], ws, { env, stdin: () => stdin } satisfies CliIo);
+  main([...args, "--output", "json"], ws, {
+    env: penv(ws, env),
+    stdin: () => stdin,
+  } satisfies CliIo);
 const okData = (r: ReturnType<typeof main>) => {
   assert.equal(r.code, 0, r.stdout + r.stderr);
   return JSON.parse(r.stdout).data;
@@ -61,9 +71,9 @@ const SUB = [
 
 /** Every byte of the database and its WAL, to prove no plaintext reached disk. */
 const diskBytes = (ws: string) =>
-  readdirSync(join(ws, ".omi-plugins"))
-    .filter((f) => f.startsWith("state.sqlite"))
-    .map((f) => readFileSync(join(ws, ".omi-plugins", f)).toString("latin1"))
+  readdirSync(ws)
+    .filter((f) => f.startsWith("profiles.sqlite"))
+    .map((f) => readFileSync(join(ws, f)).toString("latin1"))
     .join("");
 
 test("migration 8: a database from the previous release opens, keeps its data, re-runs cleanly", () => {
@@ -160,36 +170,38 @@ test("secret init-key: writes the user env without printing the key; refuses whe
     writeUserEnv: (n: string, v: string) => void writes.push([n, v]),
     readUserEnv: () => undefined,
   };
-  const r = secretInitKey({ ...deps, env: {} });
+  const r = secretInitKey({ ...deps, env: penv(ws) });
   assert.equal(writes.length, 1);
   assert.equal(writes[0]?.[0], "OMI_SECRET_KEY");
   assert.equal(parseMasterKey(writes[0]?.[1] as string, "K").length, 32);
   assert.ok(!JSON.stringify(r).includes(writes[0]?.[1] as string));
   // The CLI output carries no key either.
   const cli = main(["secret", "init-key", "--output", "json"], ws, {
-    env: { OMI_SECRET_KEY: KEY },
+    env: penv(ws, { OMI_SECRET_KEY: KEY }),
   });
   assert.equal(errorCode(cli), "SECRET_KEY_EXISTS");
   assert.ok(!cli.stdout.includes(KEY));
   // A custom variable name comes from the config.
   writeFileSync(join(ws, ".omi-plugins", "omi.config.yaml"), "secrets:\n  keyEnv: MY_KEY\n");
-  secretInitKey({ ...deps, env: {} });
+  secretInitKey({ ...deps, env: penv(ws) });
   assert.equal(writes[1]?.[0], "MY_KEY");
   // Sealed tokens in the database: a fresh key would orphan them.
   const ws2 = workspace();
   okData(
     run(ws2, ["profile", "add", "p1", ...SUB, "--token-stdin"], { OMI_SECRET_KEY: KEY }, CANARY),
   );
-  assert.throws(() => secretInitKey({ ...deps, workspace: ws2, env: {} }), {
+  assert.throws(() => secretInitKey({ ...deps, workspace: ws2, env: penv(ws2) }), {
     code: "SECRET_KEY_EXISTS",
   });
-  assert.throws(() => secretInitKey({ workspace: workspace(), env: {}, platform: "linux" }), {
+  const ws3 = workspace();
+  assert.throws(() => secretInitKey({ workspace: ws3, env: penv(ws3), platform: "linux" }), {
     code: "USAGE_INVALID",
   });
   // CR-001: a terminal opened before an earlier init does not see the User variable, but it exists.
   const before = writes.length;
+  const ws4 = workspace();
   assert.throws(
-    () => secretInitKey({ ...deps, workspace: workspace(), env: {}, readUserEnv: () => KEY }),
+    () => secretInitKey({ ...deps, workspace: ws4, env: penv(ws4), readUserEnv: () => KEY }),
     { code: "SECRET_KEY_EXISTS" },
   );
   assert.equal(writes.length, before);
@@ -235,7 +247,7 @@ test("secret rotate-key: one transaction; a failure keeps the old key valid", ()
     okData(run(ws, ["profile", "set-token", n], env, `${CANARY}-${n}`));
 
   // Corrupt the last one: the rotation must fail and leave a and b untouched.
-  const raw = new DatabaseSync(stateFile(ws));
+  const raw = new DatabaseSync(machineDb(ws));
   const before = raw
     .prepare("SELECT name, secret_ciphertext AS c, key_fingerprint AS f FROM profile ORDER BY name")
     .all();
@@ -243,8 +255,10 @@ test("secret rotate-key: one transaction; a failure keeps the old key valid", ()
     .prepare("UPDATE profile SET secret_tag = ? WHERE name = 'c'")
     .run(Buffer.alloc(16).toString("base64"));
   raw.close();
-  assert.throws(() => secretRotateKey({ workspace: ws, env }), { code: "SECRET_DECRYPT_FAILED" });
-  const check = new DatabaseSync(stateFile(ws));
+  assert.throws(() => secretRotateKey({ workspace: ws, env: penv(ws, env) }), {
+    code: "SECRET_DECRYPT_FAILED",
+  });
+  const check = new DatabaseSync(machineDb(ws));
   const after = check
     .prepare("SELECT name, secret_ciphertext AS c, key_fingerprint AS f FROM profile ORDER BY name")
     .all();
@@ -258,19 +272,23 @@ test("secret rotate-key: one transaction; a failure keeps the old key valid", ()
     );
   check.close();
   okData(run(ws, ["profile", "set-token", "c"], env, `${CANARY}-c`));
-  const r = secretRotateKey({ workspace: ws, env });
+  const r = secretRotateKey({ workspace: ws, env: penv(ws, env) });
   assert.equal(r.rotated, 3);
-  const db = openState(stateFile(ws));
+  assert.match(r.next, /every workspace on this machine/);
+  const db = openProfileDb(machineDb(ws));
   const rec = getProfileRecord(db, "a");
   db.close();
   assert.equal(rec?.sealed?.keyFingerprint, keyFingerprint(parseMasterKey(KEY2, "K")));
   assert.equal(decryptSecret(parseMasterKey(KEY2, "K"), "a", rec?.sealed as never), `${CANARY}-a`);
-  assert.throws(() => secretRotateKey({ workspace: ws, env: { OMI_SECRET_KEY: KEY } }), {
+  assert.throws(() => secretRotateKey({ workspace: ws, env: penv(ws, { OMI_SECRET_KEY: KEY }) }), {
     code: "SECRET_KEY_MISSING",
   });
   assert.throws(
     () =>
-      secretRotateKey({ workspace: ws, env: { OMI_SECRET_KEY: KEY, OMI_SECRET_KEY_NEXT: KEY } }),
+      secretRotateKey({
+        workspace: ws,
+        env: penv(ws, { OMI_SECRET_KEY: KEY, OMI_SECRET_KEY_NEXT: KEY }),
+      }),
     { code: "USAGE_INVALID" },
   );
 });
@@ -286,7 +304,7 @@ test("profile CRUD: token only via stdin, never in the database, stdout or envel
 
   const outputs = [
     run(ws, ["profile", "list"], env),
-    main(["profile", "list"], ws, { env }),
+    main(["profile", "list"], ws, { env: penv(ws, env) }),
     run(ws, ["profile", "edit", "p1", "--disabled"], env),
     run(ws, ["profile", "add", "p2", ...SUB, "--token-stdin"], {}, CANARY), // no key
     run(ws, ["profile", "set-token", "p1"], env, `${CANARY}-2`),
@@ -360,7 +378,7 @@ test("profile CRUD: token only via stdin, never in the database, stdout or envel
   assert.equal(gw.profile.auth.scheme, "bearer");
 
   // Sealed token decrypts with the right key only, bound to the name.
-  const db = openState(stateFile(ws));
+  const db = openProfileDb(machineDb(ws));
   const rec = getProfileRecord(db, "p1");
   db.close();
   assert.equal(decryptSecret(parseMasterKey(KEY, "K"), "p1", rec?.sealed as never), `${CANARY}-2`);
@@ -391,12 +409,15 @@ test("profile import: seals tokens from the declared env, backs the file up, saf
 
   // Until imported, the file is ambiguous with the database.
   assert.equal(errorCode(run(ws, ["profile", "list"], env)), "CONFIG_INVALID");
-  assert.throws(() => loadProfiles(ws), { code: "CONFIG_INVALID", message: /omi profile import/ });
+  assert.throws(() => loadProfiles(ws, penv(ws)), {
+    code: "CONFIG_INVALID",
+    message: /omi profile import/,
+  });
 
   const dry = okData(run(ws, ["profile", "import", "--dry-run"], env));
   assert.equal(dry.dryRun, true);
   assert.ok(existsSync(legacy));
-  assert.equal(existsSync(stateFile(ws)), false);
+  assert.equal(existsSync(machineDb(ws)), false); // a dry run creates nothing
 
   // Without the key nothing changes at all.
   assert.equal(
@@ -429,7 +450,7 @@ test("profile import: seals tokens from the declared env, backs the file up, saf
   );
   assert.ok(!diskBytes(ws).includes(CANARY));
   assert.deepEqual(
-    loadProfiles(ws).map((p) => p.name),
+    loadProfiles(ws, penv(ws)).map((p) => p.name),
     ["cc-sub", "cc-none"],
   );
 
