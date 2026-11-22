@@ -38,7 +38,7 @@ Luồng chính ([ADR-0002](../decisions/ADR-0002-workspace-va-profile-thuc-thi-c
 
 ## Hợp đồng thư mục gốc
 
-Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc mới cần ADR và cập nhật `ALLOWED_ROOT_DIRS` trong [tests/unit/directory-contract.test.ts](../../tests/unit/directory-contract.test.ts) — test này chặn mọi thư mục ngoài danh sách.
+Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc mới cần ADR và cập nhật `ALLOWED_ROOT_DIRS` trong [tests/unit/workspace/directory-contract.test.ts](../../tests/unit/workspace/directory-contract.test.ts) — test này chặn mọi thư mục ngoài danh sách.
 
 | Thư mục | Chủ sở hữu | Nội dung |
 |---|---|---|
@@ -46,14 +46,13 @@ Chỉ các thư mục sau được phép ở gốc repo. Thêm thư mục gốc 
 | `agent-pack/` | Claude Code | plugin `omi-engineering` lồng trong plugin `omi-coordinator` (ADR-0003 D3, DevTask-0059 #192): `agents/` (11 agent chuyên môn, mỗi agent khai báo tập skill `omi:skills`), `skill-library/` (33 skill theo Spike-0011 #196, DevTask-0063 #197; CLI chỉ chép skill của step vào `.claude/skills/` của task workspace, `omi skill list`, `task run --skills` — DevTask-0065 #199; nguồn ngoài ghi trong `THIRD_PARTY_NOTICES`), `agents-md/` (phần của `AGENTS.md` theo role: DoD, ranh giới, format REPORT; DevTask-0064 #198), `hooks/` (chặn `git push`, `gh`, ghi ra ngoài task workspace); CLI nạp bằng `--plugin-dir <plugin root>/agent-pack`, không cài riêng |
 | `skills/` | Claude Code | **chỉ** entry skill của Coordinator (D3) |
 | `hooks/` | Claude Code | `hooks.json`: `PreToolUse` chặn cứng, `SessionStart` chèn tóm tắt (ADR-0003 D6) |
-| `runtime/` | OMI | CLI, core (FSM/policy/routing/handoff/errors), adapters, reporting, persistence |
+| `runtime/` | OMI | feature module (`task-run`, `github`, `harness`, …), `shared/` và composition root `cli/main.ts`; xem "Kiến trúc runtime" |
 | `config/` | OMI | policy YAML, cấu hình GitHub Project |
-| `schemas/` | OMI | JSON Schema cho state/step/handoff/comment/cleanup |
-| `templates/` | OMI | AGENTS.md dự án, template Issue/PR/báo cáo |
+| `schemas/` | OMI | JSON Schema cho `monitor/` (omi-monitor đọc) |
+| `templates/` | OMI | template Issue/PR (`github/`, `github-v2/`), báo cáo (`reports/`), workspace (`workspace/`) |
 | `bin/` | OMI | `omi` launcher |
-| `docs/` | OMI | `decisions/`, `architecture/`, `contracts/`, `runbooks/` |
-| `tests/` | OMI | `unit/`, `integration/`, `contract/`, `e2e/`, `fixtures/` |
-| `evals/` | OMI | probe định tuyến/cách ly |
+| `docs/` | OMI | `decisions/`, `architecture/`, `runbooks/` |
+| `tests/` | OMI | `unit/`, `integration/`, `contract/`, `e2e/` (chia theo module), `fixtures/` |
 | `.github/` | GitHub | workflow CI/release |
 
 Thư mục chỉ được tạo khi task đầu tiên cần nó — không tạo thư mục rỗng hay placeholder.
@@ -126,78 +125,85 @@ omi-plugins/
 │   └── omi-release/SKILL.md            # release check → PR develop → main (PO merge) → release tag
 ├── hooks/
 │   └── hooks.json
-├── runtime/
-│   ├── cli/                            # parse, execute, compact output
-│   ├── core/
-│   │   ├── workflow-engine/            # transitions, deterministic gates
-│   │   ├── policy-engine/
-│   │   ├── agent-routing/
-│   │   ├── handoff/
-│   │   └── errors/
-│   ├── adapters/
-│   │   ├── claude/                     # tested named-agent invocation adapter
-│   │   ├── github/                     # REST/GraphQL, rate limits
-│   │   ├── git/
-│   │   └── process/
-│   ├── reporting/                      # renderer, outbox, reconciliation
-│   ├── resources/                      # task workspace (clone), role files, cleanup ownership
-│   └── persistence/                    # SQLite migrations and repositories
+├── omi-architecture.yaml               # contract kiến trúc của chính repo này (ADR-0006), legacy: []
+├── runtime/                            # feature module, mỗi module tối đa 4 lớp (mục "Kiến trúc runtime")
+│   ├── cli/main.ts                     # composition root: chỉ route lệnh tới <module>/cli/; bin/omi trỏ tới
+│   ├── shared/                         # shared kernel: contracts, config, workflow, workspace, plugin-paths, redact, errors/, process/, sqlite/, github/client
+│   ├── architecture/                   # contract kiến trúc, `omi arch check|show`
+│   ├── task-run/                       # FSM, plan, slice, commit, checks, setup, worktree, `omi task`, `omi status`
+│   ├── harness/                        # port Harness (domain/), adapter claude-code (adapters/)
+│   ├── github/                         # Project, repo, issue, hierarchy: config và adapter
+│   ├── ticket/  handoff/  context/     # ticket-first; handoff và task packet; đo context
+│   ├── profile/  monitor/  hook/       # profile và secret; giao thức omi-monitor; hook Coordinator và agent-pack
+│   ├── reporting/  cleanup/  release/  # render và outbox; dọn task đã merge; gate release, PR, merge
+│   └── workspace/                      # workspace init/migrate, config, `omi doctor`
 ├── config/
-│   ├── web.json                        # ghim bản omi-monitor: { version, asset, sha256 } (ADR-0004 D2)
-│   ├── model-routing.yaml
-│   ├── workflow-policy.yaml
-│   ├── branching-policy.yaml
-│   ├── resource-policy.yaml
-│   ├── risk-policy.yaml                # Low/Medium/High merge tiers: `omi pr validate|merge`
-│   └── github/                         # governance defaults; workspace overrides in .omi-plugins/omi.config.yaml
-│       ├── project.yaml                # custom fields + initial Status (`omi github project plan|apply`)
+│   ├── risk-policy.yaml                # Low/Medium/High merge tiers: `omi pr validate|merge` (chủ: release)
+│   └── github/                         # mặc định governance (chủ: github); override ở .omi-plugins/omi.config.yaml
+│       ├── project.yaml  project-v2.yaml
 │       ├── issue-types.yaml
-│       ├── issue-hierarchy.yaml        # allowed parent → child matrix
-│       ├── status-transitions.yaml     # Status lifecycle per type, drift in `omi github project plan`
-│       ├── workflow.yaml               # state machine v2 (ADR-0005 D2); override: key `github.workflow` of omi.config.yaml, validated when the config loads
-│       ├── views.yaml                  # views, built-in workflows, Insights (`omi github project`)
-│       └── repository.yaml             # labels, branch protection, merge methods (`omi github repo`)
+│       ├── issue-hierarchy.yaml  issue-hierarchy-v2.yaml
+│       ├── status-transitions.yaml
+│       ├── workflow.yaml               # state machine v2 (ADR-0005 D2); override: key `github.workflow` của omi.config.yaml
+│       ├── views.yaml  views-v2.yaml
+│       └── repository.yaml  repository-v2.yaml
 ├── schemas/
-│   ├── workflow-state.schema.json
-│   ├── step-result.schema.json
-│   ├── handoff.schema.json
-│   ├── review-findings.schema.json
-│   ├── github-comment.schema.json
-│   ├── cleanup-result.schema.json
-│   └── monitor/                        # JSON Schema của mô hình màn hình và output lệnh cho omi-monitor (ADR-0004 D1)
+│   └── monitor/                        # JSON Schema cho omi-monitor đọc (ADR-0004 D1); chủ: monitor
 ├── templates/
-│   ├── project/AGENTS.md
-│   ├── github/issues/                  # one Issue Form per OMI type + config.yml, rendered into target repo
-│   ├── github/pull-request.md          # rendered to target repo .github/PULL_REQUEST_TEMPLATE.md
-│   └── reports/
-│       ├── analysis.md
-│       ├── architecture.md
-│       ├── implementation.md
-│       ├── code-review.md
-│       ├── security-review.md
-│       ├── manual-qa.md
-│       ├── automation-qa.md
-│       ├── architect-escalation.md
-│       ├── po-escalation.md
-│       ├── pr.md
-│       └── cleanup.md
-├── bin/omi                            # CLI launcher; executable
+│   ├── github/                         # ISSUE_TEMPLATE/ + PULL_REQUEST_TEMPLATE.md, render vào repo đích (chủ: github)
+│   ├── github-v2/ISSUE_TEMPLATE/       # mô hình v2 (chủ: github)
+│   ├── reports/                        # template báo cáo của step (chủ: reporting)
+│   └── workspace/                      # AGENTS.md, .claude/, .omi-plugins/ mẫu cho workspace (chủ: workspace)
+├── bin/omi                             # CLI launcher; executable
 ├── docs/
-│   ├── decisions/                      # ADRs
+│   ├── decisions/                      # ADR
 │   ├── architecture/
-│   ├── contracts/
 │   └── runbooks/
 ├── tests/
-│   ├── unit/
-│   ├── integration/
-│   ├── contract/
-│   ├── e2e/
+│   ├── unit/<module>/
+│   ├── integration/<module>/
+│   ├── contract/                       # khớp với tham chiếu ngoài (manifest, skill, agent)
+│   ├── e2e/<module>/
 │   └── fixtures/
-├── evals/                              # agent/skill routing probes
-└── .github/workflows/
-    ├── validate.yml
-    └── release.yml
+└── .github/workflows/check.yml
 ```
+
+## Kiến trúc runtime (ADR-0006)
+
+Runtime chia theo **feature module**. Mỗi module có tối đa 4 lớp, mỗi lớp là một thư mục con và chỉ tạo khi có file. Hướng phụ thuộc khai báo trong [omi-architecture.yaml](../../omi-architecture.yaml); `omi arch check` kiểm tự động.
+
+| Lớp | Thư mục | Được import | Ghi chú |
+|---|---|---|---|
+| domain | `<module>/domain/` | domain, `shared/` | cấm `node:child_process`, `node:fs`, `node:sqlite` (`forbidPackages`) |
+| application | `<module>/application/` | application, domain, `shared/` | dùng adapter qua port do cli truyền vào |
+| adapters | `<module>/adapters/` | adapters, application (port), domain, `shared/` | I/O: fs, process, GitHub, SQLite |
+| cli | `<module>/cli/` | mọi lớp, `shared/` | route lệnh, dựng adapter, định dạng output |
+
+- **Shared kernel** `runtime/shared/` không import module nào; module nào cũng import được. Gồm `contracts.ts` (enum dùng chung, `parseContract`), `config.ts`, `workflow.ts`, `workspace.ts`, `plugin-paths.ts`, `redact.ts`, `errors/`, `process/`, `sqlite/`, `github/client.ts`. Schema riêng của một module nằm ở `domain/` của module đó.
+- **Composition root** `runtime/cli/main.ts` chỉ route lệnh tới `<module>/cli/`. Phụ thuộc chéo (ví dụ `cleanupScan`) được inject từ đây.
+- **Giữa module:** module A chỉ import module B khi B có trong `dependsOn` của A, và lớp đích vẫn phải được phép theo bảng trên. `dependsOn` không có chu trình.
+- **Asset** ở thư mục gốc, mỗi asset có một module chủ (xem layout trên), chỉ đọc qua `shared/plugin-paths.ts`; tên file và nội dung không đổi vì tham chiếu ngoài (`omi-monitor`, `.claude-plugin/`, CI) phụ thuộc vào chúng.
+- **Test** ở `tests/<loại>/<module>/**/*.test.ts` với loại là `unit`, `integration`, `contract` hoặc `e2e`; test được import mọi thứ nhưng không nằm cạnh source.
+
+| Module | Chức năng | `dependsOn` |
+|---|---|---|
+| `shared` | shared kernel | không |
+| `architecture` | contract kiến trúc, `omi arch` | không |
+| `github` | Project, repo, issue, hierarchy | không |
+| `profile` | profile thực thi, secret | không |
+| `monitor` | giao thức omi-monitor | không |
+| `ticket` | ticket-first | github |
+| `handoff` | handoff, task packet | github |
+| `harness` | port Harness, adapter claude-code | profile |
+| `task-run` | engine chạy task | github, ticket, harness, profile, handoff, architecture |
+| `context` | đo context | github, harness, task-run |
+| `reporting` | render, outbox | task-run |
+| `release` | gate release, PR, merge | github, task-run, ticket |
+| `cleanup` | dọn task đã merge | task-run, github, reporting, release, handoff |
+| `hook` | hook Coordinator và agent-pack | handoff, task-run |
+| `workspace` | workspace, config, `omi doctor` | architecture, context, github, harness, monitor, profile, task-run |
+
+Thêm module mới: Architect khai báo vào contract trước khi thêm code; `omi arch check` báo `undeclared-module` cho code ngoài contract. Bật cho repo khác: [runbook contract kiến trúc](../runbooks/architecture-contract.md).
 
 ### Directory ownership
 
@@ -212,4 +218,4 @@ omi-plugins/
 - TypeScript chạy trực tiếp trên Node ≥ 22.18 (type stripping, không build); `tsc` chỉ typecheck.
 - Contract: zod là nguồn duy nhất cho TS type và validator runtime (`runtime/shared/contracts.ts`, `config.ts`). Mọi tài liệu đều strict và có `schemaVersion`. Lỗi được phân loại trong `runtime/shared/errors/errors.ts`: loại `transient` tính là attempt, không tính là round.
 - Dữ liệu cục bộ nằm trong workspace, ngoài repo đích (ADR-0002 D1): config dự án ở `<workspace>/.omi-plugins/omi.config.yaml`; state SQLite (`node:sqlite`, WAL, migration theo `user_version`) ở `<workspace>/.omi-plugins/state.sqlite`. Mọi task workspace dùng chung một DB, và DB không bao giờ bị commit.
-- Test: `node:test`. Lint/format: Biome. Một lệnh: `npm run check`.
+- Test: `node:test`. Lint/format: Biome. Một lệnh: `npm run check` (lint, typecheck, `npm run arch`, test).

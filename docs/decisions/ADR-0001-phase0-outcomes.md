@@ -1,6 +1,6 @@
 # ADR-0001 — Kết quả Phase 0 và các quyết định của PO
 
-- **Trạng thái:** Accepted. D1 và D3 bị thay bởi [ADR-0002](./ADR-0002-workspace-va-profile-thuc-thi-claude-code.md); phần workflow tùy chọn bị bỏ theo [ADR-0003](./ADR-0003-rules-skills-hooks-va-coordinator-mong.md) D7. D6 (Issue Type + label `type:*`) và phần status của D7 bị thay bởi [ADR-0005](./ADR-0005-quy-trinh-github-project-moi.md) D1 và D2
+- **Trạng thái:** Accepted. D1 và D3 bị thay bởi [ADR-0002](./ADR-0002-workspace-va-profile-thuc-thi-claude-code.md); phần workflow tùy chọn bị bỏ theo [ADR-0003](./ADR-0003-rules-skills-hooks-va-coordinator-mong.md) D7. D6 (Issue Type + label `type:*`) và phần status của D7 bị thay bởi [ADR-0005](./ADR-0005-quy-trinh-github-project-moi.md) D1 và D2. D3: `resources/role-rules/` → `agent-pack/agents-md/` theo [ADR-0006](./ADR-0006-kien-truc-feature-module-va-contract.md) D5
 - **Ngày:** 2026-11-17
 - **Người quyết định:** Product Owner (qua phiên Coordinator)
 - **Bằng chứng:** comment bằng chứng trên Spike Issue #3–#12 (T0.1–T0.8); bảng tổng hợp trên [M0 #1](https://github.com/omi-home/omi-plugins/issues/1#issuecomment-6940598215)
