@@ -3,8 +3,22 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
-import { encryptSecret, loadMasterKey, type SealedSecret } from "../core/secrets.ts";
-import { STATE_FILE } from "../core/workspace.ts";
+import { STATE_FILE } from "../../core/workspace.ts";
+import {
+  type Profile,
+  ProfileEdit,
+  ProfileView,
+  ProfileWrite,
+  parseContract,
+} from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { type Db, openState, tx } from "../../shared/sqlite/db.ts";
+import {
+  assertNoLegacyProfiles,
+  keyEnvName,
+  readLegacyProfiles,
+  secretEnv,
+} from "../adapters/profile-config.ts";
 import {
   addProfile,
   getProfileRecord,
@@ -15,22 +29,8 @@ import {
   setSealedSecret,
   updateProfile,
   writeSealed,
-} from "../persistence/profiles.ts";
-import {
-  assertNoLegacyProfiles,
-  keyEnvName,
-  readLegacyProfiles,
-  secretEnv,
-} from "../shared/config.ts";
-import {
-  type Profile,
-  ProfileEdit,
-  ProfileView,
-  ProfileWrite,
-  parseContract,
-} from "../shared/contracts.ts";
-import { OmiError } from "../shared/errors/errors.ts";
-import { type Db, openState, tx } from "../shared/sqlite/db.ts";
+} from "../adapters/profiles.ts";
+import { encryptSecret, loadMasterKey, type SealedSecret } from "../domain/secrets.ts";
 
 export interface ProfileDeps {
   workspace: string;

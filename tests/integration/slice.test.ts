@@ -18,7 +18,6 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { AgentLaunch } from "../../runtime/adapters/claude/launch.ts";
 import { type CliIo, main } from "../../runtime/cli/main.ts";
-import { generateMasterKey } from "../../runtime/core/secrets.ts";
 import type { DeliveryPlan, WorkflowPlan } from "../../runtime/core/workflow-engine/plan.ts";
 import {
   lastStepError,
@@ -27,13 +26,14 @@ import {
   zeroWidthIn,
 } from "../../runtime/core/workflow-engine/slice.ts";
 import * as repo from "../../runtime/persistence/repository.ts";
-import { roleSkills } from "../../runtime/resources/role-files.ts";
 import {
   loadProfiles,
-  parseConfig,
   profileSecretResolver,
   selectProfile,
-} from "../../runtime/shared/config.ts";
+} from "../../runtime/profile/adapters/profile-config.ts";
+import { generateMasterKey } from "../../runtime/profile/domain/secrets.ts";
+import { roleSkills } from "../../runtime/resources/role-files.ts";
+import { parseConfig } from "../../runtime/shared/config.ts";
 import type { TaskPacket } from "../../runtime/shared/contracts.ts";
 import type { GhRunner } from "../../runtime/shared/github/client.ts";
 import { openState } from "../../runtime/shared/sqlite/db.ts";

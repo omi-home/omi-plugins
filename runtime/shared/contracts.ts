@@ -472,6 +472,9 @@ const round = z.int().min(1).max(4); // 2 + Architect + 2: never a fifth round
 const attempt = z.int().min(1);
 const text = (max: number) => z.string().trim().min(1).max(max);
 
+/** Default name of the env variable holding the profile master key (ADR-0004 D4). */
+export const DEFAULT_KEY_ENV = "OMI_SECRET_KEY";
+
 /** Repo-relative path from untrusted agent output: no absolute paths, no traversal. */
 export const relPath = z
   .string()

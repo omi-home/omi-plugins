@@ -106,21 +106,6 @@ placement:
     message: "Tests live under tests/{unit,integration,contract,e2e}/<module>/, never next to the source."
 ignore: []
 legacy:
-  # R3 profile + monitor
-  - { path: runtime/core/secrets.ts, issue: 331, reason: "R3: moves to runtime/profile/" }
-  - { path: runtime/persistence/profiles.ts, issue: 331, reason: "R3: moves to runtime/profile/" }
-  - { path: runtime/cli/profile.ts, issue: 331, reason: "R3: moves to runtime/profile/cli/" }
-  - { path: runtime/cli/secret.ts, issue: 331, reason: "R3: moves to runtime/profile/cli/" }
-  - {
-      path: runtime/monitor/protocol.ts,
-      issue: 331,
-      reason: "R3: moves into the monitor module layers",
-    }
-  - {
-      path: runtime/monitor/schemas.ts,
-      issue: 331,
-      reason: "R3: moves into the monitor module layers",
-    }
   # R4 github
   - { path: runtime/core/project-config.ts, issue: 332, reason: "R4: moves to runtime/github/" }
   - { path: runtime/core/repo-config.ts, issue: 332, reason: "R4: moves to runtime/github/" }

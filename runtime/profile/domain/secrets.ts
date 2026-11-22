@@ -1,9 +1,9 @@
 // Profile token encryption (ADR-0004 D4): AES-256-GCM with a 32-byte master key from the environment.
 // The key and the plaintext never appear in messages or details; AAD binds a token to its profile.
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { OmiError } from "../shared/errors/errors.ts";
+import { DEFAULT_KEY_ENV } from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
 
-export const DEFAULT_KEY_ENV = "OMI_SECRET_KEY";
 const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;

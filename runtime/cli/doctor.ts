@@ -24,7 +24,6 @@ import { archCheck, DEFAULT_CONTRACT, loadContract } from "../architecture/cli/a
 import { formatViolation } from "../architecture/domain/rules.ts";
 import { parseContext } from "../core/context-usage.ts";
 import { issueTypeWrites } from "../core/issue-type-config.ts";
-import { keyFingerprint, loadMasterKey } from "../core/secrets.ts";
 import {
   CONFIG_FILE,
   locate,
@@ -32,18 +31,17 @@ import {
   STATE_FILE,
   WORKSPACE_DIR,
 } from "../core/workspace.ts";
-import { listProfileRecords } from "../persistence/profiles.ts";
 import { openRuns, ownedRefs } from "../persistence/repository.ts";
-import { same } from "../resources/worktree.ts";
 import {
   keyEnvName,
-  loadConfig,
   loadProfiles,
-  type OmiConfig,
   profileSecretResolver,
   type Selection,
-  workflowModel,
-} from "../shared/config.ts";
+} from "../profile/adapters/profile-config.ts";
+import { listProfileRecords } from "../profile/adapters/profiles.ts";
+import { keyFingerprint, loadMasterKey } from "../profile/domain/secrets.ts";
+import { same } from "../resources/worktree.ts";
+import { loadConfig, type OmiConfig, workflowModel } from "../shared/config.ts";
 import type { Check } from "../shared/contracts.ts";
 import { OmiError } from "../shared/errors/errors.ts";
 import { type GhRunner, graphql, spawnGh } from "../shared/github/client.ts";

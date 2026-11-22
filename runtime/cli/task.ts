@@ -77,23 +77,21 @@ import {
   transitions,
   upsertReport,
 } from "../persistence/repository.ts";
-import { publishPending } from "../reporting/adapters/outbox.ts";
-import { renderStepReport } from "../reporting/application/render.ts";
-import { applyRetention, cleanupRun } from "../resources/cleanup.ts";
-import { parseSkillChoice } from "../resources/role-files.ts";
-import { branchName, ensureTaskWorkspace, git, type Workspace } from "../resources/worktree.ts";
 import {
   keyEnvName,
-  loadConfig,
   loadProfiles,
-  type OmiConfig,
   profileSecretResolver,
   readLegacyProfiles,
   type Selection,
   secretEnv,
   selectProfile,
-  workflowModel,
-} from "../shared/config.ts";
+} from "../profile/adapters/profile-config.ts";
+import { publishPending } from "../reporting/adapters/outbox.ts";
+import { renderStepReport } from "../reporting/application/render.ts";
+import { applyRetention, cleanupRun } from "../resources/cleanup.ts";
+import { parseSkillChoice } from "../resources/role-files.ts";
+import { branchName, ensureTaskWorkspace, git, type Workspace } from "../resources/worktree.ts";
+import { loadConfig, type OmiConfig, workflowModel } from "../shared/config.ts";
 import {
   type Check,
   type CleanupResult,

@@ -2,8 +2,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SCHEMAS_DIR } from "../shared/plugin-paths.ts";
-import { MONITOR_SCHEMAS, renderSchema } from "./protocol.ts";
+import { SCHEMAS_DIR } from "../../shared/plugin-paths.ts";
+import { MONITOR_SCHEMAS, renderSchema } from "../domain/protocol.ts";
 
 export const SCHEMA_DIR = `${join(SCHEMAS_DIR, "monitor")}${sep}`;
 export const schemaFile = (name: string) => `${SCHEMA_DIR}${name}.schema.json`;

@@ -1,7 +1,6 @@
 // Env of the repo's own commands (checks, setup). They run code the agent may have edited, so they
 // must not inherit the master key or any auth token of the host (ARC-001, ADR-0004 D4).
-// TODO(R3 #331): secrets.ts moves to the profile module; the default key name then moves to shared.
-import { DEFAULT_KEY_ENV } from "../../core/secrets.ts";
+import { DEFAULT_KEY_ENV } from "../contracts.ts";
 
 /** Variables Claude Code reads its auth from. */
 export const AUTH_VARS = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"];
