@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { contextSummary } from "../../../runtime/cli/doctor.ts";
 import {
   type ContextRunner,
   humanContextPlan,
@@ -15,6 +14,7 @@ import {
   parseContext,
   tokenCount,
 } from "../../../runtime/context/domain/context-usage.ts";
+import { contextSummary } from "../../../runtime/workspace/cli/doctor.ts";
 
 const WS = process.platform === "win32" ? "C:\\ws" : "/ws";
 const SAMPLE = `## Context Usage

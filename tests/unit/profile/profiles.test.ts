@@ -5,16 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import {
-  type ClaudeRun,
-  type HttpGet,
-  harnessCheck,
-  probeProfiles,
-  profilesCheck,
-} from "../../../runtime/cli/doctor.ts";
 import { main } from "../../../runtime/cli/main.ts";
-import { usageByProfile } from "../../../runtime/cli/status.ts";
-import { harnessGate } from "../../../runtime/cli/task.ts";
 import {
   atLeast,
   HARNESSES,
@@ -37,6 +28,15 @@ import { Profile, ProfilesFile } from "../../../runtime/shared/contracts.ts";
 import { OmiError } from "../../../runtime/shared/errors/errors.ts";
 import { redact } from "../../../runtime/shared/redact.ts";
 import { openState } from "../../../runtime/shared/sqlite/db.ts";
+import { harnessGate } from "../../../runtime/task-run/cli/run.ts";
+import { usageByProfile } from "../../../runtime/task-run/cli/status.ts";
+import {
+  type ClaudeRun,
+  type HttpGet,
+  harnessCheck,
+  probeProfiles,
+  profilesCheck,
+} from "../../../runtime/workspace/cli/doctor.ts";
 
 // Opaque on purpose: matches no static redact rule, so only registerSecret can scrub it.
 const SECRET = "omi-canary-profiles-5d4c3b2a1f09";

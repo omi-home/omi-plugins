@@ -75,6 +75,15 @@ export interface Harness {
   readonly capabilities: readonly HarnessCapability[];
   /** The agent pack the harness loads, inside the plugin root. */
   readonly agentPack: string;
+  /** The harness CLI to run. */
+  readonly command: string;
+  /** Versions verified with this adapter: `min` inclusive, `below` exclusive. */
+  readonly verified: { readonly min: string; readonly below: string };
+  /**
+   * Env of an agent process: the allowlisted part of `host`; with a profile selection, that
+   * profile's auth instead of the host's own.
+   */
+  env(host: NodeJS.ProcessEnv, selection?: Selection): Record<string, string>;
   /** Installed version of the harness CLI, or undefined when it does not run. */
   version(cwd?: string): string | undefined;
   /** Why this version may not run agents, or null when it is in the verified range. */

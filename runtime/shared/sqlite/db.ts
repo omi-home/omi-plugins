@@ -3,9 +3,8 @@
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-// TODO(R7 #335): workspace.ts moves to the workspace module; the state path helpers then move to shared.
-import { locate, STATE_FILE } from "../../core/workspace.ts";
 import { OmiError } from "../errors/errors.ts";
+import { locate, STATE_FILE } from "../workspace.ts";
 import { migrate } from "./migrations.ts";
 
 export type Db = DatabaseSync;

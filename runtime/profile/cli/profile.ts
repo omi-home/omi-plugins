@@ -3,7 +3,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
-import { STATE_FILE } from "../../core/workspace.ts";
 import {
   type Profile,
   ProfileEdit,
@@ -13,6 +12,7 @@ import {
 } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { type Db, openState, tx } from "../../shared/sqlite/db.ts";
+import { STATE_FILE } from "../../shared/workspace.ts";
 import {
   assertNoLegacyProfiles,
   keyEnvName,

@@ -38,7 +38,7 @@ Mỗi module có tối đa 4 lớp, mỗi lớp là một thư mục con, chỉ 
 
 ### Shared kernel `runtime/shared/`
 
-`contracts.ts` (enum dùng chung giữa các module, `parseContract`), `errors/`, `redact.ts`, `config.ts` (OmiConfig), `plugin-paths.ts` (PLUGIN_ROOT và thư mục asset; thay mọi `new URL("../../…")`), `process/` (supervise, command-env), `sqlite/` (db, migrations), `github/client.ts`. Shared **không import module nào**; module nào cũng import được shared.
+`contracts.ts` (enum dùng chung giữa các module, `parseContract`), `errors/`, `redact.ts`, `config.ts` (OmiConfig), `workspace.ts` (hằng đường dẫn workspace và `locate`), `plugin-paths.ts` (PLUGIN_ROOT và thư mục asset; thay mọi `new URL("../../…")`), `process/` (supervise, command-env), `sqlite/` (db, migrations), `github/client.ts`. Shared **không import module nào**; module nào cũng import được shared.
 
 - Schema riêng của một module nằm trong `domain/` của module đó. Enum role/state/status dùng chung vẫn ở `shared/contracts.ts` (giữ nguyên tắc "contract có kiểu ở một chỗ").
 - **Composition root** `runtime/cli/main.ts` (`bin/omi` trỏ tới, giữ nguyên đường dẫn): chỉ route lệnh tới `<module>/cli/`.
@@ -64,12 +64,12 @@ Test: `tests/<loại>/<module>/**/*.test.ts`. Test được import mọi thứ n
 
 | Hiện tại | Mới |
 | --- | --- |
-| `core/contracts.ts`, `core/errors/`, `reporting/redact.ts`, `core/config.ts`, `core/workflow-config.ts` (schema, `mergeWorkflow`, `resolveWorkflow`, `loadDefaultWorkflow` → `shared/workflow.ts`; quyết định PO 2026-11-22, #332), `workflow-engine/{supervise,command-env}.ts`, `persistence/{db,migrations}.ts`, `adapters/github/client.ts` | `shared/…` |
-| `core/workspace.ts`, `cli/{workspace,init,config}.ts`, `cli/doctor.ts` | `workspace/` |
+| `core/contracts.ts`, `core/errors/`, `reporting/redact.ts`, `core/config.ts`, `core/workflow-config.ts` (schema, `mergeWorkflow`, `resolveWorkflow`, `loadDefaultWorkflow` → `shared/workflow.ts`; quyết định PO 2026-11-22, #332), `core/workspace.ts` (hằng đường dẫn workspace `CONFIG_FILE`, `STATE_FILE`… và `locate` → `shared/workspace.ts`, vì `shared/config.ts` và `shared/sqlite/db.ts` cần chúng mà shared không được import module; quyết định PO 2026-11-22, #335), `workflow-engine/{supervise,command-env}.ts`, `persistence/{db,migrations}.ts`, `adapters/github/client.ts` | `shared/…` |
+| phần còn lại của `core/workspace.ts` (nếu có), `cli/{workspace,init,config}.ts`, `cli/doctor.ts` | `workspace/` |
 | `core/{project-config,repo-config,hierarchy,issue-forms,issue-type-config}.ts` (loader đọc file nên ở `application/`), các query dẫn xuất của `core/workflow-config.ts` (`statusesOf`, `initialStatus`, `effectiveTransitions`, `transitionsBetween`, `canTransition`, `closesIssue` → `domain/workflow-queries.ts`; `loadWorkflow` → `application/load-workflow.ts`), `adapters/github/{project,project-fields,board,repo,issue,issue-types,dependency}.ts`, phần `github`/`issue` của `cli/main.ts` | `github/` |
 | `adapters/github/ticket.ts` | `ticket/` |
 | `core/handoff/packet.ts`, `adapters/github/{handoff,context}.ts` | `handoff/` |
-| `core/workflow-engine/{fsm,plan,slice,commit,checks,setup}.ts`, `resources/{worktree,role-files}.ts`, `core/attempt-liveness.ts`, `persistence/repository.ts`, `cli/{task,status}.ts` | `task-run/` (`cli/task.ts` tách theo subcommand) |
+| `core/workflow-engine/{fsm,plan,slice,commit,checks,setup}.ts`, `resources/{worktree,role-files}.ts`, `core/attempt-liveness.ts`, `persistence/repository.ts`, `cli/{task,status}.ts` | `task-run/` (`cli/task.ts` tách theo subcommand; `omi status` → `task-run/cli/`, `cleanupScan` được inject từ `runtime/cli/main.ts`; subcommand `task finalize` ở `cleanup/cli/`, `pr create/merge/validate` ở `release/cli/`; quyết định PO 2026-11-22, #335) |
 | `adapters/claude/launch.ts` | `harness/adapters/claude-code/` (không vào `task-run`, xem D7) |
 | `reporting/{render,outbox}.ts` | `reporting/` |
 | `resources/cleanup.ts`, `cli/cleanup.ts` | `cleanup/` |

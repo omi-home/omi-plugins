@@ -41,21 +41,7 @@ const effort = (c: StepComment) =>
             : " · no thinking observed"
       }`;
 
-/** Field-wise sum; an optional field stays absent only when no part has it. */
-export function sumUsage(parts: TokenUsage[]): TokenUsage | undefined {
-  if (!parts.length) return undefined;
-  const add = (k: Exclude<keyof TokenUsage, "inputTokens" | "outputTokens">) =>
-    parts.some((p) => p[k] !== undefined) ? parts.reduce((n, p) => n + (p[k] ?? 0), 0) : undefined;
-  return {
-    inputTokens: parts.reduce((n, p) => n + p.inputTokens, 0),
-    outputTokens: parts.reduce((n, p) => n + p.outputTokens, 0),
-    cacheReadTokens: add("cacheReadTokens"),
-    cacheCreationTokens: add("cacheCreationTokens"),
-    thinkingTokens: add("thinkingTokens"),
-    costUsd: add("costUsd"),
-    numTurns: add("numTurns"),
-  };
-}
+export { sumUsage } from "../../task-run/domain/usage.ts";
 
 /**
  * Observed tokens, cache hit (cache read / all input) and cost. The host computes

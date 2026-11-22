@@ -7,8 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { agentPreToolUse, type HookInput } from "../../../runtime/cli/hook.ts";
 import { AGENT_PACK } from "../../../runtime/harness/domain/harness.ts";
+import { agentPreToolUse, type HookInput } from "../../../runtime/hook/cli/hook.ts";
 import { READ_ONLY_ROLES, Role } from "../../../runtime/shared/contracts.ts";
 import { writeRoleFiles } from "../../../runtime/task-run/adapters/role-files.ts";
 

@@ -5,10 +5,13 @@ import { OmiError } from "../../../shared/errors/errors.ts";
 import { AGENT_PACK, type AgentLaunch, type Harness } from "../../domain/harness.ts";
 import {
   AUTH_ENV,
+  agentEnv,
   buildAgentLaunch,
   detectQuota,
+  HARNESSES,
   harnessVersion,
   observeRun,
+  selectionEnv,
   versionRefusal,
 } from "./launch.ts";
 
@@ -43,6 +46,9 @@ export const claudeCode: Harness = {
   name: "claudecode",
   capabilities: ["skills", "hooks", "subagent", "effort"],
   agentPack: AGENT_PACK,
+  command: HARNESSES.claudecode.command,
+  verified: { min: HARNESSES.claudecode.min, below: HARNESSES.claudecode.below },
+  env: (host, selection) => (selection ? selectionEnv(selection, host) : agentEnv(host)),
   version: (cwd) => harnessVersion("claudecode", cwd),
   versionRefusal: (version) => versionRefusal(version, "claudecode"),
   launch: buildAgentLaunch,

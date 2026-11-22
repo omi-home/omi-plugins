@@ -2,9 +2,9 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { STATE_FILE } from "../../core/workspace.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { openState, tx } from "../../shared/sqlite/db.ts";
+import { STATE_FILE } from "../../shared/workspace.ts";
 import { keyEnvName } from "../adapters/profile-config.ts";
 import { hasAnySealedSecret, listProfileRecords, writeSealed } from "../adapters/profiles.ts";
 import {

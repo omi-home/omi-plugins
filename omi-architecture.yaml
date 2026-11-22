@@ -21,7 +21,7 @@ modules:
   - {
       id: shared,
       path: runtime/shared,
-      description: "Shared kernel: contracts, errors, redact, config, plugin-paths, process, sqlite, github client",
+      description: "Shared kernel: contracts, errors, redact, config, workspace paths, plugin-paths, process, sqlite, github client",
       shared: true,
     }
   - {
@@ -75,24 +75,25 @@ modules:
       id: cleanup,
       path: runtime/cleanup,
       description: "Safe cleanup of merged tasks, worktrees and crashed attempts",
-      dependsOn: [task-run, github, reporting],
+      dependsOn: [task-run, github, reporting, release, handoff],
     }
   - {
       id: release,
       path: runtime/release,
       description: "Release gate, tagging and PR merge",
-      dependsOn: [github, task-run, reporting],
+      dependsOn: [github, task-run, ticket],
     }
   - {
       id: hook,
       path: runtime/hook,
       description: "Coordinator and agent-pack hooks",
-      dependsOn: [workspace],
+      dependsOn: [handoff, task-run],
     }
   - {
       id: workspace,
       path: runtime/workspace,
-      description: "OMI workspace layout, init and migration",
+      description: "OMI workspace init and migration, project init, config edits and omi doctor",
+      dependsOn: [architecture, context, github, harness, monitor, profile, task-run],
     }
   - {
       id: architecture,
@@ -106,22 +107,4 @@ placement:
     allowedIn: ["tests/unit/**", "tests/integration/**", "tests/contract/**", "tests/e2e/**"]
     message: "Tests live under tests/{unit,integration,contract,e2e}/<module>/, never next to the source."
 ignore: []
-legacy:
-  # R7 task-run cli, cleanup, release, hook, workspace
-  - { path: runtime/cli/cleanup.ts, issue: 335, reason: "R7: moves to runtime/cleanup/cli/" }
-  - {
-      path: runtime/cli/config.ts,
-      issue: 335,
-      reason: "R7: cli not in the R* table; moves with the remaining cli",
-    }
-  - { path: runtime/cli/doctor.ts, issue: 335, reason: "R7: moves with the remaining cli" }
-  - { path: runtime/cli/hook.ts, issue: 335, reason: "R7: moves to runtime/hook/cli/" }
-  - { path: runtime/cli/init.ts, issue: 335, reason: "R7: moves with the remaining cli" }
-  - { path: runtime/cli/release.ts, issue: 335, reason: "R7: moves to runtime/release/cli/" }
-  - { path: runtime/cli/status.ts, issue: 335, reason: "R7: moves with the remaining cli" }
-  - { path: runtime/cli/task.ts, issue: 335, reason: "R7: moves to runtime/task-run/cli/" }
-  - { path: runtime/cli/workspace.ts, issue: 335, reason: "R7: moves to runtime/workspace/cli/" }
-  - { path: runtime/resources/cleanup.ts, issue: 335, reason: "R7: moves to runtime/cleanup/" }
-  - { path: runtime/adapters/github/pr.ts, issue: 335, reason: "R7: moves to runtime/release/" }
-  - { path: runtime/adapters/github/merge.ts, issue: 335, reason: "R7: moves to runtime/release/" }
-  - { path: runtime/core/workspace.ts, issue: 335, reason: "R7: moves to runtime/workspace/" }
+legacy: []

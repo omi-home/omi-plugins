@@ -5,8 +5,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-// TODO(R7 #335): this import leaves shared when workspace moves into its module (ADR-0006).
-import { CONFIG_FILE } from "../core/workspace.ts";
 import {
   DEFAULT_KEY_ENV,
   GateCheck,
@@ -17,6 +15,7 @@ import {
 } from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
 import { resolveWorkflow } from "./workflow.ts";
+import { CONFIG_FILE, locate } from "./workspace.ts";
 
 const ModelAlias = z.enum(["sonnet", "opus", "haiku"]);
 const Effort = z.enum(["low", "medium", "high"]);
@@ -166,4 +165,10 @@ export function loadConfig(workspace: string): OmiConfig {
     );
   }
   return parseConfig(data);
+}
+
+/** Main checkout, workspace and config of the repo containing `cwd` (also from a task worktree). */
+export function repo(cwd: string): { root: string; workspace: string; config: OmiConfig } {
+  const { root, workspace } = locate(cwd);
+  return { root, workspace, config: loadConfig(workspace) };
 }
