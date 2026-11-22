@@ -5,10 +5,13 @@ import { test } from "node:test";
 import {
   mergeEligibility,
   type PrFacts,
+  prFacts,
   riskOf,
   triggersOnPullRequest,
 } from "../../../runtime/release/adapters/merge.ts";
 import { prBody } from "../../../runtime/release/adapters/pr.ts";
+import type { OmiConfig } from "../../../runtime/shared/config.ts";
+import type { GhRunner } from "../../../runtime/shared/github/client.ts";
 
 const TIP = "a".repeat(40);
 
@@ -81,6 +84,62 @@ test("triggersOnPullRequest detects pull_request triggers only", () => {
   assert.ok(!triggersOnPullRequest("on:\n  push:\n"));
   assert.ok(!triggersOnPullRequest("on:\n  pull_request_review:\n"));
   assert.ok(!triggersOnPullRequest("# pull_request\non: push\n"));
+});
+
+test("triggersOnPullRequest is structural: only `on:` keys, trailing comments ignored", () => {
+  assert.ok(
+    !triggersOnPullRequest("on: push\njobs:\n  a:\n    if: github.event_name == 'pull_request'\n"),
+  );
+  assert.ok(!triggersOnPullRequest("on:\n  push: # pull_request\n"));
+  assert.ok(!triggersOnPullRequest("on: push # pull_request\n"));
+  assert.ok(triggersOnPullRequest("on:\n  pull_request_target:\n"));
+  assert.ok(triggersOnPullRequest("on: pull_request\n"));
+  assert.ok(!triggersOnPullRequest(": : not yaml ["));
+});
+
+test("triggersOnPullRequest honours branches / branches-ignore against the base", () => {
+  const only = "on:\n  pull_request:\n    branches: [main, 'release/**']\n";
+  assert.ok(!triggersOnPullRequest(only, "develop"));
+  assert.ok(triggersOnPullRequest(only, "main"));
+  assert.ok(triggersOnPullRequest(only, "release/1.0"));
+  assert.ok(triggersOnPullRequest(only));
+  const ignore = "on:\n  pull_request:\n    branches-ignore: [develop]\n";
+  assert.ok(!triggersOnPullRequest(ignore, "develop"));
+  assert.ok(triggersOnPullRequest(ignore, "main"));
+  assert.ok(
+    !triggersOnPullRequest("on:\n  pull_request:\n    branches: ['**', '!develop']\n", "develop"),
+  );
+});
+
+function factsRun(workflows: unknown): GhRunner {
+  const data = {
+    repository: {
+      isPrivate: false,
+      viewerPermission: "WRITE",
+      squashMergeAllowed: true,
+      mergeCommitAllowed: false,
+      rebaseMergeAllowed: false,
+      ref: null,
+      pullRequests: { nodes: [] },
+      workflows,
+    },
+  };
+  return () => ({ status: 0, stdout: JSON.stringify({ data }), stderr: "" });
+}
+const cfg = { github: { owner: "o", repo: "r" } } as OmiConfig;
+const ciOf = (workflows: unknown, base = "develop") =>
+  prFacts(cfg, { head: "h", base, states: ["OPEN"] }, factsRun(workflows)).hasCi;
+const file = (name: string, text: string | null) => ({ name, object: { text } });
+
+test("prFacts hasCi: pull_request workflow yml true; null tree, non-YAML, filtered false", () => {
+  assert.equal(ciOf({ entries: [file("check.yml", "on:\n  pull_request:\n")] }), true);
+  assert.equal(ciOf({ entries: [file("a.yaml", "on: [pull_request]\n")] }), true);
+  assert.equal(ciOf(null), false);
+  assert.equal(ciOf({ entries: [file("README.md", "on: pull_request\n")] }), false);
+  assert.equal(ciOf({ entries: [file("x.yml", null)] }), false);
+  const filtered = "on:\n  pull_request:\n    branches: [main]\n";
+  assert.equal(ciOf({ entries: [file("f.yml", filtered)] }), false);
+  assert.equal(ciOf({ entries: [file("f.yml", filtered)] }, "main"), true);
 });
 
 test("no branch protection: warn on public, fail on private unless risk accepted (D5)", () => {
