@@ -7,7 +7,6 @@ import { parseArgs } from "node:util";
 import { archCheck, archShow, humanReport, violationError } from "../architecture/cli/arch.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "../cleanup/cli/cleanup.ts";
 import { taskFinalize } from "../cleanup/cli/finalize.ts";
-import { NO_PROFILE, NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "../cleanup/cli/status.ts";
 import { contextApply, contextPlan, humanContextPlan } from "../context/cli/context.ts";
 import {
   githubProjectApply,
@@ -52,6 +51,13 @@ import { ticketValidate } from "../task-run/cli/gates.ts";
 import { taskRun } from "../task-run/cli/run.ts";
 import { skillList } from "../task-run/cli/skills.ts";
 import { taskStart } from "../task-run/cli/start.ts";
+import {
+  NO_PROFILE,
+  NO_STATUS,
+  NOT_IN_PROJECT,
+  status,
+  statusKey,
+} from "../task-run/cli/status.ts";
 import { taskStatus } from "../task-run/cli/task-status.ts";
 import { taskUnblock } from "../task-run/cli/unblock.ts";
 import { configGet, configSet } from "../workspace/cli/config.ts";
@@ -488,7 +494,7 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         return ok({ omi: VERSION }, `omi ${VERSION}\n`);
       case "status": {
         const milestone = values.milestone === undefined ? undefined : issueArg(values.milestone);
-        const r = status({ cwd, milestone });
+        const r = status({ cwd, milestone, cleanupScan });
         const order: string[] = [...ProjectStatus.options, NO_STATUS, NOT_IN_PROJECT];
         const rank = (k: string) => (order.includes(k) ? order.indexOf(k) : order.length);
         const keys = Object.keys(r.byStatus).sort((a, b) => rank(a) - rank(b));
@@ -817,7 +823,7 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         } catch {
           // no or bad stdin: empty input
         }
-        if (command === "hook session-start") return ok(null, sessionStart(input));
+        if (command === "hook session-start") return ok(null, sessionStart(input, { cleanupScan }));
         let why: string | null = null;
         try {
           why = command === "hook agent-pre-tool-use" ? agentPreToolUse(input) : preToolUse(input);

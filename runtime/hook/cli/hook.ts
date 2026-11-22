@@ -5,11 +5,11 @@
 // it lets the call through (fail-open) — the CLI gates (`omi pr merge`, protection) still hold.
 import { execFileSync } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
-import { status } from "../../cleanup/cli/status.ts";
 import { listHandoffs } from "../../handoff/adapters/handoff.ts";
 import { loadConfig } from "../../shared/config.ts";
 import type { GhRunner } from "../../shared/github/client.ts";
 import { locate } from "../../shared/workspace.ts";
+import { status } from "../../task-run/cli/status.ts";
 
 export interface HookInput {
   cwd?: string;
@@ -140,7 +140,13 @@ export function agentPreToolUse(
 }
 
 /** Short context for a new, resumed or compacted Coordinator session; never throws. */
-export function sessionStart(input: HookInput, gh?: GhRunner): string {
+export function sessionStart(
+  input: HookInput,
+  deps: {
+    cleanupScan: (o: { cwd: string; gh?: GhRunner }) => { runs: unknown[] };
+    gh?: GhRunner;
+  },
+): string {
   const cwd = input.cwd ?? process.cwd();
   let workspace: string;
   try {
@@ -151,7 +157,7 @@ export function sessionStart(input: HookInput, gh?: GhRunner): string {
   const out = ["OMI Coordinator session (summary from omi; details: /omi-resume)."];
   let milestone: number | undefined;
   try {
-    const h = listHandoffs(loadConfig(workspace), gh)[0];
+    const h = listHandoffs(loadConfig(workspace), deps.gh)[0];
     if (h) {
       milestone = h.issue;
       out.push(`Latest handoff: ${h.marker} on #${h.issue} ${h.title} — ${h.url}`);
@@ -162,7 +168,12 @@ export function sessionStart(input: HookInput, gh?: GhRunner): string {
     out.push(`Latest handoff: unavailable (${(e as Error).message.slice(0, 120)}).`);
   }
   try {
-    const r = status({ cwd: workspace, milestone, ...(gh ? { gh } : {}) });
+    const r = status({
+      cwd: workspace,
+      milestone,
+      cleanupScan: deps.cleanupScan,
+      ...(deps.gh ? { gh: deps.gh } : {}),
+    });
     const counts = Object.entries(r.byStatus).map(([k, v]) => `${k} ${v.length}`);
     out.push(`Milestone #${r.milestone.number} ${r.milestone.title}: ${counts.join(", ")}.`);
     const open = r.cleanup.ok ? r.cleanup.value.runs.length : 0;

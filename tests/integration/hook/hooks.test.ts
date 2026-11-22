@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { cleanupScan } from "../../../runtime/cleanup/cli/cleanup.ts";
 import { type HookInput, preToolUse, sessionStart } from "../../../runtime/hook/cli/hook.ts";
 
 const bin = fileURLToPath(new URL("../../../bin/omi", import.meta.url));
@@ -73,13 +74,13 @@ test("git/gh: commit on develop/main, push to them and --force blocked; task wor
 test("outside an OMI workspace nothing is enforced; session-start says nothing", () => {
   const dir = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-hook-none-")));
   assert.equal(preToolUse(bash(dir, "git push --force")), null);
-  assert.equal(sessionStart({ cwd: dir }), "");
+  assert.equal(sessionStart({ cwd: dir }, { cleanupScan }), "");
 });
 
 test("session-start: GitHub down → short summary with 'unavailable', never throws", () => {
   const repo = workspace();
   const down = () => ({ status: 1, stdout: "", stderr: "HTTP 503" });
-  const out = sessionStart({ cwd: repo, source: "startup" }, down);
+  const out = sessionStart({ cwd: repo, source: "startup" }, { cleanupScan, gh: down });
   assert.match(out, /^OMI Coordinator session/);
   assert.match(out, /Latest handoff: unavailable/);
   assert.match(out, /Milestone status: unavailable/);

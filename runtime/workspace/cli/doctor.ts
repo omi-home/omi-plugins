@@ -18,6 +18,7 @@ import { sayIssueType } from "../../github/adapters/project-fields.ts";
 import { issueTypeWrites } from "../../github/application/issue-type-config.ts";
 import { harnessFor } from "../../harness/adapters/registry.ts";
 import type { AgentObservation } from "../../harness/domain/harness.ts";
+import { atLeast, semver } from "../../harness/domain/version.ts";
 import {
   keyEnvName,
   loadProfiles,
@@ -31,7 +32,6 @@ import type { Check } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { type GhRunner, graphql, spawnGh } from "../../shared/github/client.ts";
 import { redact } from "../../shared/redact.ts";
-import { atLeast } from "../../shared/semver.ts";
 import { openState } from "../../shared/sqlite/db.ts";
 import {
   CONFIG_FILE,
@@ -56,8 +56,6 @@ function run(cmd: string, args: string[], cwd: string) {
   const r = spawnSync(cmd, args, { cwd, encoding: "utf8", timeout: 30_000 });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim() };
 }
-
-const semver = (s: string) => /(\d+)\.(\d+)\.(\d+)/.exec(s)?.slice(1).map(Number);
 
 /** Claude Code inside the range the harness registry verified (#219); `omi task run` refuses others. */
 export function harnessCheck(t: Check): Check {

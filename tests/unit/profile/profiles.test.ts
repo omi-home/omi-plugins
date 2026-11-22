@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { usageByProfile } from "../../../runtime/cleanup/cli/status.ts";
 import { main } from "../../../runtime/cli/main.ts";
 import {
   atLeast,
@@ -30,6 +29,7 @@ import { OmiError } from "../../../runtime/shared/errors/errors.ts";
 import { redact } from "../../../runtime/shared/redact.ts";
 import { openState } from "../../../runtime/shared/sqlite/db.ts";
 import { harnessGate } from "../../../runtime/task-run/cli/run.ts";
+import { usageByProfile } from "../../../runtime/task-run/cli/status.ts";
 import {
   type ClaudeRun,
   type HttpGet,

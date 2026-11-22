@@ -6,7 +6,6 @@ import { isAbsolute, join, relative } from "node:path";
 import type { Selection } from "../../../profile/domain/selection.ts";
 import type { Harness } from "../../../shared/contracts.ts";
 import { OmiError } from "../../../shared/errors/errors.ts";
-import { atLeast, semver } from "../../../shared/semver.ts";
 import {
   AGENT_PACK,
   type AgentLaunch,
@@ -15,6 +14,7 @@ import {
   PLUGIN_NAME,
   type QuotaDetection,
 } from "../../domain/harness.ts";
+import { atLeast, semver } from "../../domain/version.ts";
 
 export { atLeast };
 

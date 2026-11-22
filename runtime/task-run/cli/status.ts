@@ -7,14 +7,13 @@ import { type BoardIssue, readTree } from "../../github/adapters/board.ts";
 import { type StatusDrift, statusDrift } from "../../github/adapters/project-fields.ts";
 import { repoValidate } from "../../github/adapters/repo.ts";
 import { activeMilestone } from "../../handoff/adapters/handoff.ts";
-import { sumUsage } from "../../reporting/application/render.ts";
 import { repo } from "../../shared/config.ts";
 import { type Check, ProjectStatus, type TokenUsage } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import type { GhRunner } from "../../shared/github/client.ts";
 import { openState, statePath } from "../../shared/sqlite/db.ts";
-import { type AttemptUsage, latestRun, runUsage } from "../../task-run/adapters/repository.ts";
-import { cleanupScan, type ScanResult } from "./cleanup.ts";
+import { type AttemptUsage, latestRun, runUsage } from "../adapters/repository.ts";
+import { sumUsage } from "../domain/usage.ts";
 
 type Section<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -27,11 +26,11 @@ const section = <T>(f: () => T): Section<T> => {
   }
 };
 
-export interface StatusResult {
+export interface StatusResult<S = unknown> {
   milestone: BoardIssue;
   /** Every Issue below the Milestone, by Project Status ("not in Project" when it is not in it). */
   byStatus: Record<string, BoardIssue[]>;
-  cleanup: Section<ScanResult>;
+  cleanup: Section<S>;
   drift: Section<StatusDrift[]>;
   /** Governance checks that did not pass. */
   governance: Section<Check[]>;
@@ -93,7 +92,13 @@ export const statusKey = (i: BoardIssue): string =>
         ? i.status
         : `unknown Status '${i.status}'`;
 
-export function status(deps: { cwd: string; milestone?: number; gh?: GhRunner }): StatusResult {
+export function status<S>(deps: {
+  cwd: string;
+  milestone?: number;
+  gh?: GhRunner;
+  /** Injected by the composition root so task-run does not depend on cleanup. */
+  cleanupScan: (o: { cwd: string; gh?: GhRunner }) => S;
+}): StatusResult<S> {
   const { config } = repo(deps.cwd);
   const number = deps.milestone ?? activeMilestone(config, deps.gh);
   const [milestone, ...rest] = readTree(config, number, deps.gh);
@@ -104,7 +109,7 @@ export function status(deps: { cwd: string; milestone?: number; gh?: GhRunner })
   return {
     milestone: milestone as BoardIssue,
     byStatus,
-    cleanup: section(() => cleanupScan({ cwd: deps.cwd, gh: deps.gh })),
+    cleanup: section(() => deps.cleanupScan({ cwd: deps.cwd, gh: deps.gh })),
     drift: section(() =>
       statusDrift(config, deps.gh).filter((d) => inTree.has(d.issue.toLowerCase())),
     ),

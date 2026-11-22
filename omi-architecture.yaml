@@ -87,7 +87,7 @@ modules:
       id: hook,
       path: runtime/hook,
       description: "Coordinator and agent-pack hooks",
-      dependsOn: [cleanup, handoff],
+      dependsOn: [handoff, task-run],
     }
   - {
       id: workspace,
