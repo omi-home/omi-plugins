@@ -12,8 +12,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { type CliIo, main } from "../../runtime/cli/main.ts";
-import { secretInitKey, secretRotateKey } from "../../runtime/cli/secret.ts";
+import { type CliIo, main } from "../../../runtime/cli/main.ts";
+import { loadProfiles } from "../../../runtime/profile/adapters/profile-config.ts";
+import { getProfileRecord } from "../../../runtime/profile/adapters/profiles.ts";
+import { secretInitKey, secretRotateKey } from "../../../runtime/profile/cli/secret.ts";
 import {
   decryptSecret,
   encryptSecret,
@@ -21,12 +23,10 @@ import {
   keyFingerprint,
   loadMasterKey,
   parseMasterKey,
-} from "../../runtime/core/secrets.ts";
-import { getProfileRecord } from "../../runtime/persistence/profiles.ts";
-import { loadProfiles } from "../../runtime/shared/config.ts";
-import type { OmiError } from "../../runtime/shared/errors/errors.ts";
-import { openState } from "../../runtime/shared/sqlite/db.ts";
-import { MIGRATIONS } from "../../runtime/shared/sqlite/migrations.ts";
+} from "../../../runtime/profile/domain/secrets.ts";
+import type { OmiError } from "../../../runtime/shared/errors/errors.ts";
+import { openState } from "../../../runtime/shared/sqlite/db.ts";
+import { MIGRATIONS } from "../../../runtime/shared/sqlite/migrations.ts";
 
 const CANARY = "sk-ant-oat01-CANARY-token-0123456789abcdef";
 const KEY = generateMasterKey();

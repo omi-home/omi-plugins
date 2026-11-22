@@ -20,7 +20,17 @@ import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/
 import { archCheck, archShow, humanReport, violationError } from "../architecture/cli/arch.ts";
 import type { RepoAction } from "../core/repo-config.ts";
 import { CONFIG_FILE, locate } from "../core/workspace.ts";
-import { MONITOR_PROTOCOL_VERSION } from "../monitor/protocol.ts";
+import { MONITOR_PROTOCOL_VERSION } from "../monitor/cli/protocol.ts";
+import {
+  type ProfileDeps,
+  profileAdd,
+  profileEdit,
+  profileImport,
+  profileList,
+  profileRemove,
+  profileSetToken,
+} from "../profile/cli/profile.ts";
+import { secretInitKey, secretRotateKey } from "../profile/cli/secret.ts";
 import { formatUsage, sumUsage } from "../reporting/cli/usage.ts";
 import { skillList } from "../resources/role-files.ts";
 import { workflowModel } from "../shared/config.ts";
@@ -41,17 +51,7 @@ import { contextApply, contextPlan, humanContextPlan } from "./context.ts";
 import { type Check, doctor, probeProfiles } from "./doctor.ts";
 import { agentPreToolUse, type HookInput, preToolUse, sessionStart } from "./hook.ts";
 import { projectInit } from "./init.ts";
-import {
-  type ProfileDeps,
-  profileAdd,
-  profileEdit,
-  profileImport,
-  profileList,
-  profileRemove,
-  profileSetToken,
-} from "./profile.ts";
 import { releaseCheck, releaseTag } from "./release.ts";
-import { secretInitKey, secretRotateKey } from "./secret.ts";
 import { NO_PROFILE, NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "./status.ts";
 import {
   prCreate,

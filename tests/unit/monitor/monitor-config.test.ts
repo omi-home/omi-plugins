@@ -13,16 +13,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { main } from "../../runtime/cli/main.ts";
+import { main } from "../../../runtime/cli/main.ts";
+import { schemaFile } from "../../../runtime/monitor/adapters/schemas.ts";
 import {
   Envelope,
   MONITOR_PROTOCOL_VERSION,
   MONITOR_SCHEMAS,
   renderSchema,
-} from "../../runtime/monitor/protocol.ts";
-import { schemaFile } from "../../runtime/monitor/schemas.ts";
+} from "../../../runtime/monitor/domain/protocol.ts";
 
-const bin = fileURLToPath(new URL("../../bin/omi", import.meta.url));
+const bin = fileURLToPath(new URL("../../../bin/omi", import.meta.url));
 
 const YAML = `# OMI settings
 github:

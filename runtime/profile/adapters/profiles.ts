@@ -1,10 +1,10 @@
 // Execution profiles in `state.sqlite` (ADR-0004 D3). The typed single writer of the `profile` table;
 // sealed tokens come and go as SealedSecret, never as plaintext.
 
-import type { SealedSecret } from "../core/secrets.ts";
-import { type Profile, Profile as ProfileSchema, parseContract } from "../shared/contracts.ts";
-import { OmiError } from "../shared/errors/errors.ts";
-import { type Db, tx } from "../shared/sqlite/db.ts";
+import { type Profile, Profile as ProfileSchema, parseContract } from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { type Db, tx } from "../../shared/sqlite/db.ts";
+import type { SealedSecret } from "../domain/secrets.ts";
 
 interface Row {
   name: string;

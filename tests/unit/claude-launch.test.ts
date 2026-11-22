@@ -11,7 +11,7 @@ import {
   observeRun,
 } from "../../runtime/adapters/claude/launch.ts";
 import { spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
-import type { Selection } from "../../runtime/shared/config.ts";
+import type { Selection } from "../../runtime/profile/domain/selection.ts";
 import { OmiError } from "../../runtime/shared/errors/errors.ts";
 
 const win = process.platform === "win32";

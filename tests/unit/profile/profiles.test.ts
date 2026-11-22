@@ -5,30 +5,34 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { atLeast, HARNESSES, versionRefusal } from "../../runtime/adapters/claude/launch.ts";
+import { atLeast, HARNESSES, versionRefusal } from "../../../runtime/adapters/claude/launch.ts";
 import {
   type ClaudeRun,
   type HttpGet,
   harnessCheck,
   probeProfiles,
   profilesCheck,
-} from "../../runtime/cli/doctor.ts";
-import { main } from "../../runtime/cli/main.ts";
-import { usageByProfile } from "../../runtime/cli/status.ts";
-import { harnessGate } from "../../runtime/cli/task.ts";
-import { encryptSecret, generateMasterKey, parseMasterKey } from "../../runtime/core/secrets.ts";
-import { addProfile } from "../../runtime/persistence/profiles.ts";
+} from "../../../runtime/cli/doctor.ts";
+import { main } from "../../../runtime/cli/main.ts";
+import { usageByProfile } from "../../../runtime/cli/status.ts";
+import { harnessGate } from "../../../runtime/cli/task.ts";
 import {
   listProfiles,
   loadProfiles,
   profileSecretResolver,
   readLegacyProfiles,
-  selectProfile,
-} from "../../runtime/shared/config.ts";
-import { Profile, ProfilesFile } from "../../runtime/shared/contracts.ts";
-import { OmiError } from "../../runtime/shared/errors/errors.ts";
-import { redact } from "../../runtime/shared/redact.ts";
-import { openState } from "../../runtime/shared/sqlite/db.ts";
+} from "../../../runtime/profile/adapters/profile-config.ts";
+import { addProfile } from "../../../runtime/profile/adapters/profiles.ts";
+import {
+  encryptSecret,
+  generateMasterKey,
+  parseMasterKey,
+} from "../../../runtime/profile/domain/secrets.ts";
+import { selectProfile } from "../../../runtime/profile/domain/selection.ts";
+import { Profile, ProfilesFile } from "../../../runtime/shared/contracts.ts";
+import { OmiError } from "../../../runtime/shared/errors/errors.ts";
+import { redact } from "../../../runtime/shared/redact.ts";
+import { openState } from "../../../runtime/shared/sqlite/db.ts";
 
 // Opaque on purpose: matches no static redact rule, so only registerSecret can scrub it.
 const SECRET = "omi-canary-profiles-5d4c3b2a1f09";
@@ -214,7 +218,7 @@ test("doctor: secret env must be set for every active profile", () => {
 
 test("workspace template matches the contract", () => {
   const tpl = fileURLToPath(
-    new URL("../../templates/workspace/.omi-plugins/omi.config.json", import.meta.url),
+    new URL("../../../templates/workspace/.omi-plugins/omi.config.json", import.meta.url),
   );
   assert.ok(ProfilesFile.safeParse(JSON.parse(readFileSync(tpl, "utf8"))).success);
 });

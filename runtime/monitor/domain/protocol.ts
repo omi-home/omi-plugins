@@ -1,9 +1,9 @@
 // Contracts shared with omi-monitor (ADR-0004 D1): the `--output json` envelope and the data of the
 // commands the web app calls. JSON Schemas of these are generated into schemas/monitor/.
 import { z } from "zod";
-import { OmiConfig } from "../shared/config.ts";
-import { ProfileAuth, ProfileEffort } from "../shared/contracts.ts";
-import { ERROR_CODES } from "../shared/errors/errors.ts";
+import { OmiConfig } from "../../shared/config.ts";
+import { ProfileAuth, ProfileEffort } from "../../shared/contracts.ts";
+import { ERROR_CODES } from "../../shared/errors/errors.ts";
 
 /**
  * Version of the wire protocol between `omi` and omi-monitor (envelope + monitor command data).

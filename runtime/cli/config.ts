@@ -5,7 +5,7 @@ import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isCollection, isMap, parseDocument } from "yaml";
 import { CONFIG_FILE } from "../core/workspace.ts";
-import { ConfigSetInput } from "../monitor/protocol.ts";
+import { ConfigSetInput } from "../monitor/domain/protocol.ts";
 import { type OmiConfig, parseConfig } from "../shared/config.ts";
 import { parseContract } from "../shared/contracts.ts";
 import { OmiError } from "../shared/errors/errors.ts";

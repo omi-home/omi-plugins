@@ -8,10 +8,11 @@ import { test } from "node:test";
 import { buildAgentLaunch } from "../../../runtime/adapters/claude/launch.ts";
 import { main } from "../../../runtime/cli/main.ts";
 import { commandEnvFor } from "../../../runtime/cli/task.ts";
-import { generateMasterKey } from "../../../runtime/core/secrets.ts";
 import { runChecks } from "../../../runtime/core/workflow-engine/checks.ts";
 import { runSetup } from "../../../runtime/core/workflow-engine/setup.ts";
-import { parseConfig, type Selection } from "../../../runtime/shared/config.ts";
+import { generateMasterKey } from "../../../runtime/profile/domain/secrets.ts";
+import type { Selection } from "../../../runtime/profile/domain/selection.ts";
+import { parseConfig } from "../../../runtime/shared/config.ts";
 import { Profile } from "../../../runtime/shared/contracts.ts";
 import { commandEnv } from "../../../runtime/shared/process/command-env.ts";
 
