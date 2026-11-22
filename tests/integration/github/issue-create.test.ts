@@ -2,8 +2,8 @@
 // per type, idempotent re-run, wrong parent, cycle, cross-repo parent, numbering race, paging.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readSection, sectionOf } from "../../../runtime/adapters/github/context.ts";
 import { createIssue, type IssueAt } from "../../../runtime/github/adapters/issue.ts";
+import { readSection, sectionOf } from "../../../runtime/handoff/adapters/context.ts";
 import type { OmiConfig } from "../../../runtime/shared/config.ts";
 import type { OmiError } from "../../../runtime/shared/errors/errors.ts";
 import type { GhRunner } from "../../../runtime/shared/github/client.ts";

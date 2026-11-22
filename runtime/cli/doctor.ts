@@ -15,7 +15,7 @@ import {
 } from "../adapters/claude/launch.ts";
 import { archCheck, DEFAULT_CONTRACT, loadContract } from "../architecture/cli/arch.ts";
 import { formatViolation } from "../architecture/domain/rules.ts";
-import { parseContext } from "../core/context-usage.ts";
+import { parseContext } from "../context/domain/context-usage.ts";
 import {
   CONFIG_FILE,
   locate,

@@ -10,12 +10,12 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { observeRun } from "../../runtime/adapters/claude/launch.ts";
+import { prepareAgent, spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
 import {
   acceptStepResult,
   buildTaskPacket,
   packetPrompt,
-} from "../../runtime/core/handoff/packet.ts";
-import { prepareAgent, spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
+} from "../../runtime/handoff/application/packet.ts";
 import { roleSkills } from "../../runtime/resources/role-files.ts";
 import type { Role } from "../../runtime/shared/contracts.ts";
 

@@ -1,12 +1,12 @@
 // `/context` of `claude -p` (DevTask-0066 #201): parse its markdown tables into typed items and
-// classify each as needed / unneeded / unknown for OMI. Pure: measuring is runtime/cli/context.ts.
+// classify each as needed / unneeded / unknown for OMI. Pure: measuring is runtime/context/cli/context.ts.
 import { isAbsolute, relative } from "node:path";
 import {
   type ContextClass,
   type ContextItemKind,
   ContextUsage,
   parseContract,
-} from "../shared/contracts.ts";
+} from "../../shared/contracts.ts";
 
 /** `7.1k`, `~170`, `661`, `1m` → tokens. */
 export function tokenCount(s: string): number {

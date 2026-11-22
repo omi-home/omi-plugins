@@ -11,13 +11,13 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { observeRun } from "../../runtime/adapters/claude/launch.ts";
-import { parseContext } from "../../runtime/core/context-usage.ts";
+import { parseContext } from "../../runtime/context/domain/context-usage.ts";
+import { prepareAgent, spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
 import {
   acceptStepResult,
   buildTaskPacket,
   packetPrompt,
-} from "../../runtime/core/handoff/packet.ts";
-import { prepareAgent, spawnAgent } from "../../runtime/core/workflow-engine/slice.ts";
+} from "../../runtime/handoff/application/packet.ts";
 import type { Role } from "../../runtime/shared/contracts.ts";
 
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");

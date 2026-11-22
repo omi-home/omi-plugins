@@ -5,8 +5,8 @@
 // it lets the call through (fail-open) — the CLI gates (`omi pr merge`, protection) still hold.
 import { execFileSync } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
-import { listHandoffs } from "../adapters/github/handoff.ts";
 import { locate } from "../core/workspace.ts";
+import { listHandoffs } from "../handoff/adapters/handoff.ts";
 import { loadConfig } from "../shared/config.ts";
 import type { GhRunner } from "../shared/github/client.ts";
 import { status } from "./status.ts";

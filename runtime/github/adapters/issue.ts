@@ -4,8 +4,6 @@
 // Read before every write: a second run with the same type + title finds the Issue it made and
 // only completes the steps still missing; a wrong parent or a cycle is refused before any write.
 import { z } from "zod";
-// TODO(R5 #333): ticket.ts moves to the ticket module; its NATIVE_TYPE then needs a shared home.
-import { NATIVE_TYPE } from "../../adapters/github/ticket.ts";
 import { type OmiConfig, workflowModel } from "../../shared/config.ts";
 import { type IssueType, IssueTypeV2 } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
@@ -23,6 +21,7 @@ import {
 } from "../application/hierarchy.ts";
 import { loadForm, missingSections, sectionsCheckV2 } from "../application/issue-forms.ts";
 import { loadProjectConfig } from "../application/project-config.ts";
+import { NATIVE_TYPE } from "../domain/native-type.ts";
 import { initialStatus } from "../domain/workflow-queries.ts";
 import { setItemStatus, statusField } from "./project.ts";
 

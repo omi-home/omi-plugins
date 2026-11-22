@@ -6,7 +6,6 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { harnessVersion, versionRefusal } from "../adapters/claude/launch.ts";
-import { writeSection } from "../adapters/github/context.ts";
 import {
   type MergeReceipt,
   mergeEligibility,
@@ -25,12 +24,6 @@ import {
   sleepSync,
   validatePr,
 } from "../adapters/github/pr.ts";
-import {
-  fetchTicket,
-  readIssueType,
-  type Ticket,
-  validateTicket,
-} from "../adapters/github/ticket.ts";
 import { PRE_MERGE, PROJECT_STATUS, transition } from "../core/workflow-engine/fsm.ts";
 import { planWorkflow, type WorkflowPlan } from "../core/workflow-engine/plan.ts";
 import { runSetup } from "../core/workflow-engine/setup.ts";
@@ -57,6 +50,7 @@ import {
   titleCheckV2,
 } from "../github/application/hierarchy.ts";
 import { sectionsCheck, sectionsCheckV2 } from "../github/application/issue-forms.ts";
+import { writeSection } from "../handoff/adapters/context.ts";
 import {
   type AttemptUsage,
   acquireLease,
@@ -108,6 +102,12 @@ import { type GhRunner, graphql, spawnGh } from "../shared/github/client.ts";
 import { PLUGIN_ROOT } from "../shared/plugin-paths.ts";
 import { commandEnv } from "../shared/process/command-env.ts";
 import { type Db, openState, statePath } from "../shared/sqlite/db.ts";
+import {
+  fetchTicket,
+  readIssueType,
+  type Ticket,
+  validateTicket,
+} from "../ticket/adapters/ticket.ts";
 
 /**
  * Env of the repo's check/setup commands: the host's without the master key and any auth variable,

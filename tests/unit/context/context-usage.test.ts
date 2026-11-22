@@ -3,14 +3,18 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { contextSummary } from "../../../runtime/cli/doctor.ts";
 import {
   type ContextRunner,
   humanContextPlan,
   measureRole,
   measureWorkspace,
-} from "../../runtime/cli/context.ts";
-import { contextSummary } from "../../runtime/cli/doctor.ts";
-import { classify, parseContext, tokenCount } from "../../runtime/core/context-usage.ts";
+} from "../../../runtime/context/cli/context.ts";
+import {
+  classify,
+  parseContext,
+  tokenCount,
+} from "../../../runtime/context/domain/context-usage.ts";
 
 const WS = process.platform === "win32" ? "C:\\ws" : "/ws";
 const SAMPLE = `## Context Usage
@@ -116,7 +120,7 @@ test("plan: workspace runs plain claude -p; a role runs as omi task run would, f
     return SAMPLE;
   };
   const ws = measureWorkspace({ workspace: WS, keep: [], run });
-  const pluginRoot = fileURLToPath(new URL("../../", import.meta.url));
+  const pluginRoot = fileURLToPath(new URL("../../../", import.meta.url));
   const role = measureRole({ role: "backend-engineer", keep: [], run, pluginRoot, hostEnv: {} });
   assert.deepEqual(calls[0], { cwd: WS, args: ["-p"] });
   assert.deepEqual(calls[1]?.args.slice(0, 3), [

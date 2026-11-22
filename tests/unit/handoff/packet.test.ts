@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { buildTaskPacket } from "../../../runtime/core/handoff/packet.ts";
 import { architectureExcerpt } from "../../../runtime/core/workflow-engine/slice.ts";
+import { buildTaskPacket } from "../../../runtime/handoff/application/packet.ts";
 import { parseConfig } from "../../../runtime/shared/config.ts";
-import { makeRepo, validContract } from "./helpers.ts";
+import { makeRepo, validContract } from "../architecture/helpers.ts";
 
 const config = parseConfig({ github: { owner: "o", repo: "r", projectNumber: 2 } });
 const base = "a".repeat(40);
