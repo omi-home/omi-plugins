@@ -1,4 +1,5 @@
 // DevTask-0055 #168: the agent runs as a full Claude Code session in its task workspace.
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

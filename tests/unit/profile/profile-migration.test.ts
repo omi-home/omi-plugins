@@ -1,5 +1,6 @@
 // DevTask-0120 #359 (Feature-0044 #337): `omi profile import` moves the unmigrated rows of the
 // workspace `profile_legacy` onto the machine DB, sealed columns verbatim, with `--resolve`.
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";

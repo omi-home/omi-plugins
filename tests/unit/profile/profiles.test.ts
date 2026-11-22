@@ -1,4 +1,5 @@
 // DevTask-0073 #216: omi.config.json contract, `omi profile list`, static doctor check.
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

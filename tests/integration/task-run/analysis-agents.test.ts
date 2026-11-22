@@ -1,6 +1,7 @@
 // T5.1 BA / Solution Architect / UI/UX: live canary (each agent sees exactly its default skills) and a
 // narrow evaluation task (a real task packet → an accepted step result proposing only the role's
 // Issue section, no file changes). Costs tokens: opt in with OMI_LIVE=1.
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";

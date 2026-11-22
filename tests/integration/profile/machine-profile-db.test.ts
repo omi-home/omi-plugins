@@ -1,5 +1,6 @@
 // DevTask-0119 #358 (Feature-0044 #337): profiles live in one machine DB shared by every workspace
 // (AC-2, AC-3), concurrent writers lose nothing (AC-6), the monitor protocol still round-trips (AC-7).
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync } from "node:fs";

@@ -1,4 +1,5 @@
 // T2.1 CLI golden output and exit-code matrix, through the real bin/omi launcher.
+import "../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";

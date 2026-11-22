@@ -3,6 +3,7 @@
 // the same file can run on an older commit (baseline before #199) and on `develop` for a before/after
 // table. Only APIs that exist on both sides: role defaults come from prepareAgent itself.
 // Each run appends one JSON line to $OMI_PROBE_OUT when set.
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

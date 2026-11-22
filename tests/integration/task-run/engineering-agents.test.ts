@@ -2,6 +2,7 @@
 // task with a packet scope and an upstream contract in issueContext: edits stay in scope, the
 // contract's names are used verbatim, the result is accepted. Backend also runs a round-2 rework
 // whose diff is limited to the open finding (delta rework).
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

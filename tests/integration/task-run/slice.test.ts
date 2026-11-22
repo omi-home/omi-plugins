@@ -1,6 +1,7 @@
 // T3.6 vertical slice with stubbed agents (real git worktree, real checks, in-memory GitHub):
 // one report per step and round, delta findings between rounds, no fifth Dev, one Architect,
 // transport failures retried as attempts, bad claims blocked, crash-resume without re-running.
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {

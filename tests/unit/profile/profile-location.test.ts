@@ -1,5 +1,6 @@
 // DevTask-0119 #358 (Feature-0044 #337): where the machine profile DB lives, and the guarantee
 // that no test touches the real one.
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";

@@ -2,6 +2,7 @@
 // task workspace `.claude/skills/` and never the main session.
 // /context check runs whenever `claude` is on PATH (no model call). Live agent runs cost tokens:
 // opt in with OMI_LIVE=1.
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
