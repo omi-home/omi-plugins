@@ -117,6 +117,8 @@ export function planProfileImport(
     }
     const fields = differingFields(m.profile, s.profile);
     if (!fields.length) {
+      // Deliberate (Coordinator, review #359 CR-001): a source row without a token adds nothing
+      // to a machine row with the same fields, so it is `identical` (only marked migrated).
       if (!s.sealed) plan.identical.push(name);
       else if (!m.sealed) plan.tokenFilled.push(s);
       else {

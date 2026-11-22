@@ -435,6 +435,18 @@ export function profileImport(
   if (writes) {
     withDb(d, (db) =>
       tx(db, "import profiles", () => {
+        // The plan was read outside this transaction (review #359 SEC-001): a `copy` name that
+        // another workspace or omi-monitor added meanwhile must not be overwritten silently.
+        const exists = db.prepare("SELECT 1 AS x FROM profile WHERE name = ?");
+        for (const e of plan.copy) {
+          if (exists.get(e.profile.name)) {
+            throw new OmiError(
+              "CONFIG_CONFLICT",
+              `profile ${e.profile.name} was added to the machine profile database during import: run \`omi profile import\` again`,
+              { conflicts: [{ name: e.profile.name, fields: [], token: "unverifiable" }] },
+            );
+          }
+        }
         for (const e of [...plan.copy, ...plan.overwrite]) upsertProfileRow(db, e);
         for (const e of plan.tokenFilled) {
           if (e.sealed) writeSealed(db, e.profile.name, e.sealed, now);
