@@ -49,7 +49,7 @@ function restrict(file: string): void {
 export function openProfileDb(file: string): Db {
   // openDb would create the directory with the default mode: make it private first (POSIX)
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  const db = openDb(file, PROFILE_DB_MIGRATIONS, "open profile store");
+  const db = openDb(file, PROFILE_DB_MIGRATIONS, "open profile store", "profile");
   restrict(file);
   return db;
 }

@@ -24,7 +24,12 @@ export const openState = (file: string): Db => openDb(file, MIGRATIONS, "open st
  * Opens (creating if needed) a database with the pragmas every OMI database shares, then runs its
  * own forward-only `migrations` (tracked in that file's `PRAGMA user_version`).
  */
-export function openDb(file: string, migrations: readonly string[], what = "open database"): Db {
+export function openDb(
+  file: string,
+  migrations: readonly string[],
+  what = "open database",
+  label = "state",
+): Db {
   if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   try {
@@ -35,7 +40,7 @@ export function openDb(file: string, migrations: readonly string[], what = "open
       PRAGMA synchronous = FULL;
       PRAGMA foreign_keys = ON;
     `);
-    migrate(db, migrations);
+    migrate(db, migrations, label);
     return db;
   } catch (e) {
     db.close();

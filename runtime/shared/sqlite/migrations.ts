@@ -148,14 +148,25 @@ export const MIGRATIONS: readonly string[] = [
     updated_at         TEXT NOT NULL
   );
   `,
+  // 9 — profiles moved to the machine profile DB (Feature-0044 #337): the old table stays only as a
+  // read-only migration source; `omi profile import` marks its rows migrated.
+  `
+  ALTER TABLE profile RENAME TO profile_legacy;
+  ALTER TABLE profile_legacy ADD COLUMN migrated_at TEXT;
+  `,
 ];
 
-export function migrate(db: DatabaseSync, migrations: readonly string[] = MIGRATIONS): number {
+/** `label` names the database in errors ("state", "profile"). */
+export function migrate(
+  db: DatabaseSync,
+  migrations: readonly string[] = MIGRATIONS,
+  label = "state",
+): number {
   const version = () => Number(db.prepare("PRAGMA user_version").get()?.user_version ?? 0);
   if (version() > migrations.length) {
     throw new OmiError(
       "SCHEMA_VERSION_UNSUPPORTED",
-      `state database is version ${version()}, this OMI supports ${migrations.length}: upgrade OMI`,
+      `${label} database is version ${version()}, this OMI supports ${migrations.length}: upgrade OMI`,
     );
   }
   while (version() < migrations.length) {
@@ -170,7 +181,7 @@ export function migrate(db: DatabaseSync, migrations: readonly string[] = MIGRAT
       db.exec("COMMIT");
     } catch (e) {
       if (db.isTransaction) db.exec("ROLLBACK");
-      throw new OmiError("INTERNAL", `state migration ${next} failed`, {
+      throw new OmiError("INTERNAL", `${label} migration ${next} failed`, {
         sqlite: (e as Error).message,
       });
     }

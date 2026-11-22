@@ -204,10 +204,14 @@ Commands:
   profile remove <name>  Delete a profile and its sealed token
   profile set-token <name>
                          Seal the token read from stdin (never argv) for the profile; overwrites
-  profile import [--dry-run]
+  profile import [--dry-run] [--resolve <name>=machine|workspace]...
                          One-time move of omi.config.json (and a YAML profiles section) into the
                          database: seals each token from the env variable the profile declares, renames
-                         the file to <file>.<timestamp>.bak. Re-running is safe; env variables are kept
+                         the file to <file>.<timestamp>.bak. Re-running is safe; env variables are kept.
+                         Also moves the profile rows of this workspace's state.sqlite onto the machine
+                         database, sealed tokens copied as they are. A profile that differs from the
+                         machine one is a conflict (CONFIG_CONFLICT, nothing written) until each is
+                         settled with --resolve <name>=machine (keep the machine one) or =workspace
   secret init-key        Create the master key (AES-256-GCM, 32 bytes) in the user environment variable
                          secrets.keyEnv (default OMI_SECRET_KEY); never printed. Refused when a key is
                          set or the database holds sealed tokens. Windows; elsewhere prints how
@@ -599,10 +603,19 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         return ok({ profile: p }, lines([humanProfile(p)]));
       }
       case "profile import": {
-        const r = profileImport(deps(), Boolean(values["dry-run"]));
+        const r = profileImport(deps(), Boolean(values["dry-run"]), values.resolve ?? []);
         const human = [
           ...(r.dryRun ? ["dry run  nothing changed"] : []),
           ...r.imported.map((n) => `imported  ${n}`),
+          ...r.identical.map((n) => `identical ${n} (already on the machine; marked migrated)`),
+          ...r.tokenFilled.map(
+            (n) => `token     ${n} copied (sealed, the machine profile had none)`,
+          ),
+          ...r.resolved.map((x) => `resolved  ${x.name} (${x.choice})`),
+          ...r.conflicts.map(
+            (c) =>
+              `conflict  ${c.name} (fields: ${c.fields.join(", ") || "none"}; token: ${c.token}): \`--resolve ${c.name}=machine|workspace\``,
+          ),
           ...r.kept.map((n) => `kept      ${n} (already in the database)`),
           ...r.differing.map(
             (n) => `differs   ${n} (the file declares it differently: \`omi profile edit ${n}\`)`,
@@ -612,7 +625,12 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
             (n) => `no token  ${n} (its env variable is not set: \`profile set-token\`)`,
           ),
           ...r.backups.map((f) => `backup    ${f}`),
-          ...(r.imported.length || r.kept.length || r.backups.length
+          ...(r.imported.length ||
+          r.kept.length ||
+          r.backups.length ||
+          r.identical.length ||
+          r.conflicts.length ||
+          r.legacyMigrated.length
             ? ["note      env variables are kept until ChangeRequest-0004 #241 releases"]
             : ["import    nothing to import"]),
         ];
@@ -956,6 +974,7 @@ const parse = (args: string[]) =>
       title: { type: "string" },
       "body-file": { type: "string" },
       "dry-run": { type: "boolean" },
+      resolve: { type: "string", multiple: true },
       safe: { type: "boolean" },
       reason: { type: "string" },
       profile: { type: "string" },

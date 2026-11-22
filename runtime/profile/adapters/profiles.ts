@@ -1,5 +1,6 @@
-// Execution profiles in `state.sqlite` (ADR-0004 D3). The typed single writer of the `profile` table;
-// sealed tokens come and go as SealedSecret, never as plaintext.
+// Execution profiles in the machine profile DB (ADR-0004 D3, Feature-0044 #337). The typed single
+// writer of the `profile` table; sealed tokens come and go as SealedSecret, never as plaintext.
+// `profile_legacy` of the workspace `state.sqlite` is only read, and stamped by `markLegacyMigrated`.
 
 import { type Profile, Profile as ProfileSchema, parseContract } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
@@ -56,8 +57,71 @@ const toRecord = (r: Row): ProfileRecord => {
   };
 };
 
-export const listProfileRecords = (db: Db): ProfileRecord[] =>
-  (db.prepare("SELECT * FROM profile ORDER BY rowid").all() as unknown as Row[]).map(toRecord);
+/** `profile` in the machine DB; `profile_legacy` in `state.sqlite` (read-only migration source). */
+export type ProfileTable = "profile" | "profile_legacy";
+
+export const listProfileRecords = (db: Db, table: ProfileTable = "profile"): ProfileRecord[] =>
+  (db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as unknown as Row[]).map(toRecord);
+
+/** A row of `profile_legacy` of the workspace state DB; `migratedAt` is null until `import` ran. */
+export interface LegacyRecord extends ProfileRecord {
+  migratedAt: string | null;
+}
+
+export const listLegacyRows = (db: Db): LegacyRecord[] =>
+  (
+    db.prepare("SELECT * FROM profile_legacy ORDER BY rowid").all() as unknown as (Row & {
+      migrated_at: string | null;
+    })[]
+  ).map((r) => ({ ...toRecord(r), migratedAt: r.migrated_at }));
+
+/** Names of legacy rows not yet migrated: while there are any, every profile command refuses. */
+export const unmigratedLegacyNames = (db: Db): string[] =>
+  (
+    db
+      .prepare("SELECT name FROM profile_legacy WHERE migrated_at IS NULL ORDER BY rowid")
+      .all() as unknown as { name: string }[]
+  ).map((r) => r.name);
+
+/** The only write to `profile_legacy`: stamps rows as migrated, in one short transaction. */
+export function markLegacyMigrated(db: Db, names: readonly string[], now: string): void {
+  if (!names.length) return;
+  tx(db, "mark legacy profiles migrated", () => {
+    const stmt = db.prepare(
+      "UPDATE profile_legacy SET migrated_at = ? WHERE name = ? AND migrated_at IS NULL",
+    );
+    for (const n of names) stmt.run(now, n);
+  });
+}
+
+/**
+ * Writes a whole record (sealed columns verbatim, no decryption) inside the caller's transaction:
+ * inserts it or overwrites the row of the same name (`--resolve <name>=workspace`).
+ */
+export function upsertProfileRow(db: Db, rec: ProfileRecord): void {
+  const p = rec.profile;
+  const [harness, disabled, auth, models] = fields(p);
+  db.prepare(
+    `${insertSql} ON CONFLICT(name) DO UPDATE SET
+       harness = excluded.harness, disabled = excluded.disabled, auth = excluded.auth,
+       models = excluded.models, efforts = excluded.efforts,
+       secret_ciphertext = excluded.secret_ciphertext, secret_iv = excluded.secret_iv,
+       secret_tag = excluded.secret_tag, key_fingerprint = excluded.key_fingerprint,
+       updated_at = excluded.updated_at`,
+  ).run(
+    p.name,
+    harness,
+    disabled,
+    auth,
+    models,
+    JSON.stringify(p.efforts),
+    rec.sealed?.ciphertext ?? null,
+    rec.sealed?.iv ?? null,
+    rec.sealed?.tag ?? null,
+    rec.sealed?.keyFingerprint ?? null,
+    rec.updatedAt,
+  );
+}
 
 export const getProfileRecord = (db: Db, name: string): ProfileRecord | undefined => {
   const row = db.prepare("SELECT * FROM profile WHERE name = ?").get(name) as unknown as

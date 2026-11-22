@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { tx } from "../../shared/sqlite/db.ts";
-import { keyEnvName } from "../adapters/profile-config.ts";
+import { assertNoUnmigratedRows, keyEnvName } from "../adapters/profile-config.ts";
 import { withExistingProfileDb } from "../adapters/profile-store.ts";
 import { hasAnySealedSecret, listProfileRecords, writeSealed } from "../adapters/profiles.ts";
 import {
@@ -80,6 +80,8 @@ export interface InitKeyResult {
 }
 
 export function secretInitKey(d: SecretDeps): InitKeyResult {
+  // Only the unmigrated rows: a legacy file is moved by `omi profile import`, which needs this key first.
+  assertNoUnmigratedRows(d.workspace);
   const keyEnv = keyEnvName(d.workspace);
   if (d.env[keyEnv]?.trim()) {
     throw new OmiError(
@@ -127,6 +129,7 @@ export interface RotateKeyResult {
  * and the old key stays valid for all of them. Switching the variable is the person's step.
  */
 export function secretRotateKey(d: SecretDeps): RotateKeyResult {
+  assertNoUnmigratedRows(d.workspace);
   const keyEnv = keyEnvName(d.workspace);
   const nextEnv = `${keyEnv}_NEXT`;
   const oldKey = loadMasterKey(d.env, keyEnv);

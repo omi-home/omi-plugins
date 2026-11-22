@@ -147,10 +147,14 @@ Commands:
   profile remove <name>  Delete a profile and its sealed token
   profile set-token <name>
                          Seal the token read from stdin (never argv) for the profile; overwrites
-  profile import [--dry-run]
+  profile import [--dry-run] [--resolve <name>=machine|workspace]...
                          One-time move of omi.config.json (and a YAML profiles section) into the
                          database: seals each token from the env variable the profile declares, renames
-                         the file to <file>.<timestamp>.bak. Re-running is safe; env variables are kept
+                         the file to <file>.<timestamp>.bak. Re-running is safe; env variables are kept.
+                         Also moves the profile rows of this workspace's state.sqlite onto the machine
+                         database, sealed tokens copied as they are. A profile that differs from the
+                         machine one is a conflict (CONFIG_CONFLICT, nothing written) until each is
+                         settled with --resolve <name>=machine (keep the machine one) or =workspace
   secret init-key        Create the master key (AES-256-GCM, 32 bytes) in the user environment variable
                          secrets.keyEnv (default OMI_SECRET_KEY); never printed. Refused when a key is
                          set or the database holds sealed tokens. Windows; elsewhere prints how
