@@ -35,6 +35,14 @@ const timer = setTimeout(() => {
 child.on("error", () => process.exit(127));
 child.on("exit", (code, signal) => {
   clearTimeout(timer);
+  if (!win) {
+    // Whatever ended the child, no descendant in its group may outlive the check.
+    try {
+      process.kill(-(child.pid as number), "SIGKILL");
+    } catch {
+      // group already gone
+    }
+  }
   if (timedOut) process.exit(TIMEOUT_EXIT);
   // Exited on a signal: report the shell convention 128+n, not a generic 1.
   const sig = signal ? (os.constants.signals[signal] ?? 0) : 0;
