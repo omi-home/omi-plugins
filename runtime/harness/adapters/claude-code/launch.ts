@@ -6,6 +6,7 @@ import { isAbsolute, join, relative } from "node:path";
 import type { Selection } from "../../../profile/domain/selection.ts";
 import type { Harness } from "../../../shared/contracts.ts";
 import { OmiError } from "../../../shared/errors/errors.ts";
+import { atLeast, semver } from "../../../shared/semver.ts";
 import {
   AGENT_PACK,
   type AgentLaunch,
@@ -15,16 +16,7 @@ import {
   type QuotaDetection,
 } from "../../domain/harness.ts";
 
-const semver = (s: string) => /(\d+)\.(\d+)\.(\d+)/.exec(s)?.slice(1).map(Number);
-
-export function atLeast(version: string, min: string): boolean {
-  const [a, b] = [semver(version), semver(min)];
-  if (!a || !b) return false;
-  for (let i = 0; i < 3; i++) {
-    if (a[i] !== b[i]) return (a[i] as number) > (b[i] as number);
-  }
-  return true;
-}
+export { atLeast };
 
 /**
  * Harness registry (#219): the CLI each harness runs and the versions verified with this adapter.

@@ -2,8 +2,6 @@
 // the legacy declarations still on disk, and the choice the Coordinator makes per task run.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-// TODO(R7 #335): core/workspace.ts moves to the workspace module.
-import { PROFILES_FILE, STATE_FILE } from "../../core/workspace.ts";
 import { CONFIG_PATH, readConfigData, SecretsConfig } from "../../shared/config.ts";
 import {
   DEFAULT_KEY_ENV,
@@ -14,6 +12,7 @@ import {
 import { OmiError } from "../../shared/errors/errors.ts";
 import { registerSecret } from "../../shared/redact.ts";
 import { openState } from "../../shared/sqlite/db.ts";
+import { PROFILES_FILE, STATE_FILE } from "../../shared/workspace.ts";
 import { decryptSecret, loadMasterKey } from "../domain/secrets.ts";
 import { type ProfileListing, type SecretResolver, secretEnv } from "../domain/selection.ts";
 import { getProfileRecord, listProfileRecords } from "./profiles.ts";

@@ -5,8 +5,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { archCheck, archShow, humanReport, violationError } from "../architecture/cli/arch.ts";
+import { cleanupApply, cleanupScan, type ScanResult } from "../cleanup/cli/cleanup.ts";
+import { taskFinalize } from "../cleanup/cli/finalize.ts";
+import { NO_PROFILE, NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "../cleanup/cli/status.ts";
 import { contextApply, contextPlan, humanContextPlan } from "../context/cli/context.ts";
-import { CONFIG_FILE, locate } from "../core/workspace.ts";
 import {
   githubProjectApply,
   githubProjectPlan,
@@ -24,6 +26,7 @@ import {
   issueSectionGet,
   issueSectionSet,
 } from "../handoff/cli/handoff.ts";
+import { agentPreToolUse, type HookInput, preToolUse, sessionStart } from "../hook/cli/hook.ts";
 import { MONITOR_PROTOCOL_VERSION } from "../monitor/cli/protocol.ts";
 import {
   type ProfileDeps,
@@ -35,33 +38,26 @@ import {
   profileSetToken,
 } from "../profile/cli/profile.ts";
 import { secretInitKey, secretRotateKey } from "../profile/cli/secret.ts";
-import { formatUsage, sumUsage } from "../reporting/cli/usage.ts";
+import { prCreate, prMerge, prValidate } from "../release/cli/pr.ts";
+import { releaseCheck, releaseTag } from "../release/cli/release.ts";
+import { formatUsage, stepReports, sumUsage } from "../reporting/cli/usage.ts";
+import { repo } from "../shared/config.ts";
 import { type ProfileView, ProjectStatus, Role, type TokenUsage } from "../shared/contracts.ts";
 import { ERROR_CODES, OmiError } from "../shared/errors/errors.ts";
 import { PLUGIN_ROOT } from "../shared/plugin-paths.ts";
 import { redact, redactDeep } from "../shared/redact.ts";
+import { CONFIG_FILE, locate } from "../shared/workspace.ts";
+import { taskAnalyze } from "../task-run/cli/analyze.ts";
+import { ticketValidate } from "../task-run/cli/gates.ts";
+import { taskRun } from "../task-run/cli/run.ts";
 import { skillList } from "../task-run/cli/skills.ts";
-import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
-import { configGet, configSet } from "./config.ts";
-import { type Check, doctor, probeProfiles } from "./doctor.ts";
-import { agentPreToolUse, type HookInput, preToolUse, sessionStart } from "./hook.ts";
-import { projectInit } from "./init.ts";
-import { releaseCheck, releaseTag } from "./release.ts";
-import { NO_PROFILE, NO_STATUS, NOT_IN_PROJECT, status, statusKey } from "./status.ts";
-import {
-  prCreate,
-  prMerge,
-  prValidate,
-  repo,
-  taskAnalyze,
-  taskFinalize,
-  taskRun,
-  taskStart,
-  taskStatus,
-  taskUnblock,
-  ticketValidate,
-} from "./task.ts";
-import { workspaceInit, workspaceMigrate } from "./workspace.ts";
+import { taskStart } from "../task-run/cli/start.ts";
+import { taskStatus } from "../task-run/cli/task-status.ts";
+import { taskUnblock } from "../task-run/cli/unblock.ts";
+import { configGet, configSet } from "../workspace/cli/config.ts";
+import { type Check, doctor, probeProfiles } from "../workspace/cli/doctor.ts";
+import { projectInit } from "../workspace/cli/init.ts";
+import { workspaceInit, workspaceMigrate } from "../workspace/cli/workspace.ts";
 
 const humanScan = (s: ScanResult) => [
   ...s.runs.map(
@@ -727,7 +723,7 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         return ok(st, lines(human));
       }
       case "task run": {
-        const r = taskRun({ cwd, pick: pickFlags(values) }, issue);
+        const r = taskRun({ cwd, reports: stepReports, pick: pickFlags(values) }, issue);
         const human = [
           `run       ${r.run.id} (${r.state}, round ${r.round})`,
           ...(r.status
@@ -738,7 +734,7 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         return ok(r, lines(human));
       }
       case "task analyze": {
-        const r = taskAnalyze({ cwd, pick: pickFlags(values) }, issue);
+        const r = taskAnalyze({ cwd, reports: stepReports, pick: pickFlags(values) }, issue);
         const human = [
           `run       ${r.run.id} (${r.state})`,
           ...(r.status
@@ -749,7 +745,7 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         return ok(r, lines(human));
       }
       case "task unblock": {
-        const r = taskUnblock({ cwd, reason: values.reason }, issue);
+        const r = taskUnblock({ cwd, reports: stepReports, reason: values.reason }, issue);
         const human = [
           `run       ${r.run.id} (${r.state}, unblocked by ${r.by})`,
           ...(r.status
@@ -796,7 +792,7 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         return ok(r, lines(human));
       }
       case "task finalize": {
-        const r = taskFinalize({ cwd, dryRun: values["dry-run"] }, issue);
+        const r = taskFinalize({ cwd, reports: stepReports, dryRun: values["dry-run"] }, issue);
         const human = [
           `run       ${r.run.id} (${r.run.state})`,
           ...(r.cleanup?.steps.map(

@@ -129,7 +129,7 @@ test("tree: no permission to read the Project is an auth error", () => {
 });
 
 test("status groups: unknown and unset Status are labelled, never a raw group", async () => {
-  const { statusKey } = await import("../../../runtime/cli/status.ts");
+  const { statusKey } = await import("../../../runtime/cleanup/cli/status.ts");
   const base = {
     number: 1,
     title: "",

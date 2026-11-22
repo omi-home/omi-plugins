@@ -6,9 +6,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { SETTINGS } from "../../cli/workspace.ts";
-import { locate, WORKSPACE_DIR } from "../../core/workspace.ts";
-import { agentEnv } from "../../harness/adapters/claude-code/launch.ts";
+import { harnessFor } from "../../harness/adapters/registry.ts";
 import { AGENT_PACK, PLUGIN_NAME } from "../../harness/domain/harness.ts";
 import { loadConfig } from "../../shared/config.ts";
 import {
@@ -19,6 +17,7 @@ import {
 } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { PLUGIN_ROOT } from "../../shared/plugin-paths.ts";
+import { locate, SETTINGS, WORKSPACE_DIR } from "../../shared/workspace.ts";
 import { writeRoleFiles } from "../../task-run/adapters/role-files.ts";
 import {
   AppliedContext,
@@ -104,7 +103,10 @@ export function measureRole(o: {
         "--setting-sources",
         "project,local",
       ],
-      env: { ...agentEnv(o.hostEnv ?? process.env), CLAUDE_CONFIG_DIR: join(root, ".claude-home") },
+      env: {
+        ...harnessFor("claudecode").env(o.hostEnv ?? process.env),
+        CLAUDE_CONFIG_DIR: join(root, ".claude-home"),
+      },
     });
     return target(o.role, parseContext(stdout), o.keep, root);
   } finally {

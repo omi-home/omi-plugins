@@ -1,7 +1,6 @@
 // DevTask-0031 #63: views/workflows/Insights desired state and its pure diff; origin URL parsing.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { originRepo } from "../../../runtime/cli/init.ts";
 import {
   type ActualView,
   loadViewsConfig,
@@ -9,6 +8,7 @@ import {
   ViewsConfig,
 } from "../../../runtime/github/application/project-config.ts";
 import type { OmiError } from "../../../runtime/shared/errors/errors.ts";
+import { originRepo } from "../../../runtime/workspace/cli/init.ts";
 
 const desired = loadViewsConfig();
 /** GitHub's view as `want` would look once fully configured. */

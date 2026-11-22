@@ -1,9 +1,8 @@
 // The execution choice the Coordinator makes per task run: pure validation against the profiles
 // of the machine. Reading profiles and decrypting tokens is injected (adapters).
-// TODO(R7 #335): core/workspace.ts moves to the workspace module.
-import { PROFILES_FILE } from "../../core/workspace.ts";
 import { type Profile, ProfileEffort } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
+import { PROFILES_FILE } from "../../shared/workspace.ts";
 
 /** The env variable a profile's secret is read from. */
 export const secretEnv = (p: Profile) =>
