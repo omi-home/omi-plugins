@@ -106,17 +106,6 @@ placement:
     message: "Tests live under tests/{unit,integration,contract,e2e}/<module>/, never next to the source."
 ignore: []
 legacy:
-  # R2 reporting -> runtime/reporting/
-  - {
-      path: runtime/reporting/render.ts,
-      issue: 330,
-      reason: "R2: moves into the reporting module layers",
-    }
-  - {
-      path: runtime/reporting/outbox.ts,
-      issue: 330,
-      reason: "R2: moves into the reporting module layers",
-    }
   # R3 profile + monitor
   - { path: runtime/core/secrets.ts, issue: 331, reason: "R3: moves to runtime/profile/" }
   - { path: runtime/persistence/profiles.ts, issue: 331, reason: "R3: moves to runtime/profile/" }

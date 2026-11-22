@@ -3,10 +3,14 @@
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
-import { formatUsage, renderStepReport, sumUsage } from "../../runtime/reporting/render.ts";
-import { parseContract, ReportCategory, StepComment } from "../../runtime/shared/contracts.ts";
+import {
+  formatUsage,
+  renderStepReport,
+  sumUsage,
+} from "../../../runtime/reporting/application/render.ts";
+import { parseContract, ReportCategory, StepComment } from "../../../runtime/shared/contracts.ts";
 
-const FIXTURES = new URL("../fixtures/reports/", import.meta.url);
+const FIXTURES = new URL("../../fixtures/reports/", import.meta.url);
 
 const base = {
   schemaVersion: 1,
