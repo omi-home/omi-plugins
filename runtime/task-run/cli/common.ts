@@ -5,6 +5,7 @@ import {
   loadProfiles,
   readLegacyProfiles,
 } from "../../profile/adapters/profile-config.ts";
+import { PROFILE_DB_ENV } from "../../profile/domain/location.ts";
 import { secretEnv } from "../../profile/domain/selection.ts";
 import type { WorkflowEventType } from "../../shared/contracts.ts";
 import type { GhRunner } from "../../shared/github/client.ts";
@@ -21,7 +22,7 @@ import type { RunRow } from "../domain/run.ts";
 export function commandEnvFor(workspace: string, host: NodeJS.ProcessEnv): Record<string, string> {
   const tokenEnvs: string[] = [];
   try {
-    tokenEnvs.push(...loadProfiles(workspace).map(secretEnv));
+    tokenEnvs.push(...loadProfiles(workspace, host).map(secretEnv));
   } catch {
     // a legacy file is still declared: its variables are dropped below
   }
@@ -33,7 +34,8 @@ export function commandEnvFor(workspace: string, host: NodeJS.ProcessEnv): Recor
   } catch {
     // an unreadable legacy file declares nothing usable
   }
-  return commandEnv(host, { keyEnv: keyEnvName(workspace), tokenEnvs });
+  // The machine profile DB location is for OMI itself, not for the repo's commands.
+  return commandEnv(host, { keyEnv: keyEnvName(workspace), tokenEnvs, extra: [PROFILE_DB_ENV] });
 }
 
 export interface TaskDeps {

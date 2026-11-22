@@ -675,7 +675,9 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
       case "doctor": {
         const checks = doctor(cwd);
         // Spends tokens: only on request (#219).
-        if (values.probe) checks.push(...probeProfiles(locate(cwd).workspace));
+        if (values.probe) {
+          checks.push(...probeProfiles(locate(cwd).workspace, io.env ?? process.env));
+        }
         return ok({ checks }, humanChecks(checks), checksExit(checks));
       }
       case "release check": {

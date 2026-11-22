@@ -66,16 +66,18 @@ test("commandEnvFor: a custom secrets.keyEnv and the DB profiles' token variable
       "json",
     ],
     ws,
-    { env: { MY_KEY: key } },
+    { env: { MY_KEY: key, OMI_PROFILE_DB: join(ws, "profiles.sqlite") } },
   );
   assert.equal(added.code, 0, added.stdout);
   const env = commandEnvFor(ws, {
     MY_KEY: key,
+    OMI_PROFILE_DB: join(ws, "profiles.sqlite"),
     OMI_T_SUB: CANARY,
     ANTHROPIC_API_KEY: CANARY,
     KEEP_ME: "visible",
     PATH: "/bin",
   });
+  // The profiles come from the machine DB the host env points at; OMI_PROFILE_DB itself is dropped.
   assert.deepEqual(Object.keys(env).sort(), ["KEEP_ME", "PATH"]);
 });
 

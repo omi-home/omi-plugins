@@ -1,6 +1,6 @@
 // Execution profiles of this machine as the runtime reads them: from `state.sqlite` (ADR-0004 D3),
 // the legacy declarations still on disk, and the choice the Coordinator makes per task run.
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_PATH, readConfigData, SecretsConfig } from "../../shared/config.ts";
 import {
@@ -11,10 +11,10 @@ import {
 } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { registerSecret } from "../../shared/redact.ts";
-import { openState } from "../../shared/sqlite/db.ts";
-import { PROFILES_FILE, STATE_FILE } from "../../shared/workspace.ts";
+import { PROFILES_FILE } from "../../shared/workspace.ts";
 import { decryptSecret, loadMasterKey } from "../domain/secrets.ts";
 import { type ProfileListing, type SecretResolver, secretEnv } from "../domain/selection.ts";
+import { withExistingProfileDb } from "./profile-store.ts";
 import { getProfileRecord, listProfileRecords } from "./profiles.ts";
 
 /** Declarations of the pre-ADR-0004 layout still present on disk (never values of secrets). */
@@ -80,7 +80,7 @@ export function assertNoLegacyProfiles(workspace: string): void {
   if (where.length) {
     throw new OmiError(
       "CONFIG_INVALID",
-      `profiles are still declared in ${where.join(", ")}: run \`omi profile import\` (profiles now live in state.sqlite)`,
+      `profiles are still declared in ${where.join(", ")}: run \`omi profile import\` (profiles now live in the machine profile database)`,
     );
   }
 }
@@ -99,27 +99,14 @@ export function keyEnvName(workspace: string): string {
   return parseContract(SecretsConfig, secrets, `${CONFIG_PATH} secrets`, "CONFIG_INVALID").keyEnv;
 }
 
-/** `<workspace>/.omi-plugins/state.sqlite` when it exists, else undefined (reading creates nothing). */
-const existingState = (workspace: string) => {
-  const file = join(workspace, STATE_FILE);
-  return existsSync(file) ? file : undefined;
-};
-
 /**
- * Execution profiles of this machine, from the `profile` table of `state.sqlite` (ADR-0004 D3).
+ * Execution profiles of this machine, from the machine profile DB (Feature-0044 #337).
  * No database means no profile: steps keep the `agents.routing` defaults. A profile still declared
  * in `omi.config.json` is CONFIG_INVALID until `omi profile import` ran.
  */
-export function loadProfiles(workspace: string): Profile[] {
+export function loadProfiles(workspace: string, env: NodeJS.ProcessEnv = process.env): Profile[] {
   assertNoLegacyProfiles(workspace);
-  const file = existingState(workspace);
-  if (!file) return [];
-  const db = openState(file);
-  try {
-    return listProfileRecords(db).map((r) => r.profile);
-  } finally {
-    db.close();
-  }
+  return withExistingProfileDb(env, (db) => listProfileRecords(db).map((r) => r.profile), []);
 }
 
 /** Profiles the Coordinator may pick from: every profile not `disabled`. */
@@ -127,7 +114,7 @@ export const listProfiles = (
   workspace: string,
   env: NodeJS.ProcessEnv = process.env,
 ): ProfileListing[] =>
-  loadProfiles(workspace)
+  loadProfiles(workspace, env)
     .filter((p) => !p.disabled)
     .map((p) => ({
       name: p.name,
@@ -145,14 +132,11 @@ export const listProfiles = (
  */
 export function profileSecretResolver(workspace: string, env: NodeJS.ProcessEnv): SecretResolver {
   return (profile) => {
-    const file = existingState(workspace);
-    const db = file ? openState(file) : undefined;
-    let sealed: ReturnType<typeof getProfileRecord>;
-    try {
-      sealed = db ? getProfileRecord(db, profile.name) : undefined;
-    } finally {
-      db?.close();
-    }
+    const sealed = withExistingProfileDb(
+      env,
+      (db) => getProfileRecord(db, profile.name),
+      undefined,
+    );
     if (!sealed?.sealed) {
       throw new OmiError(
         "CONFIG_INVALID",

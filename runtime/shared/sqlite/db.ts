@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { OmiError } from "../errors/errors.ts";
 import { locate, STATE_FILE } from "../workspace.ts";
-import { migrate } from "./migrations.ts";
+import { MIGRATIONS, migrate } from "./migrations.ts";
 
 export type Db = DatabaseSync;
 
@@ -18,7 +18,13 @@ export function statePath(cwd: string): string {
 }
 
 /** Opens (creating if needed) and migrates the state database. */
-export function openState(file: string): Db {
+export const openState = (file: string): Db => openDb(file, MIGRATIONS, "open state");
+
+/**
+ * Opens (creating if needed) a database with the pragmas every OMI database shares, then runs its
+ * own forward-only `migrations` (tracked in that file's `PRAGMA user_version`).
+ */
+export function openDb(file: string, migrations: readonly string[], what = "open database"): Db {
   if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   try {
@@ -29,11 +35,11 @@ export function openState(file: string): Db {
       PRAGMA synchronous = FULL;
       PRAGMA foreign_keys = ON;
     `);
-    migrate(db);
+    migrate(db, migrations);
     return db;
   } catch (e) {
     db.close();
-    throw sqliteError(e, "open state");
+    throw sqliteError(e, what);
   }
 }
 

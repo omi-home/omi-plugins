@@ -1,6 +1,6 @@
 // DevTask-0073 #216: omi.config.json contract, `omi profile list`, static doctor check.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -17,6 +17,7 @@ import {
   profileSecretResolver,
   readLegacyProfiles,
 } from "../../../runtime/profile/adapters/profile-config.ts";
+import { openProfileDb } from "../../../runtime/profile/adapters/profile-store.ts";
 import { addProfile } from "../../../runtime/profile/adapters/profiles.ts";
 import {
   encryptSecret,
@@ -27,7 +28,6 @@ import { selectProfile } from "../../../runtime/profile/domain/selection.ts";
 import { Profile, ProfilesFile } from "../../../runtime/shared/contracts.ts";
 import { OmiError } from "../../../runtime/shared/errors/errors.ts";
 import { redact } from "../../../runtime/shared/redact.ts";
-import { openState } from "../../../runtime/shared/sqlite/db.ts";
 import { harnessGate } from "../../../runtime/task-run/cli/run.ts";
 import { usageByProfile } from "../../../runtime/task-run/cli/status.ts";
 import {
@@ -79,10 +79,16 @@ const KEY = generateMasterKey();
 /** Host env that holds the master key (ADR-0004 D4). */
 const KEYED = { OMI_SECRET_KEY: KEY };
 
-/** A workspace whose state.sqlite already holds these profiles; `sealed` ones carry SECRET (ADR-0004 D3). */
+/** The machine profile DB of a test workspace: never the real one (Feature-0044 #337). */
+const penv = (ws: string, env: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+  OMI_PROFILE_DB: join(ws, "profiles.sqlite"),
+  ...env,
+});
+
+/** A workspace whose machine DB already holds these profiles; `sealed` ones carry SECRET. */
 function seeded(profiles: unknown[], sealed: string[] = []) {
   const ws = workspace();
-  const db = openState(join(ws, ".omi-plugins", "state.sqlite"));
+  const db = openProfileDb(join(ws, "profiles.sqlite"));
   try {
     for (const p of profiles) {
       const profile = Profile.parse(p);
@@ -103,18 +109,25 @@ const invalid = (data: unknown) =>
     (e) => e instanceof OmiError && e.code === "CONFIG_INVALID",
   );
 
-test("profiles load from state.sqlite with defaults; no database means none", () => {
-  const ps = loadProfiles(seeded([sub, gw]));
+test("profiles load from the machine DB with defaults; no database means none", () => {
+  const seededWs = seeded([sub, gw]);
+  const ps = loadProfiles(seededWs, penv(seededWs));
   assert.equal(ps.length, 2);
   assert.equal(ps[0]?.disabled, false);
-  assert.deepEqual(loadProfiles(workspace()), []);
-  assert.deepEqual(loadProfiles(workspace({})), []);
+  const none = (ws: string) => loadProfiles(ws, penv(ws));
+  assert.deepEqual(none(workspace()), []);
+  assert.deepEqual(none(workspace({})), []);
   // An empty legacy file (the workspace template) declares nothing.
-  assert.deepEqual(loadProfiles(workspace({ profiles: [] })), []);
+  assert.deepEqual(none(workspace({ profiles: [] })), []);
+  // Reading creates nothing.
+  const bare = workspace();
+  none(bare);
+  assert.equal(existsSync(join(bare, "profiles.sqlite")), false);
 });
 
 test("a profile still declared in omi.config.json is CONFIG_INVALID until imported", () => {
-  assert.throws(() => loadProfiles(workspace({ profiles: [sub] })), {
+  const declared = workspace({ profiles: [sub] });
+  assert.throws(() => loadProfiles(declared, penv(declared)), {
     code: "CONFIG_INVALID",
     message: /omi profile import/,
   });
@@ -148,18 +161,18 @@ test("invalid files are rejected without echoing values", () => {
 
 test("listProfiles hides disabled profiles and never reads out the secret", () => {
   const ws = seeded([sub, { ...gw, disabled: true }]);
-  const list = listProfiles(ws, { OMI_T_SUB: SECRET });
+  const list = listProfiles(ws, penv(ws, { OMI_T_SUB: SECRET }));
   assert.deepEqual(
     list.map((p) => [p.name, p.auth, p.secretEnv, p.secretSet]),
     [["cc-sub", "subscription", "OMI_T_SUB", true]],
   );
   assert.ok(!JSON.stringify(list).includes(SECRET));
-  assert.equal(listProfiles(ws, {})[0]?.secretSet, false);
+  assert.equal(listProfiles(ws, penv(ws))[0]?.secretSet, false);
 });
 
 test("omi profile list prints active profiles as json and human", () => {
   const ws = seeded([sub, { ...gw, disabled: true }]);
-  const r = main(["profile", "list", "--output", "json"], ws);
+  const r = main(["profile", "list", "--output", "json"], ws, { env: penv(ws) });
   assert.equal(r.code, 0, r.stderr);
   const data = JSON.parse(r.stdout).data as { profiles: { name: string }[] };
   assert.deepEqual(
@@ -167,15 +180,16 @@ test("omi profile list prints active profiles as json and human", () => {
     ["cc-sub", "cc-gw"],
   );
   assert.match(
-    main(["profile", "list"], ws).stdout,
+    main(["profile", "list"], ws, { env: penv(ws) }).stdout,
     /cc-gw\s+claudecode gateway disabled UNSEALED/,
   );
-  assert.match(main(["profile", "list"], workspace()).stdout, /none/);
+  const empty = workspace();
+  assert.match(main(["profile", "list"], empty, { env: penv(empty) }).stdout, /none/);
 });
 
 test("doctor: secret env must be set for every active profile", () => {
   const ws = seeded([sub, gw, { ...gw, name: "off", disabled: true }], ["cc-sub"]);
-  const checks = profilesCheck(ws, KEYED);
+  const checks = profilesCheck(ws, penv(ws, KEYED));
   assert.deepEqual(
     checks.map((c) => [c.name, c.status]),
     [
@@ -189,10 +203,10 @@ test("doctor: secret env must be set for every active profile", () => {
   assert.ok(!JSON.stringify(checks).includes(KEY));
   assert.match(checks[2]?.detail ?? "", /no token/);
   // No master key, then a different one: each profile says why, without echoing a value.
-  const none = profilesCheck(ws, {});
+  const none = profilesCheck(ws, penv(ws));
   assert.deepEqual([none[0]?.name, none[0]?.status], ["master key", "fail"]);
   assert.match(none[0]?.detail ?? "", /omi secret init-key/);
-  const wrong = profilesCheck(ws, { OMI_SECRET_KEY: generateMasterKey() });
+  const wrong = profilesCheck(ws, penv(ws, { OMI_SECRET_KEY: generateMasterKey() }));
   assert.match(wrong[1]?.detail ?? "", /not the one that sealed/);
   // CR-004: the key's fingerprint is compared with the stored one; never a value in the output.
   const otherKey = generateMasterKey();
@@ -200,7 +214,8 @@ test("doctor: secret env must be set for every active profile", () => {
   assert.match(wrong[0]?.detail ?? "", /wrong key/);
   assert.ok(!JSON.stringify(wrong).includes(otherKey));
   // Reported even with no active profile: a missing key warns, a wrong key still fails.
-  const empty = profilesCheck(workspace(), {});
+  const bareWs = workspace();
+  const empty = profilesCheck(bareWs, penv(bareWs));
   assert.deepEqual(
     empty.map((c) => [c.name, c.status]),
     [
@@ -210,14 +225,18 @@ test("doctor: secret env must be set for every active profile", () => {
   );
   const offOnly = seeded([{ ...sub, disabled: true }], ["cc-sub"]);
   assert.deepEqual(
-    profilesCheck(offOnly, {}).map((c) => [c.name, c.status]),
+    profilesCheck(offOnly, penv(offOnly)).map((c) => [c.name, c.status]),
     [
       ["master key", "fail"],
       ["profiles", "pass"],
     ],
   );
-  assert.match(profilesCheck(offOnly, { OMI_SECRET_KEY: otherKey })[0]?.detail ?? "", /wrong key/);
-  assert.equal(profilesCheck(workspace({ profiles: [{ ...sub, x: 1 }] }))[0]?.status, "fail");
+  assert.match(
+    profilesCheck(offOnly, penv(offOnly, { OMI_SECRET_KEY: otherKey }))[0]?.detail ?? "",
+    /wrong key/,
+  );
+  const badFile = workspace({ profiles: [{ ...sub, x: 1 }] });
+  assert.equal(profilesCheck(badFile, penv(badFile))[0]?.status, "fail");
 });
 
 test("workspace template matches the contract", () => {
@@ -229,9 +248,9 @@ test("workspace template matches the contract", () => {
 
 test("selectProfile (#217): validated choice, defaults to the profile's first model/effort", () => {
   const ws = seeded([sub, { ...gw, disabled: true }], ["cc-sub"]);
-  const ps = loadProfiles(ws);
+  const ps = loadProfiles(ws, penv(ws));
   assert.equal(selectProfile(ps, {}), undefined);
-  const env = profileSecretResolver(ws, KEYED);
+  const env = profileSecretResolver(ws, penv(ws, KEYED));
   const pick = selectProfile(ps, { profile: "cc-sub", reason: "simple docs task" }, env);
   assert.deepEqual(
     [pick?.profile.name, pick?.model, pick?.effort, pick?.reason],
@@ -266,16 +285,17 @@ test("selectProfile (#217): validated choice, defaults to the profile's first mo
   usage({ profile: "cc-sub", reason: "  " }, /--reason is required/);
   // Nothing starts that cannot authenticate; the message names the variable, never a value.
   assert.throws(
-    () => selectProfile(ps, { profile: "cc-sub", reason: "r" }, profileSecretResolver(ws, {})),
+    () =>
+      selectProfile(ps, { profile: "cc-sub", reason: "r" }, profileSecretResolver(ws, penv(ws))),
     { code: "SECRET_KEY_MISSING", message: /OMI_SECRET_KEY is not set/ },
   );
   const bare = seeded([sub]);
   assert.throws(
     () =>
       selectProfile(
-        loadProfiles(bare),
+        loadProfiles(bare, penv(bare)),
         { profile: "cc-sub", reason: "r" },
-        profileSecretResolver(bare, KEYED),
+        profileSecretResolver(bare, penv(bare, KEYED)),
       ),
     { code: "CONFIG_INVALID", message: /no token/ },
   );
@@ -320,7 +340,8 @@ test("harness registry (#219): versions inside the verified range run; others ar
 
 test("doctor: a gateway profile warns about the third party; bearer is not verified yet", () => {
   const bearer = { ...gw, name: "gw-b", auth: { ...gw.auth, scheme: "bearer" } };
-  const checks = profilesCheck(seeded([gw, bearer], ["cc-gw", "gw-b"]), KEYED);
+  const gwWs = seeded([gw, bearer], ["cc-gw", "gw-b"]);
+  const checks = profilesCheck(gwWs, penv(gwWs, KEYED));
   const warn = checks.filter((c) => c.status === "warn");
   assert.equal(warn.length, 2);
   assert.match(warn[0]?.detail ?? "", /third party: it sees the code and prompts.*zero-width/);
@@ -337,7 +358,7 @@ const transcript = (model: string, result: object = { is_error: false, result: "
 
 test("doctor --probe (#219): one short run per active profile; gateway lists models first", () => {
   const ws = seeded([sub, gw, { ...gw, name: "off", disabled: true }], ["cc-sub", "cc-gw"]);
-  const env = { PATH: "/bin", ...KEYED, ANTHROPIC_API_KEY: "sk-host" };
+  const env = penv(ws, { PATH: "/bin", ...KEYED, ANTHROPIC_API_KEY: "sk-host" });
   const gets: { url: string; headers: Record<string, string> }[] = [];
   const runs: Parameters<ClaudeRun>[0][] = [];
   const checks = probeProfiles(ws, env, {
@@ -371,7 +392,7 @@ test("doctor --probe (#219): one short run per active profile; gateway lists mod
 
 test("doctor --probe: 402, missing model, auth error, wrong model and quota fail, redacted", () => {
   const ws = seeded([gw], ["cc-gw"]);
-  const env = KEYED;
+  const env = penv(ws, KEYED);
   const never: ClaudeRun = () => assert.fail("no run after a failed model list");
   const probe = (http: HttpGet, claude: ClaudeRun = never) =>
     probeProfiles(ws, env, { http, claude })[0];
@@ -399,6 +420,7 @@ test("doctor --probe: 402, missing model, auth error, wrong model and quota fail
     /out of quota \(http_402\)/,
   );
   assert.match(probe(listed, () => "")?.detail ?? "", /no result/);
-  assert.equal(probeProfiles(workspace(), {})[0]?.status, "pass"); // no profile: nothing to probe
-  assert.match(probeProfiles(ws, {})[0]?.detail ?? "", /OMI_SECRET_KEY is not set/);
+  const bare = workspace();
+  assert.equal(probeProfiles(bare, penv(bare))[0]?.status, "pass"); // no profile: nothing to probe
+  assert.match(probeProfiles(ws, penv(ws))[0]?.detail ?? "", /OMI_SECRET_KEY is not set/);
 });
