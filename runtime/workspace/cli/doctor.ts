@@ -23,9 +23,11 @@ import {
   keyEnvName,
   loadProfiles,
   profileSecretResolver,
+  unmigratedLegacyProfiles,
 } from "../../profile/adapters/profile-config.ts";
-import { withExistingProfileDb } from "../../profile/adapters/profile-store.ts";
+import { profileDbStatus, withExistingProfileDb } from "../../profile/adapters/profile-store.ts";
 import { listProfileRecords } from "../../profile/adapters/profiles.ts";
+import { PROFILE_DB_ENV } from "../../profile/domain/location.ts";
 import { keyFingerprint, loadMasterKey } from "../../profile/domain/secrets.ts";
 import type { Selection } from "../../profile/domain/selection.ts";
 import { loadConfig, type OmiConfig, workflowModel } from "../../shared/config.ts";
@@ -502,6 +504,101 @@ export function issueTypeChecks(config: OmiConfig, run: GhRunner = spawnGh): Che
 }
 
 /**
+ * `profile store` (the machine DB: path, source, permissions, schema) and `legacy profiles` (rows of
+ * this workspace's `profile_legacy` not yet imported). Never prints a value; details go through redact.
+ */
+export function profileStoreChecks(
+  workspace: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Check[] {
+  const checks: Check[] = [];
+  try {
+    const s = profileDbStatus(env);
+    const where = `${s.path} (${s.source === "env" ? `from ${PROFILE_DB_ENV}` : "default"})`;
+    if (!s.exists) {
+      checks.push({
+        name: "profile store",
+        status: "pass",
+        detail: `no profile store yet: ${where}`,
+      });
+    } else if (s.schemaVersion === undefined) {
+      checks.push({
+        name: "profile store",
+        status: "fail",
+        detail: redact(`${where} cannot be opened`),
+      });
+    } else if (s.schemaVersion > s.supportedVersion) {
+      checks.push({
+        name: "profile store",
+        status: "fail",
+        detail: redact(
+          `${where} has schema ${s.schemaVersion}, newer than the ${s.supportedVersion} this OMI supports: update omi-plugins`,
+        ),
+      });
+    } else if (s.mode === undefined) {
+      checks.push({
+        name: "profile store",
+        status: "pass",
+        detail: redact(`${where}, schema ${s.schemaVersion}; ACL of the user profile, not checked`),
+      });
+    } else {
+      const loose = [
+        ...((s.mode & 0o077) !== 0 ? [`file is ${(s.mode & 0o777).toString(8)}`] : []),
+        ...(s.dirMode !== undefined && (s.dirMode & 0o077) !== 0
+          ? [`directory is ${(s.dirMode & 0o777).toString(8)}`]
+          : []),
+      ];
+      checks.push(
+        loose.length
+          ? {
+              name: "profile store",
+              status: "fail",
+              detail: redact(
+                `${where}: group/other can access it (${loose.join(", ")}): run \`chmod 600 "${s.path}" && chmod 700 "${dirname(s.path)}"\``,
+              ),
+            }
+          : {
+              name: "profile store",
+              status: "pass",
+              detail: redact(`${where}, schema ${s.schemaVersion}, permissions private`),
+            },
+      );
+    }
+  } catch (e) {
+    checks.push({
+      name: "profile store",
+      status: "fail",
+      detail: redact(e instanceof OmiError ? e.message : "profile store check crashed"),
+    });
+  }
+  try {
+    const names = unmigratedLegacyProfiles(workspace);
+    checks.push(
+      names.length
+        ? {
+            name: "legacy profiles",
+            status: "fail",
+            detail: redact(
+              `not migrated to the machine profile store: ${names.join(", ")}: run \`omi profile import\``,
+            ),
+          }
+        : {
+            name: "legacy profiles",
+            status: "pass",
+            detail: "no unmigrated profile in this workspace",
+          },
+    );
+  } catch (e) {
+    checks.push({
+      name: "legacy profiles",
+      status: "fail",
+      detail: redact(e instanceof OmiError ? e.message : "legacy profiles check crashed"),
+    });
+  }
+  return checks;
+}
+
+/**
  * Static checks of the machine's execution profiles (DevTask-0073 #216): the file parses and every
  * profile not `disabled` has its secret env set. A real probe is `omi doctor --probe` (#219).
  */
@@ -885,6 +982,7 @@ export function doctor(cwd: string): Check[] {
   if (loc)
     checks.push(
       ...layout(loc.workspace, repoRoot),
+      ...profileStoreChecks(loc.workspace),
       ...profilesCheck(loc.workspace),
       memoryDirCheck(loc.workspace),
       coordinatorPluginCheck(loc.workspace),
