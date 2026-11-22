@@ -21,7 +21,7 @@ modules:
   - {
       id: shared,
       path: runtime/shared,
-      description: "Shared kernel: contracts, errors, redact, config, plugin-paths, process, sqlite, github client",
+      description: "Shared kernel: contracts, errors, redact, config, workspace paths, plugin-paths, process, sqlite, github client",
       shared: true,
     }
   - {

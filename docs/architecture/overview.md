@@ -210,6 +210,6 @@ omi-plugins/
 ## Công cụ
 
 - TypeScript chạy trực tiếp trên Node ≥ 22.18 (type stripping, không build); `tsc` chỉ typecheck.
-- Contract: zod là nguồn duy nhất cho TS type và validator runtime (`runtime/core/contracts.ts`, `config.ts`). Mọi tài liệu đều strict và có `schemaVersion`. Lỗi được phân loại trong `runtime/core/errors/errors.ts`: loại `transient` tính là attempt, không tính là round.
+- Contract: zod là nguồn duy nhất cho TS type và validator runtime (`runtime/shared/contracts.ts`, `config.ts`). Mọi tài liệu đều strict và có `schemaVersion`. Lỗi được phân loại trong `runtime/shared/errors/errors.ts`: loại `transient` tính là attempt, không tính là round.
 - Dữ liệu cục bộ nằm trong workspace, ngoài repo đích (ADR-0002 D1): config dự án ở `<workspace>/.omi-plugins/omi.config.yaml`; state SQLite (`node:sqlite`, WAL, migration theo `user_version`) ở `<workspace>/.omi-plugins/state.sqlite`. Mọi task workspace dùng chung một DB, và DB không bao giờ bị commit.
 - Test: `node:test`. Lint/format: Biome. Một lệnh: `npm run check`.

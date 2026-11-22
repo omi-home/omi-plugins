@@ -7,4 +7,4 @@
 #   lint: { run: npm run lint }
 #   build: { run: npm run typecheck }
 #   test: { run: npm test }
-# Every setting and its default: runtime/core/config.ts of the OMI plugin.
+# Every setting and its default: runtime/shared/config.ts of the OMI plugin.
