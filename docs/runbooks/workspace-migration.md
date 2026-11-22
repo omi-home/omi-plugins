@@ -54,7 +54,7 @@ Agent (`omi task run`/`task analyze`) cần biến `CLAUDE_CODE_OAUTH_TOKEN` (l�
 
 Theo [ADR-0007](../decisions/ADR-0007-profile-cap-may.md). Workspace mới không cần bước này. Workspace có profile cũ (bảng `profile_legacy` sau khi state lên migration 9, hoặc `omi.config.json`) làm một lần:
 
-1. Đặt master key giống các workspace khác trên máy (`OMI_SECRET_KEY`); máy chưa có key thì `omi secret init-key`.
+1. Đặt master key (`OMI_SECRET_KEY`) đúng là key đã mã hóa token của workspace này, và giống key của các workspace khác trên máy (token được chép nguyên dạng mã hóa). Không dùng `omi secret init-key` ở bước này: khi `profile_legacy` còn hàng chưa migrate, mọi lệnh `secret *` bị chặn (ADR-0007 D3); `init-key` chỉ dành cho máy chưa có workspace nào có token mã hóa.
 2. `omi profile import --dry-run`: xem kế hoạch (chép, `identical`, `tokenFilled`, xung đột). Không ghi gì, không in token.
 3. Nếu có xung đột (`CONFIG_CONFLICT`, chỉ liệt kê tên profile, tên field và trạng thái token), chọn từng cái: `omi profile import --resolve <name>=machine` giữ bản trên máy, `--resolve <name>=workspace` ghi đè bằng bản workspace. Lặp `--resolve` cho nhiều tên.
 4. `omi profile import`: một tx trên DB cấp máy, rồi đánh dấu `migrated_at` trong state workspace, rồi đổi file cũ thành `.bak`. Token chép nguyên dạng mã hóa, không giải mã ra file hay log.

@@ -71,7 +71,6 @@ Dữ liệu và phiên làm việc của OMI nằm ngoài repo đích (ADR-0002 
 │   │   ├── omi.config.yaml             # config dự án: github, checks, review, agents, cleanup
 │   │   ├── omi.config.json             # profile thực thi cũ, riêng từng máy, không commit; bị thay bởi bảng `profile` (ADR-0004 D3), `omi profile import` đổi thành `.bak`
 │   │   ├── state.sqlite                # state SQLite, dùng chung cho mọi task workspace; không còn giữ profile (bảng `profile_legacy` chỉ là nguồn migration, ADR-0007)
-│   │   (profiles.sqlite                # ngoài workspace, cấp máy: `%LOCALAPPDATA%\omi\` (win32) hoặc `${XDG_CONFIG_HOME:-~/.config}/omi/`; profile và token mã hóa, dùng chung mọi workspace; đổi bằng `OMI_PROFILE_DB`, ADR-0007)
 │   │   ├── web/<version>/              # bản build OMI Monitor (standalone) do `omi web` tải và giải nén (ADR-0004 D2)
 │   │   └── evidence/<run>/             # task packet, log check; analysis: evidence/<run>/workspace/
 │   ├── AGENTS.md                       # chỉ dẫn của Coordinator
@@ -84,6 +83,8 @@ Dữ liệu và phiên làm việc của OMI nằm ngoài repo đích (ADR-0002 
     ├── REPORT.md                       # template báo cáo của bước
     └── <repo>/                         # clone (không shallow), branch `<loại>/<issue>-<slug>`
 ```
+
+Ngoài mọi workspace, ở cấp máy: `profiles.sqlite` giữ profile và token mã hóa, dùng chung cho mọi workspace của người dùng OS (ADR-0007). Vị trí: `%LOCALAPPDATA%\omi\profiles.sqlite` (win32), `${XDG_CONFIG_HOME:-~/.config}/omi/profiles.sqlite` (khác); đổi bằng `OMI_PROFILE_DB` (đường dẫn tuyệt đối).
 
 - Task workspace: `git fetch origin` trong checkout chính, clone local, `remote set-url origin <github>`, rồi tạo branch từ `origin/<base>`. Push và PR do CLI làm từ clone.
 - Agent có cwd = task workspace. Khi cwd ở task workspace: git chạy dạng `git -C <repo> …`, check chạy dạng `cd <repo> && <lệnh>`. Sau lệnh `cd <repo> && …` đầu tiên, Claude Code giữ cwd trong repo: khi đó git chạy trần (`git status|diff|log|show`, chỉ đọc) và check chạy trần `<lệnh>`. Mỗi check là một lệnh riêng (không `;`, pipe), có hoặc không có tham số. Chỉ những dạng này được cấp quyền.

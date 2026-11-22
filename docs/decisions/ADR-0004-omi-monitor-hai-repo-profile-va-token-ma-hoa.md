@@ -1,6 +1,6 @@
 # ADR-0004 — OMI Monitor: hai repo, profile và token mã hóa trong SQLite
 
-- **Trạng thái:** Accepted. PO duyệt phạm vi qua ChangeRequest-0011 #280 (2026-11-20), gồm ARC-002, ARC-004, ARC-005 và ARC-006. Thay ADR-0002 D6 bằng D3 của ADR này, và sửa quy tắc "secret chỉ ở dạng tham chiếu env". Triển khai ở Feature-0035 #279 (Milestone-0012 #278, Epic-0002 #277).
+- **Trạng thái:** Accepted. PO duyệt phạm vi qua ChangeRequest-0011 #280 (2026-11-20), gồm ARC-002, ARC-004, ARC-005 và ARC-006. Thay ADR-0002 D6 bằng D3 của ADR này, và sửa quy tắc "secret chỉ ở dạng tham chiếu env". Triển khai ở Feature-0035 #279 (Milestone-0012 #278, Epic-0002 #277). Vị trí lưu và quy tắc migration của D3 bị thay bởi [ADR-0007](./ADR-0007-profile-cap-may.md).
 - **Ngày:** 2026-11-20
 - **Người quyết định:** Product Owner (qua phiên Coordinator)
 - **Nguồn:** [ChangeRequest-0011 #280](https://github.com/omi-home/omi-plugins/issues/280), section `architecture` (Decision record) và section Decision.
