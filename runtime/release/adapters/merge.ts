@@ -1,6 +1,7 @@
 // Merge eligibility, the authorized merge path and merge receipts (spec §8 gate 6, §14,
 // ADR-0001 D5). Facts are read from GitHub; the gate itself is a pure function so every rule is
 // testable without a network. Merge evidence is GitHub's receipt, never `git branch --merged`.
+import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { loadRiskPolicy, riskLevel } from "../../github/application/repo-config.ts";
 import type { OmiConfig } from "../../shared/config.ts";
@@ -78,13 +79,67 @@ const Facts = z.strictObject({
     .nullable(),
 });
 
-/** True when a workflow file's text triggers on `pull_request` (comment lines ignored). */
-export function triggersOnPullRequest(text: string): boolean {
-  const body = text
-    .split("\n")
-    .filter((l) => !l.trimStart().startsWith("#"))
-    .join("\n");
-  return /(?<![\w.])pull_request(_target)?(?!\w)/.test(body);
+const PR_TRIGGERS = ["pull_request", "pull_request_target"];
+
+/** GitHub branch filter glob: `*` stays inside a segment, `**` crosses `/`, `?` is one char. */
+function branchGlob(p: string): RegExp {
+  let re = "";
+  for (let i = 0; i < p.length; i++) {
+    const c = p.charAt(i);
+    if (c === "*") {
+      if (p.charAt(i + 1) === "*") {
+        re += ".*";
+        i++;
+      } else re += "[^/]*";
+    } else if (c === "?") re += "[^/]";
+    else re += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${re}$`);
+}
+
+const asList = (v: unknown): string[] =>
+  (Array.isArray(v) ? v : typeof v === "string" ? [v] : []).filter(
+    (x): x is string => typeof x === "string",
+  );
+
+/** Whether a `branches` list (with `!` negations, last match wins) selects `base`. */
+function branchesMatch(patterns: string[], base: string): boolean {
+  const hasPositive = patterns.some((p) => !p.startsWith("!"));
+  let matched = !hasPositive;
+  for (const p of patterns) {
+    const neg = p.startsWith("!");
+    if (branchGlob(neg ? p.slice(1) : p).test(base)) matched = !neg;
+  }
+  return matched;
+}
+
+/**
+ * True when a workflow file triggers on `pull_request`/`pull_request_target` under `on:`
+ * (structural YAML parse: comments, `if:` strings and other keys never count). With `base`, a
+ * `branches`/`branches-ignore` filter that excludes it means no check will ever run for such a PR.
+ */
+export function triggersOnPullRequest(text: string, base?: string): boolean {
+  let doc: unknown;
+  try {
+    doc = parseYaml(text);
+  } catch {
+    return false;
+  }
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) return false;
+  const on = (doc as Record<string, unknown>).on ?? (doc as Record<string, unknown>)["true"];
+  if (typeof on === "string") return PR_TRIGGERS.includes(on);
+  if (Array.isArray(on)) return on.some((t) => typeof t === "string" && PR_TRIGGERS.includes(t));
+  if (typeof on !== "object" || on === null) return false;
+  const triggers = on as Record<string, unknown>;
+  return PR_TRIGGERS.some((k) => {
+    if (!(k in triggers)) return false;
+    const cfg = triggers[k];
+    if (base === undefined || typeof cfg !== "object" || cfg === null) return true;
+    const { branches, "branches-ignore": ignore } = cfg as Record<string, unknown>;
+    if (branches !== undefined && !branchesMatch(asList(branches), base)) return false;
+    if (ignore !== undefined && asList(ignore).some((p) => branchGlob(p).test(base))) return false;
+    return true;
+  });
 }
 
 export interface PrFacts {
@@ -137,7 +192,7 @@ export function prFacts(
     admin: data.viewerPermission === "ADMIN",
     protected: Boolean(data.ref?.branchProtectionRule || data.ref?.rules.nodes.length),
     hasCi: (data.workflows?.entries ?? []).some(
-      (e) => /\.ya?ml$/.test(e.name) && triggersOnPullRequest(e.object?.text ?? ""),
+      (e) => /\.ya?ml$/.test(e.name) && triggersOnPullRequest(e.object?.text ?? "", o.base),
     ),
     allowed: {
       SQUASH: data.squashMergeAllowed,
