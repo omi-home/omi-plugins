@@ -50,7 +50,20 @@ Sau đó chạy thử `omi status` và `omi task start <n>` cho task kế tiếp
 
 Agent (`omi task run`/`task analyze`) cần biến `CLAUDE_CODE_OAUTH_TOKEN` (lấy bằng `claude setup-token`): agent chạy với `CLAUDE_CONFIG_DIR` riêng, không dùng login của host ([runbook vận hành, mục 3](./operations.md#3-quyền-github-và-xác-thực-agent)).
 
-## 5. Quay lại nếu lỗi
+## 5. Chuyển profile lên DB cấp máy
+
+Theo [ADR-0007](../decisions/ADR-0007-profile-cap-may.md). Workspace mới không cần bước này. Workspace có profile cũ (bảng `profile_legacy` sau khi state lên migration 9, hoặc `omi.config.json`) làm một lần:
+
+1. Đặt master key giống các workspace khác trên máy (`OMI_SECRET_KEY`); máy chưa có key thì `omi secret init-key`.
+2. `omi profile import --dry-run`: xem kế hoạch (chép, `identical`, `tokenFilled`, xung đột). Không ghi gì, không in token.
+3. Nếu có xung đột (`CONFIG_CONFLICT`, chỉ liệt kê tên profile, tên field và trạng thái token), chọn từng cái: `omi profile import --resolve <name>=machine` giữ bản trên máy, `--resolve <name>=workspace` ghi đè bằng bản workspace. Lặp `--resolve` cho nhiều tên.
+4. `omi profile import`: một tx trên DB cấp máy, rồi đánh dấu `migrated_at` trong state workspace, rồi đổi file cũ thành `.bak`. Token chép nguyên dạng mã hóa, không giải mã ra file hay log.
+5. Chạy lại để kiểm: kết quả rỗng, không ghi gì. Sập giữa chừng thì chạy lại là an toàn (ra `identical`).
+6. `omi doctor`: DB cấp máy, master key và từng profile giải mã được.
+
+Hàng của `profile_legacy` không bị xóa tự động. Với workspace khác, lặp lại các bước trên.
+
+## 6. Quay lại nếu lỗi
 
 | Lỗi ở bước | Cách quay lại |
 |---|---|

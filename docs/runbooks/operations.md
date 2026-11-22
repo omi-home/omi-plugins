@@ -93,6 +93,13 @@ Lỗi tạm thời (`GITHUB_RATE_LIMITED`, `GITHUB_UNAVAILABLE`, `NETWORK`, `LOC
 
 - OMI chỉ xoá thứ nó sở hữu và đã xác minh (task workspace sạch, chỉ chứa file OMI sinh ra, tip của clone khớp receipt merge của GitHub), không bao giờ `--force`, không xoá branch remote.
 - Task workspace mồ côi (`cleanup scan` báo `orphan`: `<workspace>-task-*` không thuộc run nào đang mở) không bị xoá tự động. Người kiểm tra nội dung (commit chưa push?) rồi tự xoá thư mục.
+- Profile (ADR-0007) nằm ở DB cấp máy `profiles.sqlite`, dùng chung mọi workspace của user OS:
+  - Đường dẫn: win32 `%LOCALAPPDATA%\omi\profiles.sqlite`; darwin `~/Library/Application Support/omi/profiles.sqlite`; còn lại `${XDG_CONFIG_HOME:-~/.config}/omi/profiles.sqlite`. `OMI_PROFILE_DB` (đường dẫn tuyệt đối tới file, tương đối → `CONFIG_INVALID`) ghi đè.
+  - Quyền file: POSIX thư mục `0700`, `profiles.sqlite`/`-wal`/`-shm` `0600`, `omi doctor` kiểm. Windows dựa vào ACL của `%LOCALAPPDATA%`.
+  - Không đặt trên network share (khóa ghi WAL không đáng tin). Tranh chấp ghi quá 5 giây → `LOCK_HELD`, thử lại.
+  - Chưa có file thì chưa có profile; lệnh đọc không tạo file, `add`/`set-token`/`import` tạo. Sao lưu: copy `profiles.sqlite` (cùng `-wal`).
+  - Workspace cũ còn profile trong `state.sqlite`: mọi lệnh profile/secret báo `CONFIG_INVALID` tới khi chạy `omi profile import` (xem [migration](./workspace-migration.md#5-chuyển-profile-lên-db-cấp-máy)). Tên trùng khác nội dung → `CONFIG_CONFLICT`; chọn bằng `omi profile import --resolve <name>=machine|workspace` (lặp được); `--dry-run` xem kế hoạch.
+  - Master key (`OMI_SECRET_KEY`) phải giống nhau ở mọi workspace; lệch → `SECRET_KEY_MISMATCH`. `omi secret rotate-key` đổi key cho cả máy.
 - State cục bộ ở `<workspace>/.omi-plugins/state.sqlite` (dùng chung mọi task workspace, ngoài repo). Không xoá khi còn run mở; xoá là mất lịch sử run và outbox chưa đăng.
 
 ## 9. Release
