@@ -37,8 +37,8 @@ import {
   startStep,
   stepResult,
 } from "../../persistence/repository.ts";
-import { publishPending } from "../../reporting/outbox.ts";
-import { renderStepReport } from "../../reporting/render.ts";
+import { publishPending } from "../../reporting/adapters/outbox.ts";
+import { renderStepReport } from "../../reporting/application/render.ts";
 import { type SkillChoice, stepSkills, writeRoleFiles } from "../../resources/role-files.ts";
 import { git } from "../../resources/worktree.ts";
 import type { OmiConfig, Selection } from "../../shared/config.ts";

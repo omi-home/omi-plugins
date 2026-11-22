@@ -18,7 +18,7 @@ import {
   pendingCount,
   recoverAttempts,
 } from "../persistence/repository.ts";
-import { publishPending } from "../reporting/outbox.ts";
+import { publishPending } from "../reporting/adapters/outbox.ts";
 import { git, listWorktrees, same } from "../resources/worktree.ts";
 import { OmiError } from "../shared/errors/errors.ts";
 import { type GhRunner, spawnGh } from "../shared/github/client.ts";

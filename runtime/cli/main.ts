@@ -21,7 +21,7 @@ import { archCheck, archShow, humanReport, violationError } from "../architectur
 import type { RepoAction } from "../core/repo-config.ts";
 import { CONFIG_FILE, locate } from "../core/workspace.ts";
 import { MONITOR_PROTOCOL_VERSION } from "../monitor/protocol.ts";
-import { formatUsage, sumUsage } from "../reporting/render.ts";
+import { formatUsage, sumUsage } from "../reporting/cli/usage.ts";
 import { skillList } from "../resources/role-files.ts";
 import { workflowModel } from "../shared/config.ts";
 import {

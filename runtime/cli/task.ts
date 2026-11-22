@@ -77,8 +77,8 @@ import {
   transitions,
   upsertReport,
 } from "../persistence/repository.ts";
-import { publishPending } from "../reporting/outbox.ts";
-import { renderStepReport } from "../reporting/render.ts";
+import { publishPending } from "../reporting/adapters/outbox.ts";
+import { renderStepReport } from "../reporting/application/render.ts";
 import { applyRetention, cleanupRun } from "../resources/cleanup.ts";
 import { parseSkillChoice } from "../resources/role-files.ts";
 import { branchName, ensureTaskWorkspace, git, type Workspace } from "../resources/worktree.ts";

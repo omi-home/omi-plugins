@@ -7,10 +7,10 @@ import {
   commentMarker,
   type StepComment,
   type TokenUsage,
-} from "../shared/contracts.ts";
-import { OmiError } from "../shared/errors/errors.ts";
-import { TEMPLATES_DIR } from "../shared/plugin-paths.ts";
-import { redact } from "../shared/redact.ts";
+} from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { TEMPLATES_DIR } from "../../shared/plugin-paths.ts";
+import { redact } from "../../shared/redact.ts";
 
 const TEMPLATES = join(TEMPLATES_DIR, "reports");
 

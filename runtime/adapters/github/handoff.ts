@@ -2,7 +2,7 @@
 // with `<!-- omi:handoff=<date>-s<N> -->` on the active Milestone (ADR-0001 D7), so a new session
 // resumes from GitHub instead of local memory.
 import { z } from "zod";
-import { api } from "../../reporting/outbox.ts";
+import { api } from "../../reporting/adapters/outbox.ts";
 import type { OmiConfig } from "../../shared/config.ts";
 import { AuthorAssociation, type ProjectStatus, parseContract } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";

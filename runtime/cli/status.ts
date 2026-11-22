@@ -7,7 +7,7 @@ import { activeMilestone } from "../adapters/github/handoff.ts";
 import { type StatusDrift, statusDrift } from "../adapters/github/project-fields.ts";
 import { repoValidate } from "../adapters/github/repo.ts";
 import { type AttemptUsage, latestRun, runUsage } from "../persistence/repository.ts";
-import { sumUsage } from "../reporting/render.ts";
+import { sumUsage } from "../reporting/application/render.ts";
 import { type Check, ProjectStatus, type TokenUsage } from "../shared/contracts.ts";
 import { OmiError } from "../shared/errors/errors.ts";
 import type { GhRunner } from "../shared/github/client.ts";

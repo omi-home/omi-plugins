@@ -9,18 +9,18 @@ import {
   type PendingReport,
   pendingReports,
   releaseLease,
-} from "../persistence/repository.ts";
-import { type IssueRef, parseContract } from "../shared/contracts.ts";
-import { isTransient, OmiError } from "../shared/errors/errors.ts";
+} from "../../persistence/repository.ts";
+import { type IssueRef, parseContract } from "../../shared/contracts.ts";
+import { isTransient, OmiError } from "../../shared/errors/errors.ts";
 import {
   classify,
   type GhRunner,
   markerAuthor,
   RestComment,
   spawnGh,
-} from "../shared/github/client.ts";
-import { redact } from "../shared/redact.ts";
-import type { Db } from "../shared/sqlite/db.ts";
+} from "../../shared/github/client.ts";
+import { redact } from "../../shared/redact.ts";
+import type { Db } from "../../shared/sqlite/db.ts";
 
 const Comment = RestComment;
 type Comment = z.infer<typeof Comment>;
