@@ -29,9 +29,9 @@ import * as repo from "../../runtime/persistence/repository.ts";
 import {
   loadProfiles,
   profileSecretResolver,
-  selectProfile,
 } from "../../runtime/profile/adapters/profile-config.ts";
 import { generateMasterKey } from "../../runtime/profile/domain/secrets.ts";
+import { selectProfile } from "../../runtime/profile/domain/selection.ts";
 import { roleSkills } from "../../runtime/resources/role-files.ts";
 import { parseConfig } from "../../runtime/shared/config.ts";
 import type { TaskPacket } from "../../runtime/shared/contracts.ts";

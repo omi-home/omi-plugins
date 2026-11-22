@@ -3,7 +3,7 @@
 // a fresh CLAUDE_CONFIG_DIR per run and an env built from an allowlist, never the host's env.
 import { spawnSync } from "node:child_process";
 import { isAbsolute, join, relative } from "node:path";
-import type { Selection } from "../../profile/adapters/profile-config.ts";
+import type { Selection } from "../../profile/domain/selection.ts";
 import type { Harness, QuotaSignal, Role, TokenUsage } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 

@@ -17,7 +17,6 @@ import {
   assertNoLegacyProfiles,
   keyEnvName,
   readLegacyProfiles,
-  secretEnv,
 } from "../adapters/profile-config.ts";
 import {
   addProfile,
@@ -31,6 +30,7 @@ import {
   writeSealed,
 } from "../adapters/profiles.ts";
 import { encryptSecret, loadMasterKey, type SealedSecret } from "../domain/secrets.ts";
+import { secretEnv } from "../domain/selection.ts";
 
 export interface ProfileDeps {
   workspace: string;

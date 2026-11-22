@@ -82,10 +82,8 @@ import {
   loadProfiles,
   profileSecretResolver,
   readLegacyProfiles,
-  type Selection,
-  secretEnv,
-  selectProfile,
 } from "../profile/adapters/profile-config.ts";
+import { type Selection, secretEnv, selectProfile } from "../profile/domain/selection.ts";
 import { publishPending } from "../reporting/adapters/outbox.ts";
 import { renderStepReport } from "../reporting/application/render.ts";
 import { applyRetention, cleanupRun } from "../resources/cleanup.ts";

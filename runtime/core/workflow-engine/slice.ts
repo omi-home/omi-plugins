@@ -37,7 +37,7 @@ import {
   startStep,
   stepResult,
 } from "../../persistence/repository.ts";
-import type { Selection } from "../../profile/adapters/profile-config.ts";
+import type { Selection } from "../../profile/domain/selection.ts";
 import { publishPending } from "../../reporting/adapters/outbox.ts";
 import { renderStepReport } from "../../reporting/application/render.ts";
 import { type SkillChoice, stepSkills, writeRoleFiles } from "../../resources/role-files.ts";

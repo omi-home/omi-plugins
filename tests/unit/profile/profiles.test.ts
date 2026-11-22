@@ -21,7 +21,6 @@ import {
   loadProfiles,
   profileSecretResolver,
   readLegacyProfiles,
-  selectProfile,
 } from "../../../runtime/profile/adapters/profile-config.ts";
 import { addProfile } from "../../../runtime/profile/adapters/profiles.ts";
 import {
@@ -29,6 +28,7 @@ import {
   generateMasterKey,
   parseMasterKey,
 } from "../../../runtime/profile/domain/secrets.ts";
+import { selectProfile } from "../../../runtime/profile/domain/selection.ts";
 import { Profile, ProfilesFile } from "../../../runtime/shared/contracts.ts";
 import { OmiError } from "../../../runtime/shared/errors/errors.ts";
 import { redact } from "../../../runtime/shared/redact.ts";

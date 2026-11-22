@@ -36,10 +36,10 @@ import {
   keyEnvName,
   loadProfiles,
   profileSecretResolver,
-  type Selection,
 } from "../profile/adapters/profile-config.ts";
 import { listProfileRecords } from "../profile/adapters/profiles.ts";
 import { keyFingerprint, loadMasterKey } from "../profile/domain/secrets.ts";
+import type { Selection } from "../profile/domain/selection.ts";
 import { same } from "../resources/worktree.ts";
 import { loadConfig, type OmiConfig, workflowModel } from "../shared/config.ts";
 import type { Check } from "../shared/contracts.ts";
