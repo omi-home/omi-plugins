@@ -63,9 +63,29 @@ const Facts = z.strictObject({
         })
         .nullable(),
       pullRequests: z.strictObject({ nodes: z.array(PrNode) }),
+      workflows: z
+        .object({
+          entries: z.array(
+            z.object({
+              name: z.string(),
+              object: z.object({ text: z.string().nullable().optional() }).nullable().optional(),
+            }),
+          ),
+        })
+        .nullable()
+        .optional(),
     })
     .nullable(),
 });
+
+/** True when a workflow file's text triggers on `pull_request` (comment lines ignored). */
+export function triggersOnPullRequest(text: string): boolean {
+  const body = text
+    .split("\n")
+    .filter((l) => !l.trimStart().startsWith("#"))
+    .join("\n");
+  return /(?<![\w.])pull_request(_target)?(?!\w)/.test(body);
+}
 
 export interface PrFacts {
   pr: PrNode | undefined;
@@ -77,6 +97,8 @@ export interface PrFacts {
   admin: boolean;
   /** Server-side rules on the base branch: classic protection or a ruleset. */
   protected: boolean;
+  /** The base branch has a workflow triggered by `pull_request`: checks are expected on a PR. */
+  hasCi?: boolean;
   allowed: Record<MergeMethod, boolean>;
 }
 
@@ -88,11 +110,18 @@ export function prFacts(
 ): PrFacts {
   const { owner, repo } = config.github;
   const data = graphql(
-    `query($owner:String!,$repo:String!,$head:String!,$base:String!){repository(owner:$owner,name:$repo){
+    `query($owner:String!,$repo:String!,$head:String!,$base:String!,$wf:String!){repository(owner:$owner,name:$repo){
+      workflows:object(expression:$wf){... on Tree{entries{name object{... on Blob{text}}}}}
       isPrivate viewerPermission squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed
       ref(qualifiedName:$base){branchProtectionRule{isAdminEnforced} rules(first:20){nodes{type}}}
       pullRequests(headRefName:$head,states:[${o.states.join(",")}],first:5,orderBy:{field:CREATED_AT,direction:DESC}){nodes{${PR_FIELDS}}}}}`,
-    { owner, repo, head: o.head, base: `refs/heads/${o.base}` },
+    {
+      owner,
+      repo,
+      head: o.head,
+      base: `refs/heads/${o.base}`,
+      wf: `refs/heads/${o.base}:.github/workflows`,
+    },
     Facts,
     "merge facts",
     run,
@@ -107,6 +136,9 @@ export function prFacts(
     isPrivate: data.isPrivate,
     admin: data.viewerPermission === "ADMIN",
     protected: Boolean(data.ref?.branchProtectionRule || data.ref?.rules.nodes.length),
+    hasCi: (data.workflows?.entries ?? []).some(
+      (e) => /\.ya?ml$/.test(e.name) && triggersOnPullRequest(e.object?.text ?? ""),
+    ),
     allowed: {
       SQUASH: data.squashMergeAllowed,
       MERGE: data.mergeCommitAllowed,
@@ -193,7 +225,9 @@ export function mergeEligibility(
   const ci = pr.commits.nodes[0]?.commit.statusCheckRollup?.state;
   checks.push(
     ci === undefined
-      ? warn("ci", "no checks reported on the head commit")
+      ? f.hasCi
+        ? fail("ci", "no checks reported yet: wait and retry")
+        : warn("ci", "no checks reported on the head commit (repo has no pull_request workflow)")
       : ci === "SUCCESS"
         ? pass("ci", "all checks passed (run on agent-pushed code: not an independent control)")
         : ci === "PENDING" || ci === "EXPECTED"
