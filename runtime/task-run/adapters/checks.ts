@@ -74,10 +74,20 @@ export function runCommand(
     closeSync(fd);
   }
   const durationMs = Date.now() - started;
+  const pastTimeout = durationMs >= cmd.timeoutSec * 1000;
+  // The supervisor itself ending on a signal (status null) or 128+signal after the deadline passed
+  // is still a timeout: it was killed together with the tree it was killing, never a real failure.
+  const killedBySignal = r.status === null || r.status === 137 || r.status === 143;
   const timedOut =
     (r.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT" ||
-    (r.status === TIMEOUT_EXIT && durationMs >= cmd.timeoutSec * 1000);
-  const summary = !timedOut && r.status === 0 ? "" : tail(logPath);
+    (r.status === TIMEOUT_EXIT && pastTimeout) ||
+    (killedBySignal && pastTimeout);
+  const base = !timedOut && r.status === 0 ? "" : tail(logPath);
+  // Evidence for abnormal ends (signal, no exit code): the real status/signal/duration.
+  const summary =
+    !timedOut && r.status !== 0 && (r.status === null || r.signal)
+      ? `${base}\n[supervisor status=${r.status} signal=${r.signal} durationMs=${durationMs}]`.trim()
+      : base;
   const outcome: CheckOutcome = timedOut
     ? "timeout"
     : r.status === 0
