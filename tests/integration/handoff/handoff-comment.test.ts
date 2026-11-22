@@ -2,10 +2,10 @@
 // re-post is a no-op, explicit marker updates, active Milestone selection, redaction.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { listHandoffs, postHandoff } from "../../runtime/adapters/github/handoff.ts";
-import type { OmiConfig } from "../../runtime/shared/config.ts";
-import type { OmiError } from "../../runtime/shared/errors/errors.ts";
-import type { GhRunner } from "../../runtime/shared/github/client.ts";
+import { listHandoffs, postHandoff } from "../../../runtime/handoff/adapters/handoff.ts";
+import type { OmiConfig } from "../../../runtime/shared/config.ts";
+import type { OmiError } from "../../../runtime/shared/errors/errors.ts";
+import type { GhRunner } from "../../../runtime/shared/github/client.ts";
 
 const config = { github: { owner: "o", repo: "r", projectNumber: 2 } } as OmiConfig;
 

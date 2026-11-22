@@ -2,6 +2,7 @@
 // Project, valid OMI type, terminal, open parent, acceptance criteria, no open blockers.
 import { z } from "zod";
 import { labelType, loadHierarchyV2, typeLabels } from "../../github/application/hierarchy.ts";
+import { NATIVE_TYPE } from "../../github/domain/native-type.ts";
 import { type OmiConfig, workflowModel } from "../../shared/config.ts";
 import {
   type Check,
@@ -110,16 +111,6 @@ export function readIssueType(
   }
   return type;
 }
-
-/** Native Issue Type expected for an OMI type (ADR-0001 D6); unlisted types have none. */
-export const NATIVE_TYPE: Partial<Record<IssueType, string>> = {
-  bug: "Bug",
-  feature: "Feature",
-  "dev-task": "Task",
-  "test-task": "Task",
-  "devops-task": "Task",
-  "documentation-task": "Task",
-};
 
 const ACCEPTANCE = /^#{1,6}\s.*(acceptance|definition of done|tiêu chí)|^\s*[-*]\s\[[ x]\]/im;
 

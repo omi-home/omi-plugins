@@ -5,7 +5,6 @@
 // pin with `marketplace add owner/repo#<tag>`), push it, close the Release Issue and roll up.
 import { prFacts } from "../adapters/github/merge.ts";
 import { markedPrimaries } from "../adapters/github/pr.ts";
-import { fetchTicket } from "../adapters/github/ticket.ts";
 import { type FinishChange, markFinished } from "../github/adapters/project.ts";
 import { labelType } from "../github/application/hierarchy.ts";
 import { git } from "../resources/worktree.ts";
@@ -13,6 +12,7 @@ import type { Check } from "../shared/contracts.ts";
 import { OmiError } from "../shared/errors/errors.ts";
 import type { GhRunner } from "../shared/github/client.ts";
 import { classify, spawnGh } from "../shared/github/client.ts";
+import { fetchTicket } from "../ticket/adapters/ticket.ts";
 import { repo } from "./task.ts";
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;

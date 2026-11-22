@@ -3,10 +3,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
-import { fetchTicket, type Ticket, validateTicket } from "../../runtime/adapters/github/ticket.ts";
-import { github } from "../../runtime/cli/doctor.ts";
-import { parseConfig } from "../../runtime/shared/config.ts";
-import { classify, type GhRunner, graphql } from "../../runtime/shared/github/client.ts";
+import { github } from "../../../runtime/cli/doctor.ts";
+import { parseConfig } from "../../../runtime/shared/config.ts";
+import { classify, type GhRunner, graphql } from "../../../runtime/shared/github/client.ts";
+import {
+  fetchTicket,
+  type Ticket,
+  validateTicket,
+} from "../../../runtime/ticket/adapters/ticket.ts";
 
 const config = parseConfig({ github: { owner: "o", repo: "r", projectNumber: 2 } });
 const gh =

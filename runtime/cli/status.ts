@@ -3,10 +3,10 @@
 // (`cleanup scan`), Status drift (`project plan`) and governance gaps (`github repo validate`).
 // The tree is required; each side section reports its own error instead of failing the command.
 
-import { activeMilestone } from "../adapters/github/handoff.ts";
 import { type BoardIssue, readTree } from "../github/adapters/board.ts";
 import { type StatusDrift, statusDrift } from "../github/adapters/project-fields.ts";
 import { repoValidate } from "../github/adapters/repo.ts";
+import { activeMilestone } from "../handoff/adapters/handoff.ts";
 import { type AttemptUsage, latestRun, runUsage } from "../persistence/repository.ts";
 import { sumUsage } from "../reporting/application/render.ts";
 import { type Check, ProjectStatus, type TokenUsage } from "../shared/contracts.ts";

@@ -22,9 +22,14 @@ import {
   detectQuota,
   observeRun,
 } from "../../adapters/claude/launch.ts";
-import { fetchIssueContext } from "../../adapters/github/context.ts";
 import { archShow } from "../../architecture/cli/arch.ts";
 import type { ArchitectureExcerpt } from "../../architecture/domain/contract.ts";
+import { fetchIssueContext } from "../../handoff/adapters/context.ts";
+import {
+  acceptStepResultWithWarnings,
+  buildTaskPacket,
+  packetPrompt,
+} from "../../handoff/application/packet.ts";
 import {
   addArtifact,
   advanceRun,
@@ -58,7 +63,6 @@ import { OmiError } from "../../shared/errors/errors.ts";
 import type { GhRunner } from "../../shared/github/client.ts";
 import { redact, redactDeep } from "../../shared/redact.ts";
 import type { Db } from "../../shared/sqlite/db.ts";
-import { acceptStepResultWithWarnings, buildTaskPacket, packetPrompt } from "../handoff/packet.ts";
 import { runChecks } from "./checks.ts";
 import { commitWork } from "./commit.ts";
 import { policyFrom, type WorkflowEvent } from "./fsm.ts";

@@ -11,7 +11,7 @@ import {
   PER_ISSUE_CHARS,
   parseCarriedFindings,
   TOTAL_CHARS,
-} from "../../runtime/adapters/github/context.ts";
+} from "../../../runtime/handoff/adapters/context.ts";
 import {
   acceptStepResult,
   acceptStepResultWithWarnings,
@@ -21,10 +21,10 @@ import {
   packetPrompt,
   type TaskPacketInput,
   TRUNCATION_SUFFIX,
-} from "../../runtime/core/handoff/packet.ts";
-import { parseConfig } from "../../runtime/shared/config.ts";
-import type { Role } from "../../runtime/shared/contracts.ts";
-import type { GhRunner } from "../../runtime/shared/github/client.ts";
+} from "../../../runtime/handoff/application/packet.ts";
+import { parseConfig } from "../../../runtime/shared/config.ts";
+import type { Role } from "../../../runtime/shared/contracts.ts";
+import type { GhRunner } from "../../../runtime/shared/github/client.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8" }).trim();

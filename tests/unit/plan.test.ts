@@ -1,9 +1,9 @@
 // DevTask-0026 #55: workflow composition picks only the roles an Issue needs.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { upsertSection } from "../../runtime/adapters/github/context.ts";
 import { planWorkflow } from "../../runtime/core/workflow-engine/plan.ts";
 import { isTest } from "../../runtime/core/workflow-engine/slice.ts";
+import { upsertSection } from "../../runtime/handoff/adapters/context.ts";
 
 const codeOf = (fn: () => unknown) => {
   try {

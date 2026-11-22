@@ -4,9 +4,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { fetchIssueContext, readSection, writeSection } from "../adapters/github/context.ts";
-import { listHandoffs, postHandoff, strip } from "../adapters/github/handoff.ts";
 import { archCheck, archShow, humanReport, violationError } from "../architecture/cli/arch.ts";
+import { contextApply, contextPlan, humanContextPlan } from "../context/cli/context.ts";
 import { CONFIG_FILE, locate } from "../core/workspace.ts";
 import {
   githubProjectApply,
@@ -18,6 +17,13 @@ import {
   projectValidate,
   repoValidate,
 } from "../github/cli/github.ts";
+import {
+  handoffPost,
+  handoffShow,
+  issueFindings,
+  issueSectionGet,
+  issueSectionSet,
+} from "../handoff/cli/handoff.ts";
 import { MONITOR_PROTOCOL_VERSION } from "../monitor/cli/protocol.ts";
 import {
   type ProfileDeps,
@@ -37,7 +43,6 @@ import { PLUGIN_ROOT } from "../shared/plugin-paths.ts";
 import { redact, redactDeep } from "../shared/redact.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { configGet, configSet } from "./config.ts";
-import { contextApply, contextPlan, humanContextPlan } from "./context.ts";
 import { type Check, doctor, probeProfiles } from "./doctor.ts";
 import { agentPreToolUse, type HookInput, preToolUse, sessionStart } from "./hook.ts";
 import { projectInit } from "./init.ts";
@@ -764,28 +769,17 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
           issueDepend(issue, values.on, () => repo(cwd).config),
         );
       case "issue findings": {
-        const found = fetchIssueContext(repo(cwd).config, issue).carriedFindings;
-        const human = found.length
-          ? found.map((f) => `- ${f.source}: ${f.finding} → ${f.action}`)
-          : [`no carried findings on #${issue}`];
-        return ok({ issue, findings: found }, lines(human));
+        const r = issueFindings(repo(cwd).config, issue);
+        return ok(r.data, r.human);
       }
       case "issue section get": {
-        const text = readSection(repo(cwd).config, issue, section);
-        return ok(
-          { issue, section, text },
-          `${text}
-`,
-        );
+        const r = issueSectionGet(repo(cwd).config, issue, section);
+        return ok(r.data, r.human);
       }
       case "issue section set": {
         const text = bodyFile();
-        writeSection(repo(cwd).config, issue, section, text);
-        return ok(
-          { issue, section },
-          `section   #${issue} ${section} updated
-`,
-        );
+        const r = issueSectionSet(repo(cwd).config, issue, section, text);
+        return ok(r.data, r.human);
       }
       case "pr create": {
         const body = values["body-file"] ? bodyFile() : undefined;
@@ -814,16 +808,8 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         return ok(r, lines(human), r.cleanup?.state === "CLEANUP_FAILED" ? EXIT.failed : EXIT.ok);
       }
       case "handoff show": {
-        const h = listHandoffs(repo(cwd).config)[0] ?? null;
-        const human = h
-          ? lines([
-              `handoff   ${h.marker} on #${h.issue} ${h.title} (${h.createdAt})`,
-              `url       ${h.url}`,
-              "",
-              strip(h.body),
-            ])
-          : "handoff   none found\n";
-        return ok(h, human);
+        const r = handoffShow(repo(cwd).config);
+        return ok(r.data, r.human);
       }
       case "hook pre-tool-use":
       case "hook agent-pre-tool-use":
@@ -854,11 +840,8 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
       case "handoff post": {
         const text = bodyFile();
         const milestone = values.milestone === undefined ? undefined : issueArg(values.milestone);
-        const r = postHandoff(repo(cwd).config, text, { issue: milestone });
-        return ok(
-          r,
-          lines([`handoff   ${r.marker} on #${r.issue} (${r.action})`, `url       ${r.url}`]),
-        );
+        const r = handoffPost(repo(cwd).config, text, milestone);
+        return ok(r.data, r.human);
       }
       case "cleanup scan": {
         const r = cleanupScan({ cwd });

@@ -8,11 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { type PullRequest, prBody, validatePr } from "../../runtime/adapters/github/pr.ts";
-import type { Ticket } from "../../runtime/adapters/github/ticket.ts";
 import { prCreate, prMerge, prValidate, taskStart, taskStatus } from "../../runtime/cli/task.ts";
 import { titleType } from "../../runtime/github/application/hierarchy.ts";
 import type { IssueType } from "../../runtime/shared/contracts.ts";
 import type { GhRunner } from "../../runtime/shared/github/client.ts";
+import type { Ticket } from "../../runtime/ticket/adapters/ticket.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();

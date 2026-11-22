@@ -6,7 +6,19 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { AGENT_PACK, agentEnv, PLUGIN_NAME } from "../adapters/claude/launch.ts";
+import { AGENT_PACK, agentEnv, PLUGIN_NAME } from "../../adapters/claude/launch.ts";
+import { SETTINGS } from "../../cli/workspace.ts";
+import { locate, WORKSPACE_DIR } from "../../core/workspace.ts";
+import { writeRoleFiles } from "../../resources/role-files.ts";
+import { loadConfig } from "../../shared/config.ts";
+import {
+  type ContextClass,
+  type ContextUsage,
+  parseContract,
+  Role,
+} from "../../shared/contracts.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
+import { PLUGIN_ROOT } from "../../shared/plugin-paths.ts";
 import {
   AppliedContext,
   addContext,
@@ -16,15 +28,8 @@ import {
   removeContext,
   type Settings,
   settingsDiff,
-} from "../core/context-settings.ts";
-import { classify, parseContext } from "../core/context-usage.ts";
-import { locate, WORKSPACE_DIR } from "../core/workspace.ts";
-import { writeRoleFiles } from "../resources/role-files.ts";
-import { loadConfig } from "../shared/config.ts";
-import { type ContextClass, type ContextUsage, parseContract, Role } from "../shared/contracts.ts";
-import { OmiError } from "../shared/errors/errors.ts";
-import { PLUGIN_ROOT } from "../shared/plugin-paths.ts";
-import { SETTINGS } from "./workspace.ts";
+} from "../domain/context-settings.ts";
+import { classify, parseContext } from "../domain/context-usage.ts";
 
 /** Runs `claude <args>` in cwd with `/context` on stdin (a Git Bash argument would be rewritten). */
 export type ContextRunner = (o: {

@@ -13,8 +13,16 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { APPLIED_FILE, type ContextRunner, contextApply } from "../../runtime/cli/context.ts";
-import { addContext, desiredContext, removeContext } from "../../runtime/core/context-settings.ts";
+import {
+  APPLIED_FILE,
+  type ContextRunner,
+  contextApply,
+} from "../../../runtime/context/cli/context.ts";
+import {
+  addContext,
+  desiredContext,
+  removeContext,
+} from "../../../runtime/context/domain/context-settings.ts";
 
 const CONTEXT = `**Tokens:** 20k / 1m (2%)
 
