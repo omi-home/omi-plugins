@@ -5,9 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
-// TODO(R4 #332): the imports of ../core/* below leave shared when workflow config moves into its
-// module (ADR-0006).
-import { resolveWorkflow } from "../core/workflow-config.ts";
+// TODO(R7 #335): this import leaves shared when workspace moves into its module (ADR-0006).
 import { CONFIG_FILE } from "../core/workspace.ts";
 import {
   DEFAULT_KEY_ENV,
@@ -18,6 +16,7 @@ import {
   WorkflowModel,
 } from "./contracts.ts";
 import { OmiError } from "./errors/errors.ts";
+import { resolveWorkflow } from "./workflow.ts";
 
 const ModelAlias = z.enum(["sonnet", "opus", "haiku"]);
 const Effort = z.enum(["low", "medium", "high"]);
@@ -65,7 +64,7 @@ export const OmiConfig = z.strictObject({
     privateRepoRiskAccepted: z.boolean().default(false),
     /** Workflow model: `legacy` (type:* labels) until Project #2 migrates to `v2` (ADR-0005 D8). */
     model: WorkflowModel.default("legacy"),
-    /** Override of config/github/workflow.yaml; merged and validated by workflow-config.ts. */
+    /** Override of config/github/workflow.yaml; merged and validated by workflow.ts. */
     workflow: z
       .record(z.string(), z.unknown())
       .optional()

@@ -3,12 +3,12 @@
 // verdict without the reviewer's posted report. Plus policy from config, #99 status mapping.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { setStatus } from "../../runtime/adapters/github/project.ts";
 import {
   PROJECT_STATUS,
   policyFrom,
   type WorkflowEvent,
 } from "../../runtime/core/workflow-engine/fsm.ts";
+import { setStatus } from "../../runtime/github/adapters/project.ts";
 import * as repo from "../../runtime/persistence/repository.ts";
 import { parseConfig } from "../../runtime/shared/config.ts";
 import { parseContract, StepResult, WorkflowState } from "../../runtime/shared/contracts.ts";

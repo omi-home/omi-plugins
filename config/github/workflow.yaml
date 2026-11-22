@@ -1,7 +1,7 @@
 # State machine of model v2 (ADR-0005 D2; ChangeRequest-0013 §9.3 + §5.2; DevTask-0103 #316).
 # Single source of the statuses and transitions each issue type may have; `omi move` / `omi sync`
 # read it (Feature-0039 #298).
-# Workspace override: `github.workflow` in .omi-plugins/omi.config.yaml (merge rules: runtime/core/workflow-config.ts).
+# Workspace override: `github.workflow` in .omi-plugins/omi.config.yaml (merge rules: runtime/shared/workflow.ts).
 #
 # transition: from = status or "*"; to = status or list; by = po | coordinator | auto;
 #   coordinator = only through `omi move`; po = only recorded by `sync`; auto = `sync` applies it when `when` holds.

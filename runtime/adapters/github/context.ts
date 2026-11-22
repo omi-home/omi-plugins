@@ -2,7 +2,7 @@
 // executable Issue body plus its parent chain, size-bounded, and the findings other tasks
 // carried into it. One GraphQL call, read-only.
 import { z } from "zod";
-import { labelType } from "../../core/hierarchy.ts";
+import { labelType } from "../../github/application/hierarchy.ts";
 import type { OmiConfig } from "../../shared/config.ts";
 import {
   AuthorAssociation,

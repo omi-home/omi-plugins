@@ -7,14 +7,14 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { issueTypeApply } from "../adapters/github/issue-types.ts";
+import { locate } from "../core/workspace.ts";
+import { issueTypeApply } from "../github/adapters/issue-types.ts";
 import {
   findOrCreateProject,
   linkProject,
   type ProjectRef,
   projectByNumber,
-} from "../adapters/github/project.ts";
-import { locate } from "../core/workspace.ts";
+} from "../github/adapters/project.ts";
 import { CONFIG_PATH, loadConfig, readConfigData } from "../shared/config.ts";
 import { OmiError } from "../shared/errors/errors.ts";
 import { type GhRunner, spawnGh } from "../shared/github/client.ts";

@@ -5,9 +5,9 @@
 // pin with `marketplace add owner/repo#<tag>`), push it, close the Release Issue and roll up.
 import { prFacts } from "../adapters/github/merge.ts";
 import { markedPrimaries } from "../adapters/github/pr.ts";
-import { type FinishChange, markFinished } from "../adapters/github/project.ts";
 import { fetchTicket } from "../adapters/github/ticket.ts";
-import { labelType } from "../core/hierarchy.ts";
+import { type FinishChange, markFinished } from "../github/adapters/project.ts";
+import { labelType } from "../github/application/hierarchy.ts";
 import { git } from "../resources/worktree.ts";
 import type { Check } from "../shared/contracts.ts";
 import { OmiError } from "../shared/errors/errors.ts";
