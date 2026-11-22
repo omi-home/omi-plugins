@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { PLUGIN_NAME } from "../../runtime/adapters/claude/launch.ts";
+import { PLUGIN_NAME } from "../../runtime/harness/domain/harness.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const readJson = (p: string) => JSON.parse(readFileSync(root + p, "utf8"));

@@ -36,11 +36,11 @@ import {
 } from "../profile/cli/profile.ts";
 import { secretInitKey, secretRotateKey } from "../profile/cli/secret.ts";
 import { formatUsage, sumUsage } from "../reporting/cli/usage.ts";
-import { skillList } from "../resources/role-files.ts";
 import { type ProfileView, ProjectStatus, Role, type TokenUsage } from "../shared/contracts.ts";
 import { ERROR_CODES, OmiError } from "../shared/errors/errors.ts";
 import { PLUGIN_ROOT } from "../shared/plugin-paths.ts";
 import { redact, redactDeep } from "../shared/redact.ts";
+import { skillList } from "../task-run/cli/skills.ts";
 import { cleanupApply, cleanupScan, type ScanResult } from "./cleanup.ts";
 import { configGet, configSet } from "./config.ts";
 import { type Check, doctor, probeProfiles } from "./doctor.ts";

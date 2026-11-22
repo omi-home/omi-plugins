@@ -243,7 +243,7 @@ export const WorkflowState = z.enum([
 ]);
 export type WorkflowState = z.infer<typeof WorkflowState>;
 
-/** Events the workflow FSM accepts (runtime/core/workflow-engine/fsm.ts). */
+/** Events the workflow FSM accepts (runtime/task-run/domain/fsm.ts). */
 export const WorkflowEventType = z.enum([
   "TICKET_VALID",
   "WORKSPACE_CREATED",

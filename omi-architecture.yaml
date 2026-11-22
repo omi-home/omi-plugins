@@ -28,6 +28,7 @@ modules:
       id: reporting,
       path: runtime/reporting,
       description: "Report rendering, outbox and GitHub comment publishing",
+      dependsOn: [task-run],
     }
   - { id: profile, path: runtime/profile, description: "Execution profiles and sealed secrets" }
   - {
@@ -50,25 +51,25 @@ modules:
       id: handoff,
       path: runtime/handoff,
       description: "Session handoff comments and task packet handoff",
-      dependsOn: [github, reporting],
+      dependsOn: [github],
     }
   - {
       id: context,
       path: runtime/context,
       description: "Context usage measurement and session settings",
-      dependsOn: [github],
+      dependsOn: [github, harness, task-run],
     }
   - {
       id: harness,
       path: runtime/harness,
-      description: "Agent harness: launches Claude Code per role and profile",
-      dependsOn: [profile, reporting],
+      description: "Agent harness: port Harness in domain/, one adapter per harness (Claude Code)",
+      dependsOn: [profile],
     }
   - {
       id: task-run,
       path: runtime/task-run,
       description: "Task run engine: FSM, plan, slice, commit, checks, setup, worktree, repository state",
-      dependsOn: [github, ticket, harness, reporting, profile, handoff, context],
+      dependsOn: [github, ticket, harness, profile, handoff, architecture],
     }
   - {
       id: cleanup,
@@ -106,50 +107,6 @@ placement:
     message: "Tests live under tests/{unit,integration,contract,e2e}/<module>/, never next to the source."
 ignore: []
 legacy:
-  # R6 task-run engine + harness
-  - {
-      path: runtime/core/workflow-engine/fsm.ts,
-      issue: 334,
-      reason: "R6: moves to runtime/task-run/",
-    }
-  - {
-      path: runtime/core/workflow-engine/plan.ts,
-      issue: 334,
-      reason: "R6: moves to runtime/task-run/",
-    }
-  - {
-      path: runtime/core/workflow-engine/slice.ts,
-      issue: 334,
-      reason: "R6: moves to runtime/task-run/",
-    }
-  - {
-      path: runtime/core/workflow-engine/commit.ts,
-      issue: 334,
-      reason: "R6: moves to runtime/task-run/",
-    }
-  - {
-      path: runtime/core/workflow-engine/checks.ts,
-      issue: 334,
-      reason: "R6: moves to runtime/task-run/",
-    }
-  - {
-      path: runtime/core/workflow-engine/setup.ts,
-      issue: 334,
-      reason: "R6: moves to runtime/task-run/",
-    }
-  - {
-      path: runtime/adapters/claude,
-      issue: 334,
-      reason: "R6: moves to the harness module (ADR-0006 D7)",
-    }
-  - { path: runtime/resources/worktree.ts, issue: 334, reason: "R6: moves to runtime/task-run/" }
-  - { path: runtime/resources/role-files.ts, issue: 334, reason: "R6: moves to runtime/task-run/" }
-  - { path: runtime/core/attempt-liveness.ts, issue: 334, reason: "R6: moves to runtime/task-run/" }
-  - {
-      path: runtime/persistence/repository.ts,
-      issue: 334,
-      reason: "R6: moves to runtime/task-run/",
-    }
   # R7 task-run cli, cleanup, release, hook, workspace
   - { path: runtime/cli/cleanup.ts, issue: 335, reason: "R7: moves to runtime/cleanup/cli/" }
   - {

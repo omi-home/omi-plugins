@@ -6,10 +6,10 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { AGENT_PACK, agentEnv, PLUGIN_NAME } from "../../adapters/claude/launch.ts";
 import { SETTINGS } from "../../cli/workspace.ts";
 import { locate, WORKSPACE_DIR } from "../../core/workspace.ts";
-import { writeRoleFiles } from "../../resources/role-files.ts";
+import { agentEnv } from "../../harness/adapters/claude-code/launch.ts";
+import { AGENT_PACK, PLUGIN_NAME } from "../../harness/domain/harness.ts";
 import { loadConfig } from "../../shared/config.ts";
 import {
   type ContextClass,
@@ -19,6 +19,7 @@ import {
 } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { PLUGIN_ROOT } from "../../shared/plugin-paths.ts";
+import { writeRoleFiles } from "../../task-run/adapters/role-files.ts";
 import {
   AppliedContext,
   addContext,

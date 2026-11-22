@@ -15,9 +15,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { layout } from "../../runtime/cli/doctor.ts";
 import { workspaceMigrate } from "../../runtime/cli/workspace.ts";
-import { advanceRun, createRun, openRuns } from "../../runtime/persistence/repository.ts";
 import type { OmiError } from "../../runtime/shared/errors/errors.ts";
 import { openState } from "../../runtime/shared/sqlite/db.ts";
+import { advanceRun, createRun, openRuns } from "../../runtime/task-run/adapters/repository.ts";
 
 const git = (cwd: string, ...a: string[]) =>
   execFileSync("git", a, { cwd, encoding: "utf8", stdio: "pipe" }).trim();

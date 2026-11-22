@@ -15,14 +15,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { taskStart, taskStatus, taskUnblock, ticketValidate } from "../../runtime/cli/task.ts";
+import type { GhRunner } from "../../runtime/shared/github/client.ts";
+import { openState, statePath } from "../../runtime/shared/sqlite/db.ts";
 import {
   acquireLease,
   advanceRun,
   getRun,
   transitionRun,
-} from "../../runtime/persistence/repository.ts";
-import type { GhRunner } from "../../runtime/shared/github/client.ts";
-import { openState, statePath } from "../../runtime/shared/sqlite/db.ts";
+} from "../../runtime/task-run/adapters/repository.ts";
 import type { Ticket } from "../../runtime/ticket/adapters/ticket.ts";
 
 const git = (cwd: string, ...args: string[]) =>

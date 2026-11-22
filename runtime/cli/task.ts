@@ -5,7 +5,6 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { harnessVersion, versionRefusal } from "../adapters/claude/launch.ts";
 import {
   type MergeReceipt,
   mergeEligibility,
@@ -24,15 +23,6 @@ import {
   sleepSync,
   validatePr,
 } from "../adapters/github/pr.ts";
-import { PRE_MERGE, PROJECT_STATUS, transition } from "../core/workflow-engine/fsm.ts";
-import { planWorkflow, type WorkflowPlan } from "../core/workflow-engine/plan.ts";
-import { runSetup } from "../core/workflow-engine/setup.ts";
-import {
-  lastStepError,
-  runAnalysis,
-  runSlice,
-  type SliceDeps,
-} from "../core/workflow-engine/slice.ts";
 import { locate } from "../core/workspace.ts";
 import {
   markFinished,
@@ -52,26 +42,6 @@ import {
 import { sectionsCheck, sectionsCheckV2 } from "../github/application/issue-forms.ts";
 import { writeSection } from "../handoff/adapters/context.ts";
 import {
-  type AttemptUsage,
-  acquireLease,
-  addArtifact,
-  adoptResources,
-  advanceRun,
-  claimedRefs,
-  createRun,
-  enqueueReport,
-  getRun,
-  latestRun,
-  liveRun,
-  ownedRefs,
-  type RunRow,
-  releaseLease,
-  runContext,
-  runUsage,
-  transitions,
-  upsertReport,
-} from "../persistence/repository.ts";
-import {
   keyEnvName,
   loadProfiles,
   profileSecretResolver,
@@ -79,10 +49,9 @@ import {
 } from "../profile/adapters/profile-config.ts";
 import { type Selection, secretEnv, selectProfile } from "../profile/domain/selection.ts";
 import { publishPending } from "../reporting/adapters/outbox.ts";
+import { stepReports } from "../reporting/adapters/step-reports.ts";
 import { renderStepReport } from "../reporting/application/render.ts";
 import { applyRetention, cleanupRun } from "../resources/cleanup.ts";
-import { parseSkillChoice } from "../resources/role-files.ts";
-import { branchName, ensureTaskWorkspace, git, type Workspace } from "../resources/worktree.ts";
 import { loadConfig, type OmiConfig, workflowModel } from "../shared/config.ts";
 import {
   type Check,
@@ -102,6 +71,43 @@ import { type GhRunner, graphql, spawnGh } from "../shared/github/client.ts";
 import { PLUGIN_ROOT } from "../shared/plugin-paths.ts";
 import { commandEnv } from "../shared/process/command-env.ts";
 import { type Db, openState, statePath } from "../shared/sqlite/db.ts";
+import {
+  type AttemptUsage,
+  acquireLease,
+  addArtifact,
+  adoptResources,
+  advanceRun,
+  claimedRefs,
+  createRun,
+  enqueueReport,
+  getRun,
+  latestRun,
+  liveRun,
+  ownedRefs,
+  type RunRow,
+  releaseLease,
+  runContext,
+  runUsage,
+  transitions,
+  upsertReport,
+} from "../task-run/adapters/repository.ts";
+import { parseSkillChoice } from "../task-run/adapters/role-files.ts";
+import { runSetup } from "../task-run/adapters/setup.ts";
+import {
+  branchName,
+  ensureTaskWorkspace,
+  git,
+  type Workspace,
+} from "../task-run/adapters/worktree.ts";
+import {
+  lastStepError,
+  runAnalysis,
+  runSlice,
+  type SliceDeps,
+} from "../task-run/application/slice.ts";
+import { harnessOf, taskRunPorts } from "../task-run/cli/ports.ts";
+import { PRE_MERGE, PROJECT_STATUS, transition } from "../task-run/domain/fsm.ts";
+import { planWorkflow, type WorkflowPlan } from "../task-run/domain/plan.ts";
 import {
   fetchTicket,
   readIssueType,
@@ -553,6 +559,8 @@ export function taskRun(
           gh,
           pluginRoot: PLUGIN_ROOT,
           evidenceDir,
+          ports: { ...taskRunPorts, reports: stepReports },
+          harness: harnessOf(selection),
           runAgent: deps.runAgent,
           hostEnv: deps.hostEnv,
           commandEnv: commandEnvFor(workspace, deps.hostEnv ?? process.env),
@@ -593,8 +601,8 @@ export function harnessGate(
   selection: Selection | undefined,
 ): void {
   if (deps.runAgent && !deps.harnessVersion) return;
-  const h = selection?.profile.harness ?? "claudecode";
-  const why = versionRefusal((deps.harnessVersion ?? (() => harnessVersion(h)))(), h);
+  const h = harnessOf(selection);
+  const why = h.versionRefusal((deps.harnessVersion ?? (() => h.version()))());
   if (why) throw new OmiError("CONFIG_INVALID", `${why}: see \`omi doctor\``);
 }
 
@@ -674,6 +682,8 @@ export function taskAnalyze(
           gh,
           pluginRoot: PLUGIN_ROOT,
           evidenceDir: evidenceOf(run.id),
+          ports: { ...taskRunPorts, reports: stepReports },
+          harness: harnessOf(selection),
           runAgent: deps.runAgent,
           hostEnv: deps.hostEnv,
           commandEnv: commandEnvFor(workspace, deps.hostEnv ?? process.env),

@@ -5,11 +5,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { findWorkspace, mainCheckout, STATE_FILE } from "../core/workspace.ts";
-import { openRuns } from "../persistence/repository.ts";
 import { CONFIG_PATH, readConfigData } from "../shared/config.ts";
 import { OmiError } from "../shared/errors/errors.ts";
 import { TEMPLATES_DIR } from "../shared/plugin-paths.ts";
 import { openState } from "../shared/sqlite/db.ts";
+import { openRuns } from "../task-run/adapters/repository.ts";
 import { files } from "./init.ts";
 
 const TEMPLATES = join(TEMPLATES_DIR, "workspace");

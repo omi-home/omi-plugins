@@ -1,7 +1,6 @@
 // DevTask-0038 #90: repository desired state, diff (never loosen, never delete) and risk policy.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MANUAL_QA_LABELS, SECURITY_LABELS } from "../../../runtime/core/workflow-engine/plan.ts";
 import {
   type ActualRepo,
   loadRepoConfig,
@@ -11,6 +10,7 @@ import {
   riskLevel,
 } from "../../../runtime/github/application/repo-config.ts";
 import { IssueType } from "../../../runtime/shared/contracts.ts";
+import { MANUAL_QA_LABELS, SECURITY_LABELS } from "../../../runtime/task-run/domain/plan.ts";
 
 const desired = loadRepoConfig();
 const policy = loadRiskPolicy();

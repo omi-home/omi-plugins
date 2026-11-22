@@ -4,16 +4,8 @@ import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
-import {
-  agentEnv,
-  atLeast,
-  detectQuota,
-  HARNESSES,
-  observeRun,
-  selectionEnv,
-  versionRefusal,
-} from "../adapters/claude/launch.ts";
-import { archCheck, DEFAULT_CONTRACT, loadContract } from "../architecture/cli/arch.ts";
+import { archCheck } from "../architecture/adapters/check.ts";
+import { DEFAULT_CONTRACT, loadContract } from "../architecture/application/arch.ts";
 import { formatViolation } from "../architecture/domain/rules.ts";
 import { parseContext } from "../context/domain/context-usage.ts";
 import {
@@ -31,7 +23,15 @@ import {
 } from "../github/adapters/issue-types.ts";
 import { sayIssueType } from "../github/adapters/project-fields.ts";
 import { issueTypeWrites } from "../github/application/issue-type-config.ts";
-import { openRuns, ownedRefs } from "../persistence/repository.ts";
+import {
+  agentEnv,
+  atLeast,
+  detectQuota,
+  HARNESSES,
+  observeRun,
+  selectionEnv,
+  versionRefusal,
+} from "../harness/adapters/claude-code/launch.ts";
 import {
   keyEnvName,
   loadProfiles,
@@ -40,13 +40,14 @@ import {
 import { listProfileRecords } from "../profile/adapters/profiles.ts";
 import { keyFingerprint, loadMasterKey } from "../profile/domain/secrets.ts";
 import type { Selection } from "../profile/domain/selection.ts";
-import { same } from "../resources/worktree.ts";
 import { loadConfig, type OmiConfig, workflowModel } from "../shared/config.ts";
 import type { Check } from "../shared/contracts.ts";
 import { OmiError } from "../shared/errors/errors.ts";
 import { type GhRunner, graphql, spawnGh } from "../shared/github/client.ts";
 import { redact } from "../shared/redact.ts";
 import { openState } from "../shared/sqlite/db.ts";
+import { openRuns, ownedRefs } from "../task-run/adapters/repository.ts";
+import { same } from "../task-run/adapters/worktree.ts";
 import { memoryDir, OLD_LAYOUT, SETTINGS } from "./workspace.ts";
 
 export type { Check };
