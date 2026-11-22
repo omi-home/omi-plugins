@@ -51,6 +51,27 @@ export interface CommandResult {
   summary: string;
 }
 
+/** Slack for a timer that fires a little early against the caller's clock. */
+const TIMER_SLACK_MS = 50;
+
+/**
+ * A check timed out: spawnSync gave up, or supervise.ts exited 124 after the deadline. The duration
+ * guard keeps a command that itself exits 124 (e.g. `timeout`) a plain failure; it must be measured
+ * with a monotonic clock, since a wall clock stepping back once made a real timeout look like a
+ * failure (#366: status 124 with Date.now() durationMs 1211 for a 2 s timeout).
+ */
+export function isTimeout(
+  status: number | null,
+  error: NodeJS.ErrnoException | undefined,
+  durationMs: number,
+  timeoutMs: number,
+): boolean {
+  return (
+    error?.code === "ETIMEDOUT" ||
+    (status === TIMEOUT_EXIT && durationMs >= timeoutMs - TIMER_SLACK_MS)
+  );
+}
+
 /** Runs one configured command under supervise.ts, full output to `logPath`. */
 export function runCommand(
   cmd: { run: string; timeoutSec: number },
@@ -60,7 +81,7 @@ export function runCommand(
   env: NodeJS.ProcessEnv = commandEnv(process.env),
 ): CommandResult {
   const fd = openSync(logPath, "w");
-  const started = Date.now();
+  const started = performance.now(); // monotonic: Date.now() can step back on VMs and CI runners
   let r: ReturnType<typeof spawnSync>;
   try {
     r = spawnSync(process.execPath, [SUPERVISOR, String(cmd.timeoutSec * 1000), cmd.run], {
@@ -73,11 +94,19 @@ export function runCommand(
   } finally {
     closeSync(fd);
   }
-  const durationMs = Date.now() - started;
-  const timedOut =
-    (r.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT" ||
-    (r.status === TIMEOUT_EXIT && durationMs >= cmd.timeoutSec * 1000);
-  const summary = !timedOut && r.status === 0 ? "" : tail(logPath);
+  const durationMs = Math.round(performance.now() - started);
+  const timedOut = isTimeout(
+    r.status,
+    r.error as NodeJS.ErrnoException | undefined,
+    durationMs,
+    cmd.timeoutSec * 1000,
+  );
+  const base = !timedOut && r.status === 0 ? "" : tail(logPath);
+  // Evidence for abnormal ends (signal, no exit code): the real status/signal/duration.
+  const summary =
+    !timedOut && r.status !== 0 && (r.status === null || r.signal)
+      ? `${base}\n[supervisor status=${r.status} signal=${r.signal} durationMs=${durationMs}]`.trim()
+      : base;
   const outcome: CheckOutcome = timedOut
     ? "timeout"
     : r.status === 0

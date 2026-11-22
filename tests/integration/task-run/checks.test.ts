@@ -1,6 +1,7 @@
 // T3.4 deterministic gate: pass/skip, failed command, timeout, missing tool, huge output
 // bounded, redacted summary, full log retained. Real processes, no network.
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -154,20 +155,89 @@ test("timeout kills the whole process tree: no grandchild outlives its check (#3
     logDir: dir(),
     checks: checks({ test: { run: `node "${script}"`, timeoutSec: 2 } }),
   });
-  assert.equal(r.results.find((x) => x.name === "test")?.outcome, "timeout");
+  const t = r.results.find((x) => x.name === "test");
+  // The message records the real status/duration of any flake, so it is diagnosable from CI logs.
+  assert.equal(
+    t?.outcome,
+    "timeout",
+    JSON.stringify({ exitCode: t?.exitCode, durationMs: t?.durationMs, summary: t?.summary }),
+  );
   const pid = Number(readFileSync(pidFile, "utf8"));
-  const alive = () => {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  if (alive())
-    process.kill(pid); // never leak the sleeper, even when the assertion fails
-  else return;
+  const deadline = Date.now() + 2000;
+  while (alive(pid) && Date.now() < deadline)
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  if (!alive(pid)) return;
+  process.kill(pid); // never leak the sleeper, even when the assertion fails
   assert.fail(`grandchild ${pid} survived the timeout`);
+});
+
+// SIGKILL'd grandchild is orphaned to init and stays a zombie (state Z) until reaped; on CI
+// containers the reaper can lag, and kill(pid, 0) succeeds on a zombie. A zombie is dead, so
+// treat it as gone.
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3) !== "Z";
+  } catch {
+    return true; // no /proc (macOS, Windows): the signal probe is all we have
+  }
+}
+
+test("negative control: alive() still reports a real surviving process", () => {
+  const c = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)"], { stdio: "ignore" });
+  try {
+    assert.equal(alive(c.pid as number), true);
+  } finally {
+    c.kill("SIGKILL");
+  }
+});
+
+// A check that finishes while a descendant keeps running: spawns a sleeper (same group, or its own
+// group when `detached`), records its pid, then exits at once.
+function leaveSleeper(detached: boolean): { run: string; pid: () => number } {
+  const work = dir();
+  const pidFile = join(work, "pid");
+  const script = join(work, "leave.cjs");
+  writeFileSync(
+    script,
+    [
+      `const c = require("node:child_process").spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)"], { stdio: "ignore", detached: ${detached} });`,
+      `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(c.pid));`,
+      "c.unref();", // else this script waits for the sleeper and never ends on its own
+    ].join("\n"),
+  );
+  return { run: `node "${script}"`, pid: () => Number(readFileSync(pidFile, "utf8")) };
+}
+
+const posix = process.platform === "win32" ? { skip: "POSIX process groups" } : {};
+
+test("a check that exits on its own leaves no descendant of its group behind", posix, () => {
+  const s = leaveSleeper(false);
+  const r = runChecks({ worktree: dir(), logDir: dir(), checks: checks({ test: { run: s.run } }) });
+  assert.equal(r.results.find((x) => x.name === "test")?.outcome, "pass");
+  const pid = s.pid();
+  const deadline = Date.now() + 2000;
+  while (alive(pid) && Date.now() < deadline)
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  const survived = alive(pid);
+  if (survived) process.kill(pid);
+  assert.equal(survived, false, `grandchild ${pid} survived the check`);
+});
+
+test("negative control: a grandchild that escapes the group is detected as alive", posix, () => {
+  const s = leaveSleeper(true);
+  runChecks({ worktree: dir(), logDir: dir(), checks: checks({ test: { run: s.run } }) });
+  const pid = s.pid();
+  try {
+    assert.equal(alive(pid), true);
+  } finally {
+    process.kill(pid, "SIGKILL");
+  }
 });
 
 test("missing tool is reported as such", () => {

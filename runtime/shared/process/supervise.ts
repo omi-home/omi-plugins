@@ -2,6 +2,7 @@
 // on timeout, kills its whole process tree, which spawnSync alone cannot do (it only kills the
 // shell). Usage: node supervise.ts <timeoutMs> <command>. Exit 124 = timed out.
 import { spawn, spawnSync } from "node:child_process";
+import os from "node:os";
 
 // Not importable: running this module starts the command. checks.ts mirrors the exit code.
 const TIMEOUT_EXIT = 124;
@@ -32,7 +33,18 @@ const timer = setTimeout(() => {
   }
 }, Number(ms));
 child.on("error", () => process.exit(127));
-child.on("exit", (code) => {
+child.on("exit", (code, signal) => {
   clearTimeout(timer);
-  process.exit(timedOut ? TIMEOUT_EXIT : (code ?? 1));
+  if (!win) {
+    // Whatever ended the child, no descendant in its group may outlive the check.
+    try {
+      process.kill(-(child.pid as number), "SIGKILL");
+    } catch {
+      // group already gone
+    }
+  }
+  if (timedOut) process.exit(TIMEOUT_EXIT);
+  // Exited on a signal: report the shell convention 128+n, not a generic 1.
+  const sig = signal ? (os.constants.signals[signal] ?? 0) : 0;
+  process.exit(code ?? (sig ? 128 + sig : 1));
 });
