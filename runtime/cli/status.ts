@@ -7,12 +7,12 @@ import { type BoardIssue, readTree } from "../github/adapters/board.ts";
 import { type StatusDrift, statusDrift } from "../github/adapters/project-fields.ts";
 import { repoValidate } from "../github/adapters/repo.ts";
 import { activeMilestone } from "../handoff/adapters/handoff.ts";
-import { type AttemptUsage, latestRun, runUsage } from "../persistence/repository.ts";
 import { sumUsage } from "../reporting/application/render.ts";
 import { type Check, ProjectStatus, type TokenUsage } from "../shared/contracts.ts";
 import { OmiError } from "../shared/errors/errors.ts";
 import type { GhRunner } from "../shared/github/client.ts";
 import { openState, statePath } from "../shared/sqlite/db.ts";
+import { type AttemptUsage, latestRun, runUsage } from "../task-run/adapters/repository.ts";
 import { cleanupScan, type ScanResult } from "./cleanup.ts";
 import { repo } from "./task.ts";
 

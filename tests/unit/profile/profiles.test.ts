@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { atLeast, HARNESSES, versionRefusal } from "../../../runtime/adapters/claude/launch.ts";
 import {
   type ClaudeRun,
   type HttpGet,
@@ -16,6 +15,11 @@ import {
 import { main } from "../../../runtime/cli/main.ts";
 import { usageByProfile } from "../../../runtime/cli/status.ts";
 import { harnessGate } from "../../../runtime/cli/task.ts";
+import {
+  atLeast,
+  HARNESSES,
+  versionRefusal,
+} from "../../../runtime/harness/adapters/claude-code/launch.ts";
 import {
   listProfiles,
   loadProfiles,

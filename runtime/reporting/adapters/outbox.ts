@@ -3,17 +3,10 @@
 // the ID was stored ends in a PATCH, never a duplicate. Persist happened before; this publishes.
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import {
-  acquireLease,
-  markReported,
-  type PendingReport,
-  pendingReports,
-  releaseLease,
-} from "../../persistence/repository.ts";
 import { type IssueRef, parseContract } from "../../shared/contracts.ts";
-import { isTransient, OmiError } from "../../shared/errors/errors.ts";
+import { isTransient } from "../../shared/errors/errors.ts";
 import {
-  classify,
+  api,
   type GhRunner,
   markerAuthor,
   RestComment,
@@ -21,6 +14,13 @@ import {
 } from "../../shared/github/client.ts";
 import { redact } from "../../shared/redact.ts";
 import type { Db } from "../../shared/sqlite/db.ts";
+import {
+  acquireLease,
+  markReported,
+  type PendingReport,
+  pendingReports,
+  releaseLease,
+} from "../../task-run/adapters/repository.ts";
 
 const Comment = RestComment;
 type Comment = z.infer<typeof Comment>;
@@ -38,16 +38,6 @@ export interface PublishOptions {
 const LEASE_MS = 5 * 60_000;
 const blockingSleep = (ms: number) =>
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-
-export function api(run: GhRunner, args: string[], what: string, input?: string): unknown {
-  const r = run(["api", ...args], input);
-  if (r.status !== 0 || r.error) throw classify(r, what);
-  try {
-    return JSON.parse(r.stdout);
-  } catch {
-    throw new OmiError("INTERNAL", `${what}: response is not JSON`);
-  }
-}
 
 const path = (t: IssueRef) => `repos/${t.repository}/issues`;
 

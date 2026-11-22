@@ -4,9 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createRun, transitionRun } from "../../runtime/persistence/repository.ts";
 import { applyRetention } from "../../runtime/resources/cleanup.ts";
 import { openState } from "../../runtime/shared/sqlite/db.ts";
+import { createRun, transitionRun } from "../../runtime/task-run/adapters/repository.ts";
 
 test("retention removes old evidence of completed runs only", () => {
   const db = openState(":memory:");

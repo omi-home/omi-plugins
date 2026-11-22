@@ -1,22 +1,13 @@
 // File tree walk with lstat: symlinks are never followed (and never listed), so a link cannot
 // pull files from outside the repo into the check. A symlinked parent directory is caught by
 // comparing real paths with the repo's.
-import { lstatSync, readdirSync, realpathSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { lstatSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { insideRepo } from "../application/repo-path.ts";
 
 const SKIP_DIRS = new Set([".git", "node_modules"]);
 
 export type RootState = "ok" | "missing" | "symlink" | "not-directory" | "outside-repo";
-
-/** True when `rel` under `repoDir` resolves, through every symlink, to a place inside the repo. */
-export function insideRepo(repoDir: string, rel: string): boolean {
-  try {
-    const out = relative(realpathSync(repoDir), realpathSync(join(repoDir, rel)));
-    return out === "" || (!out.startsWith("..") && !isAbsolute(out));
-  } catch {
-    return false;
-  }
-}
 
 /** Repo-relative posix paths of the regular files under `root`, sorted. */
 export function scanTree(repoDir: string, root: string): { state: RootState; files: string[] } {

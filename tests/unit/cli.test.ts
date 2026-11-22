@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { atLeast } from "../../runtime/adapters/claude/launch.ts";
 import { HELP } from "../../runtime/cli/main.ts";
+import { atLeast } from "../../runtime/harness/adapters/claude-code/launch.ts";
 
 const bin = fileURLToPath(new URL("../../bin/omi", import.meta.url));
 const VERSION = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"))

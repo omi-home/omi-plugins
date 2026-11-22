@@ -43,6 +43,17 @@ export function classify(r: Pick<GhResult, "stderr" | "error">, what: string): O
   return new OmiError(code, `${what}: ${first || "gh failed"}`);
 }
 
+/** `gh api <args>` parsed as JSON; a failure or a non-JSON answer is a classified OmiError. */
+export function api(run: GhRunner, args: string[], what: string, input?: string): unknown {
+  const r = run(["api", ...args], input);
+  if (r.status !== 0 || r.error) throw classify(r, what);
+  try {
+    return JSON.parse(r.stdout);
+  } catch {
+    throw new OmiError("INTERNAL", `${what}: response is not JSON`);
+  }
+}
+
 const TRUSTED: readonly AuthorAssociation[] = ["OWNER", "MEMBER", "COLLABORATOR"];
 const VIEWER = "query{ viewer{ login } }";
 const viewers = new WeakMap<GhRunner, string>();

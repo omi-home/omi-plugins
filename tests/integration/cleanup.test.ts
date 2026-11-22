@@ -15,16 +15,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { MergeReceipt } from "../../runtime/adapters/github/merge.ts";
+import { type CleanupOptions, cleanupRun } from "../../runtime/resources/cleanup.ts";
+import { parseConfig } from "../../runtime/shared/config.ts";
+import { openState } from "../../runtime/shared/sqlite/db.ts";
 import {
   acquireLease,
   claimResource,
   createRun,
   ownedRefs,
-} from "../../runtime/persistence/repository.ts";
-import { type CleanupOptions, cleanupRun } from "../../runtime/resources/cleanup.ts";
-import { ensureTaskWorkspace } from "../../runtime/resources/worktree.ts";
-import { parseConfig } from "../../runtime/shared/config.ts";
-import { openState } from "../../runtime/shared/sqlite/db.ts";
+} from "../../runtime/task-run/adapters/repository.ts";
+import { ensureTaskWorkspace } from "../../runtime/task-run/adapters/worktree.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();

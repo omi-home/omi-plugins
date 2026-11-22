@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { architectureExcerpt } from "../../../runtime/core/workflow-engine/slice.ts";
 import { buildTaskPacket } from "../../../runtime/handoff/application/packet.ts";
 import { parseConfig } from "../../../runtime/shared/config.ts";
+import { architectureExcerpt } from "../../../runtime/task-run/application/slice.ts";
 import { makeRepo, validContract } from "../architecture/helpers.ts";
 
 const config = parseConfig({ github: { owner: "o", repo: "r", projectNumber: 2 } });

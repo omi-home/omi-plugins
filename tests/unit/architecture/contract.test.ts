@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
-import { loadContract } from "../../../runtime/architecture/cli/arch.ts";
+import { loadContract } from "../../../runtime/architecture/application/arch.ts";
 import { ArchitectureContract } from "../../../runtime/architecture/domain/contract.ts";
 import { matchGlob } from "../../../runtime/architecture/domain/glob.ts";
 

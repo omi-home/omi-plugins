@@ -7,11 +7,11 @@ import { prFacts } from "../adapters/github/merge.ts";
 import { markedPrimaries } from "../adapters/github/pr.ts";
 import { type FinishChange, markFinished } from "../github/adapters/project.ts";
 import { labelType } from "../github/application/hierarchy.ts";
-import { git } from "../resources/worktree.ts";
 import type { Check } from "../shared/contracts.ts";
 import { OmiError } from "../shared/errors/errors.ts";
 import type { GhRunner } from "../shared/github/client.ts";
 import { classify, spawnGh } from "../shared/github/client.ts";
+import { git } from "../task-run/adapters/worktree.ts";
 import { fetchTicket } from "../ticket/adapters/ticket.ts";
 import { repo } from "./task.ts";
 

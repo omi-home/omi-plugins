@@ -32,7 +32,7 @@ labels:
       color: "b60205",
       description: "Risk: high — PO merges, Security Reviewer runs",
     }
-  # Engineer of a delivery task (workflow-engine/plan.ts).
+  # Engineer of a delivery task (runtime/task-run/domain/plan.ts).
   - { name: "role:frontend", color: "bfdadc", description: "Engineer: Frontend" }
   - { name: "role:backend", color: "bfdadc", description: "Engineer: Backend" }
   - { name: "role:database", color: "bfdadc", description: "Engineer: Database" }

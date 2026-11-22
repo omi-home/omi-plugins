@@ -7,7 +7,10 @@
 import { existsSync, readdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { prFacts, receiptOf } from "../adapters/github/merge.ts";
-import { attemptLiveness, CRASHED_HINT } from "../core/attempt-liveness.ts";
+import { publishPending } from "../reporting/adapters/outbox.ts";
+import { OmiError } from "../shared/errors/errors.ts";
+import { type GhRunner, spawnGh } from "../shared/github/client.ts";
+import { openState, statePath } from "../shared/sqlite/db.ts";
 import {
   claimedRefs,
   leaseActive,
@@ -17,12 +20,9 @@ import {
   ownedRefs,
   pendingCount,
   recoverAttempts,
-} from "../persistence/repository.ts";
-import { publishPending } from "../reporting/adapters/outbox.ts";
-import { git, listWorktrees, same } from "../resources/worktree.ts";
-import { OmiError } from "../shared/errors/errors.ts";
-import { type GhRunner, spawnGh } from "../shared/github/client.ts";
-import { openState, statePath } from "../shared/sqlite/db.ts";
+} from "../task-run/adapters/repository.ts";
+import { git, listWorktrees, same } from "../task-run/adapters/worktree.ts";
+import { attemptLiveness, CRASHED_HINT } from "../task-run/domain/attempt-liveness.ts";
 import { repo, taskFinalize } from "./task.ts";
 
 export interface ScanRun {
