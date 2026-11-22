@@ -2,6 +2,7 @@
 // each sees exactly its default skills; on a diff with an injection + hard-coded secret the Security
 // Reviewer owns the finding and the Code Reviewer only routes it; Automation QA authors tests (not
 // just runs them); Manual QA reports through its section; DevOps stays in its scope.
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";

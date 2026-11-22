@@ -1,4 +1,5 @@
 // DevTask-0093 #282 (ADR-0004): profile table, token encryption, `omi secret`, `omi profile`.
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import {
   existsSync,

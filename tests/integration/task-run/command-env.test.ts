@@ -1,5 +1,6 @@
 // DevTask-0094 #283 (ARC-001): the repo's check/setup commands never see the master key or auth
 // variables; the agent gets the decrypted token in its child env only. Real processes.
+import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
