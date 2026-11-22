@@ -6,7 +6,7 @@ Contract kiến trúc là file `omi-architecture.yaml` nằm **trong repo** (ADR
 
 ## 1. Tạo contract
 
-Tạo `omi-architecture.yaml` ở gốc repo đích. Ví dụ tối thiểu cho repo TypeScript có hai module `billing` và `orders`, `orders` được gọi `billing`:
+Tạo `omi-architecture.yaml` ở gốc repo đích. Ví dụ tối thiểu cho repo TypeScript có hai module `billing` và `orders`, `orders` được phép import `billing` (`dependsOn: [billing]`):
 
 ```yaml
 schemaVersion: 1
