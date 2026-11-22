@@ -2,7 +2,7 @@
 // ADR-0001 D5). Facts are read from GitHub; the gate itself is a pure function so every rule is
 // testable without a network. Merge evidence is GitHub's receipt, never `git branch --merged`.
 import { z } from "zod";
-import { loadRiskPolicy, riskLevel } from "../../core/repo-config.ts";
+import { loadRiskPolicy, riskLevel } from "../../github/application/repo-config.ts";
 import type { OmiConfig } from "../../shared/config.ts";
 import type { Check } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";

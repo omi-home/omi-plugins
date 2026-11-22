@@ -64,9 +64,9 @@ Test: `tests/<loại>/<module>/**/*.test.ts`. Test được import mọi thứ n
 
 | Hiện tại | Mới |
 | --- | --- |
-| `core/contracts.ts`, `core/errors/`, `reporting/redact.ts`, `core/config.ts`, `workflow-engine/{supervise,command-env}.ts`, `persistence/{db,migrations}.ts`, `adapters/github/client.ts` | `shared/…` |
+| `core/contracts.ts`, `core/errors/`, `reporting/redact.ts`, `core/config.ts`, `core/workflow-config.ts` (schema, `mergeWorkflow`, `resolveWorkflow`, `loadDefaultWorkflow` → `shared/workflow.ts`; quyết định PO 2026-11-22, #332), `workflow-engine/{supervise,command-env}.ts`, `persistence/{db,migrations}.ts`, `adapters/github/client.ts` | `shared/…` |
 | `core/workspace.ts`, `cli/{workspace,init,config}.ts`, `cli/doctor.ts` | `workspace/` |
-| `core/{project-config,repo-config,workflow-config,hierarchy,issue-forms}.ts`, `adapters/github/{project,project-fields,board,repo,issue,dependency}.ts`, phần `github`/`issue` của `cli/main.ts` | `github/` |
+| `core/{project-config,repo-config,hierarchy,issue-forms,issue-type-config}.ts` (loader đọc file nên ở `application/`), các query dẫn xuất của `core/workflow-config.ts` (`statusesOf`, `initialStatus`, `effectiveTransitions`, `transitionsBetween`, `canTransition`, `closesIssue` → `domain/workflow-queries.ts`; `loadWorkflow` → `application/load-workflow.ts`), `adapters/github/{project,project-fields,board,repo,issue,issue-types,dependency}.ts`, phần `github`/`issue` của `cli/main.ts` | `github/` |
 | `adapters/github/ticket.ts` | `ticket/` |
 | `core/handoff/packet.ts`, `adapters/github/{handoff,context}.ts` | `handoff/` |
 | `core/workflow-engine/{fsm,plan,slice,commit,checks,setup}.ts`, `resources/{worktree,role-files}.ts`, `core/attempt-liveness.ts`, `persistence/repository.ts`, `cli/{task,status}.ts` | `task-run/` (`cli/task.ts` tách theo subcommand) |

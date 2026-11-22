@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { type PullRequest, prBody, validatePr } from "../../runtime/adapters/github/pr.ts";
 import type { Ticket } from "../../runtime/adapters/github/ticket.ts";
 import { prCreate, prMerge, prValidate, taskStart, taskStatus } from "../../runtime/cli/task.ts";
-import { titleType } from "../../runtime/core/hierarchy.ts";
+import { titleType } from "../../runtime/github/application/hierarchy.ts";
 import type { IssueType } from "../../runtime/shared/contracts.ts";
 import type { GhRunner } from "../../runtime/shared/github/client.ts";
 

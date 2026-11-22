@@ -5,21 +5,19 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { fetchIssueContext, readSection, writeSection } from "../adapters/github/context.ts";
-import { addDependency } from "../adapters/github/dependency.ts";
 import { listHandoffs, postHandoff, strip } from "../adapters/github/handoff.ts";
-import { createIssue } from "../adapters/github/issue.ts";
-import {
-  type ProjectAction,
-  type ProjectPlan,
-  projectApply,
-  projectPlan,
-  projectValidate,
-  type StatusDrift,
-} from "../adapters/github/project-fields.ts";
-import { approvedActions, repoApply, repoPlan, repoValidate } from "../adapters/github/repo.ts";
 import { archCheck, archShow, humanReport, violationError } from "../architecture/cli/arch.ts";
-import type { RepoAction } from "../core/repo-config.ts";
 import { CONFIG_FILE, locate } from "../core/workspace.ts";
+import {
+  githubProjectApply,
+  githubProjectPlan,
+  githubRepoApply,
+  githubRepoPlan,
+  issueCreate,
+  issueDepend,
+  projectValidate,
+  repoValidate,
+} from "../github/cli/github.ts";
 import { MONITOR_PROTOCOL_VERSION } from "../monitor/cli/protocol.ts";
 import {
   type ProfileDeps,
@@ -33,15 +31,7 @@ import {
 import { secretInitKey, secretRotateKey } from "../profile/cli/secret.ts";
 import { formatUsage, sumUsage } from "../reporting/cli/usage.ts";
 import { skillList } from "../resources/role-files.ts";
-import { workflowModel } from "../shared/config.ts";
-import {
-  IssueType,
-  IssueTypeV2,
-  type ProfileView,
-  ProjectStatus,
-  Role,
-  type TokenUsage,
-} from "../shared/contracts.ts";
+import { type ProfileView, ProjectStatus, Role, type TokenUsage } from "../shared/contracts.ts";
 import { ERROR_CODES, OmiError } from "../shared/errors/errors.ts";
 import { PLUGIN_ROOT } from "../shared/plugin-paths.ts";
 import { redact, redactDeep } from "../shared/redact.ts";
@@ -296,14 +286,6 @@ const sectionArg = (a: string | undefined) => {
   return a as string;
 };
 
-/** `59`, `#59` or `owner/repo#59`. */
-const parentArg = (a: string, home: { owner: string; repo: string }, flag = "--parent") => {
-  const m = /^(?:([\w.-]+)\/([\w.-]+)#|#?)(\d+)$/.exec(a);
-  if (!m || Number(m[3]) < 1)
-    throw new OmiError("USAGE_INVALID", `${flag} expects n or owner/repo#n`);
-  return { owner: m[1] ?? home.owner, repo: m[2] ?? home.repo, number: Number(m[3]) };
-};
-
 /** Subcommands: <group> <action> <issue>. */
 const NESTED = new Set([
   "ticket validate",
@@ -363,50 +345,11 @@ export interface CliIo {
   stdin?: () => string;
 }
 
-const describe = (a: ProjectAction) =>
-  a.kind === "create"
-    ? `create field ${a.field.name} (${a.field.type})`
-    : a.kind === "update-options"
-      ? `field ${a.name}: ${[...a.add.map((o) => `+${o}`), ...a.change.map((o) => `~${o}`)].join(", ")}`
-      : a.kind === "create-view"
-        ? `create view ${a.view.name} (${a.view.layout})`
-        : a.kind === "update-view"
-          ? `update view ${a.name}: ${a.changes.join(", ")}`
-          : a.kind === "create-issue-type" || a.kind === "update-issue-type"
-            ? a.kind === "create-issue-type"
-              ? `create issue type ${a.type.name} (${a.type.color})`
-              : `update issue type ${a.name}: ${a.changes.join(", ")}`
-            : `${a.name}: ${a.reason}`;
-
-const humanPlan = (p: Omit<ProjectPlan, "drift">, drift: StatusDrift[]) => {
-  const actions = [...(p.issueTypes?.actions ?? []), ...p.actions, ...p.views.actions];
-  return [
-    ...actions.map(
-      (a) =>
-        `${a.kind === "manual" || a.kind === "workflow" ? "manual " : "pending"}   ${describe(a)}`,
-    ),
-    ...(actions.length ? [] : ["project   in the desired state"]),
-    ...(p.issueTypes?.extra ?? []).map((e) => `extra     issue type ${e} (not managed: kept)`),
-    ...p.extra.map((e) => `extra     ${e} (not managed: kept)`),
-    ...p.views.extraViews.map((v) => `extra     view ${v} (not managed: kept)`),
-    ...p.views.unsupported.map((u) => `unsupported ${u}`),
-    ...drift.map((d) => `drift     ${d.issue} ${d.status ?? "unset"}: ${d.reason}`),
-  ];
-};
-
-const repoPrefix = (a: RepoAction) =>
-  a.kind === "manual" || a.kind === "unsupported" ? a.kind.padEnd(11) : "pending    ";
-
-const describeRepo = (a: RepoAction) =>
-  a.kind === "create-label" || a.kind === "update-label"
-    ? `${a.kind === "create-label" ? "create" : "update"} label ${a.name} (#${a.color} ${a.description})`
-    : a.kind === "protect"
-      ? `protect ${a.branch}: ${a.enable.join(", ")}`
-      : a.kind === "merge-methods"
-        ? `merge methods: ${Object.entries(a.set)
-            .map(([k, v]) => `${k}=${v}`)
-            .join(", ")}`
-        : `${a.what}: ${a.reason}`;
+/** A github-module command result as a CLI result: `failed` exits 1. */
+const githubOut = (
+  ok: (data: unknown, human: string, code?: number) => CliResult,
+  r: { data: unknown; human: string; failed?: boolean },
+): CliResult => ok(r.data, r.human, r.failed ? EXIT.failed : EXIT.ok);
 
 const pickFlags = (v: {
   profile?: string;
@@ -810,51 +753,16 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         ];
         return ok(r, lines(human));
       }
-      case "issue create": {
-        // Legacy takes an OMI type (dev-task), v2 a native type name (DevTask): the model is known
-        // only from the workspace config, which createIssue checks the type against.
-        const type = [...IssueType.options, ...IssueTypeV2.options].find((t) => t === values.type);
-        if (!type) {
-          throw new OmiError(
-            "USAGE_INVALID",
-            `--type must be one of ${IssueType.options.join(", ")} (github.model legacy) or ${IssueTypeV2.options.join(", ")} (v2)`,
-          );
-        }
-        if (!values.title) throw new OmiError("USAGE_INVALID", "--title is required");
-        const body = bodyFile();
-        const { config } = repo(cwd);
-        // Legacy: a native type name is refused here, not as a missing `type:DevTask` label later.
-        if (workflowModel(config) === "legacy" && !IssueType.safeParse(type).success) {
-          throw new OmiError(
-            "USAGE_INVALID",
-            `--type must be one of ${IssueType.options.join(", ")} (github.model is legacy)`,
-          );
-        }
-        const parent =
-          values.parent === undefined ? undefined : parentArg(values.parent, config.github);
-        const r = createIssue(config, {
-          type,
-          title: values.title,
-          body,
-          parent,
-        });
-        const human = [
-          `issue     ${r.url}${r.created ? "" : " (existing)"}`,
-          `title     ${r.title}`,
-          `changes   ${r.changes.join(", ") || "none"}`,
-        ];
-        return ok(r, lines(human));
-      }
-      case "issue depend": {
-        if (!values.on) throw new OmiError("USAGE_INVALID", "--on <m|owner/repo#m> is required");
-        const { github } = repo(cwd).config;
-        const r = addDependency(
-          { owner: github.owner, repo: github.repo, number: issue },
-          parentArg(values.on, github, "--on"),
+      case "issue create":
+        return githubOut(
+          ok,
+          issueCreate(values, bodyFile, () => repo(cwd).config),
         );
-        const human = `depend    ${r.issue} blocked by ${r.blockedBy}${r.added ? "" : " (existing)"}\n`;
-        return ok(r, human);
-      }
+      case "issue depend":
+        return githubOut(
+          ok,
+          issueDepend(issue, values.on, () => repo(cwd).config),
+        );
       case "issue findings": {
         const found = fetchIssueContext(repo(cwd).config, issue).carriedFindings;
         const human = found.length
@@ -969,30 +877,11 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         return ok(r, lines(human), r.outcomes.some((o) => o.error) ? EXIT.failed : EXIT.ok);
       }
       case "project plan":
-      case "github project plan": {
-        const r = projectPlan(repo(cwd).config);
-        // Like a check: 1 while anything is pending, manual or drifting, so scripts can gate on it.
-        const clean =
-          !r.actions.length &&
-          !r.views.actions.length &&
-          !r.issueTypes?.actions.length &&
-          !r.drift.length;
-        return ok(r, lines(humanPlan(r, r.drift)), clean ? EXIT.ok : EXIT.failed);
-      }
+      case "github project plan":
+        return githubOut(ok, githubProjectPlan(repo(cwd).config));
       case "project apply":
-      case "github project apply": {
-        const r = projectApply(repo(cwd).config);
-        const human = [
-          ...r.applied.map((a) => `applied   ${describe(a)}`),
-          ...(r.applied.length ? [] : ["applied   nothing (already in the desired state)"]),
-          ...humanPlan(r.plan, []),
-        ];
-        const left =
-          r.plan.actions.length +
-          r.plan.views.actions.length +
-          (r.plan.issueTypes?.actions.length ?? 0);
-        return ok(r, lines(human), left ? EXIT.failed : EXIT.ok);
-      }
+      case "github project apply":
+        return githubOut(ok, githubProjectApply(repo(cwd).config));
       case "github project validate": {
         const checks = projectValidate(repo(cwd).config);
         return ok({ checks }, humanChecks(checks), checksExit(checks));
@@ -1032,32 +921,13 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         ];
         return ok(r, lines(human));
       }
-      case "github repo plan": {
-        const r = repoPlan(repo(cwd).config);
-        const human = [
-          ...r.actions.map((a) => `${repoPrefix(a)} ${describeRepo(a)}`),
-          ...(r.actions.length ? [] : ["repo      in the desired state"]),
-          ...r.foreign.map((l) => `foreign   label ${l} (not managed: kept)`),
-        ];
-        return ok(r, lines(human), r.actions.length ? EXIT.failed : EXIT.ok);
-      }
-      case "github repo apply": {
-        const file = values["approved-plan"];
-        if (!file) throw new OmiError("USAGE_INVALID", "--approved-plan <file> is required");
-        let approved: unknown;
-        try {
-          approved = JSON.parse(readFileSync(resolve(cwd, file), "utf8"));
-        } catch {
-          throw new OmiError("USAGE_INVALID", `cannot read --approved-plan ${file} as JSON`);
-        }
-        const r = repoApply(repo(cwd).config, approvedActions(approved));
-        const human = [
-          ...r.applied.map((a) => `applied   ${describeRepo(a)}`),
-          ...(r.applied.length ? [] : ["applied   nothing (already in the desired state)"]),
-          ...r.plan.actions.map((a) => `${repoPrefix(a)} ${describeRepo(a)}`),
-        ];
-        return ok(r, lines(human), r.plan.actions.length ? EXIT.failed : EXIT.ok);
-      }
+      case "github repo plan":
+        return githubOut(ok, githubRepoPlan(repo(cwd).config));
+      case "github repo apply":
+        return githubOut(
+          ok,
+          githubRepoApply(cwd, values["approved-plan"], () => repo(cwd).config),
+        );
       case "github repo validate": {
         const checks = repoValidate(repo(cwd).config);
         return ok({ checks }, humanChecks(checks), checksExit(checks));

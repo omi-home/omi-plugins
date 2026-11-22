@@ -26,27 +26,11 @@ import {
   validatePr,
 } from "../adapters/github/pr.ts";
 import {
-  markFinished,
-  markStarted,
-  type StatusChange,
-  setStatus,
-} from "../adapters/github/project.ts";
-import {
   fetchTicket,
   readIssueType,
   type Ticket,
   validateTicket,
 } from "../adapters/github/ticket.ts";
-import {
-  hierarchyChecks,
-  type Link,
-  labelType,
-  loadHierarchy,
-  loadHierarchyV2,
-  titleCheck,
-  titleCheckV2,
-} from "../core/hierarchy.ts";
-import { sectionsCheck, sectionsCheckV2 } from "../core/issue-forms.ts";
 import { PRE_MERGE, PROJECT_STATUS, transition } from "../core/workflow-engine/fsm.ts";
 import { planWorkflow, type WorkflowPlan } from "../core/workflow-engine/plan.ts";
 import { runSetup } from "../core/workflow-engine/setup.ts";
@@ -57,6 +41,22 @@ import {
   type SliceDeps,
 } from "../core/workflow-engine/slice.ts";
 import { locate } from "../core/workspace.ts";
+import {
+  markFinished,
+  markStarted,
+  type StatusChange,
+  setStatus,
+} from "../github/adapters/project.ts";
+import {
+  hierarchyChecks,
+  type Link,
+  labelType,
+  loadHierarchy,
+  loadHierarchyV2,
+  titleCheck,
+  titleCheckV2,
+} from "../github/application/hierarchy.ts";
+import { sectionsCheck, sectionsCheckV2 } from "../github/application/issue-forms.ts";
 import {
   type AttemptUsage,
   acquireLease,

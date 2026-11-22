@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import { titleType } from "../core/hierarchy.ts";
+import { titleType } from "../github/application/hierarchy.ts";
 import {
   acquireLease,
   claimResource,

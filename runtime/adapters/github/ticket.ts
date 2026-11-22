@@ -1,7 +1,7 @@
 // Ticket lookup and ticket-first gates 1–2 (spec §8): exists, open, in the configured
 // Project, valid OMI type, terminal, open parent, acceptance criteria, no open blockers.
 import { z } from "zod";
-import { labelType, loadHierarchyV2, typeLabels } from "../../core/hierarchy.ts";
+import { labelType, loadHierarchyV2, typeLabels } from "../../github/application/hierarchy.ts";
 import { type OmiConfig, workflowModel } from "../../shared/config.ts";
 import {
   type Check,

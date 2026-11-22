@@ -13,17 +13,9 @@ import {
   selectionEnv,
   versionRefusal,
 } from "../adapters/claude/launch.ts";
-import {
-  ADMIN_ORG_HINT,
-  hasAdminOrg,
-  issueTypePlan,
-  tokenScopes,
-} from "../adapters/github/issue-types.ts";
-import { sayIssueType } from "../adapters/github/project-fields.ts";
 import { archCheck, DEFAULT_CONTRACT, loadContract } from "../architecture/cli/arch.ts";
 import { formatViolation } from "../architecture/domain/rules.ts";
 import { parseContext } from "../core/context-usage.ts";
-import { issueTypeWrites } from "../core/issue-type-config.ts";
 import {
   CONFIG_FILE,
   locate,
@@ -31,6 +23,14 @@ import {
   STATE_FILE,
   WORKSPACE_DIR,
 } from "../core/workspace.ts";
+import {
+  ADMIN_ORG_HINT,
+  hasAdminOrg,
+  issueTypePlan,
+  tokenScopes,
+} from "../github/adapters/issue-types.ts";
+import { sayIssueType } from "../github/adapters/project-fields.ts";
+import { issueTypeWrites } from "../github/application/issue-type-config.ts";
 import { openRuns, ownedRefs } from "../persistence/repository.ts";
 import {
   keyEnvName,
