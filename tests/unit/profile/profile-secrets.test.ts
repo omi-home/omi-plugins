@@ -76,13 +76,16 @@ const diskBytes = (ws: string) =>
     .map((f) => readFileSync(join(ws, f)).toString("latin1"))
     .join("");
 
-test("migration 8: a database from the previous release opens, keeps its data, re-runs cleanly", () => {
+test("migration 9: a database from the previous release opens, keeps its data and profile rows, re-runs cleanly", () => {
   const ws = workspace();
   const old = new DatabaseSync(stateFile(ws));
-  for (const [i, sql] of MIGRATIONS.slice(0, 7).entries()) {
+  for (const [i, sql] of MIGRATIONS.slice(0, 8).entries()) {
     old.exec(sql);
     old.exec(`PRAGMA user_version = ${i + 1}`);
   }
+  old.exec(
+    "INSERT INTO profile (name, harness, auth, models, efforts, updated_at) VALUES ('p','claudecode','{}','[]','[]','t')",
+  );
   old.exec(
     "INSERT INTO workflow_run (id, repository, issue, workflow, state, created_at, updated_at) VALUES ('r1','o/r',1,'w','RUNNING','t','t')",
   );
@@ -90,11 +93,13 @@ test("migration 8: a database from the previous release opens, keeps its data, r
   for (let i = 0; i < 2; i++) {
     const db = openState(stateFile(ws));
     assert.equal(db.prepare("SELECT id FROM workflow_run").get()?.id, "r1");
-    assert.equal(db.prepare("SELECT count(*) AS n FROM profile").get()?.n, 0);
+    const row = db.prepare("SELECT name, migrated_at FROM profile_legacy").get();
+    assert.deepEqual({ ...row }, { name: "p", migrated_at: null });
+    assert.throws(() => db.prepare("SELECT 1 FROM profile").get(), /no such table/);
     assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, MIGRATIONS.length);
     db.close();
   }
-  assert.equal(MIGRATIONS.length, 8);
+  assert.equal(MIGRATIONS.length, 9);
 });
 
 test("crypto: random IV, round trip, tamper, AAD and key are all enforced", () => {

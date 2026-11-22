@@ -1,6 +1,6 @@
 // Execution profiles of this machine as the runtime reads them: from `state.sqlite` (ADR-0004 D3),
 // the legacy declarations still on disk, and the choice the Coordinator makes per task run.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_PATH, readConfigData, SecretsConfig } from "../../shared/config.ts";
 import {
@@ -11,11 +11,12 @@ import {
 } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { registerSecret } from "../../shared/redact.ts";
-import { PROFILES_FILE } from "../../shared/workspace.ts";
+import { openState } from "../../shared/sqlite/db.ts";
+import { PROFILES_FILE, STATE_FILE } from "../../shared/workspace.ts";
 import { decryptSecret, loadMasterKey } from "../domain/secrets.ts";
 import { type ProfileListing, type SecretResolver, secretEnv } from "../domain/selection.ts";
 import { withExistingProfileDb } from "./profile-store.ts";
-import { getProfileRecord, listProfileRecords } from "./profiles.ts";
+import { getProfileRecord, listProfileRecords, unmigratedLegacyNames } from "./profiles.ts";
 
 /** Declarations of the pre-ADR-0004 layout still present on disk (never values of secrets). */
 export interface LegacyProfiles {
@@ -70,6 +71,29 @@ export function readLegacyProfiles(workspace: string): LegacyProfiles {
   return out;
 }
 
+/** Names of the rows of this workspace's `profile_legacy` that `omi profile import` has not moved yet. */
+export function unmigratedLegacyProfiles(workspace: string): string[] {
+  const file = join(workspace, STATE_FILE);
+  if (!existsSync(file)) return [];
+  const db = openState(file);
+  try {
+    return unmigratedLegacyNames(db);
+  } finally {
+    db.close();
+  }
+}
+
+/** Profiles of the old workspace table still unmigrated: never silently pick one side. */
+export function assertNoUnmigratedRows(workspace: string): void {
+  const names = unmigratedLegacyProfiles(workspace);
+  if (names.length) {
+    throw new OmiError(
+      "CONFIG_INVALID",
+      `profiles of this workspace's state database are not migrated (${names.join(", ")}): run \`omi profile import\` (profiles now live in the machine profile database)`,
+    );
+  }
+}
+
 /**
  * Profiles declared in a file while profiles live in the database is ambiguous: never silently pick
  * one side (ADR-0004 D3). Points at `omi profile import`.
@@ -77,6 +101,7 @@ export function readLegacyProfiles(workspace: string): LegacyProfiles {
 export function assertNoLegacyProfiles(workspace: string): void {
   const legacy = readLegacyProfiles(workspace);
   const where = [legacy.json, legacy.yaml].filter((s) => s?.profiles.length).map((s) => s?.path);
+  assertNoUnmigratedRows(workspace);
   if (where.length) {
     throw new OmiError(
       "CONFIG_INVALID",
@@ -132,6 +157,7 @@ export const listProfiles = (
  */
 export function profileSecretResolver(workspace: string, env: NodeJS.ProcessEnv): SecretResolver {
   return (profile) => {
+    assertNoLegacyProfiles(workspace);
     const sealed = withExistingProfileDb(
       env,
       (db) => getProfileRecord(db, profile.name),
