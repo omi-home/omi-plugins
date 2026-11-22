@@ -2,7 +2,12 @@
 // ADR-0001 D5), merge method, reviews and risk.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mergeEligibility, type PrFacts, riskOf } from "../../../runtime/release/adapters/merge.ts";
+import {
+  mergeEligibility,
+  type PrFacts,
+  riskOf,
+  triggersOnPullRequest,
+} from "../../../runtime/release/adapters/merge.ts";
 import { prBody } from "../../../runtime/release/adapters/pr.ts";
 
 const TIP = "a".repeat(40);
@@ -57,10 +62,25 @@ test("unresolved or failed checks block; no checks at all is a disclosed warning
     const ci = { commits: { nodes: [{ commit: { statusCheckRollup: { state } } }] } };
     assert.equal(status(facts(ci)).ci, "fail", state);
   }
-  assert.equal(
-    status(facts({ commits: { nodes: [{ commit: { statusCheckRollup: null } }] } })).ci,
-    "warn",
-  );
+  const none = { commits: { nodes: [{ commit: { statusCheckRollup: null } }] } };
+  assert.equal(status(facts(none)).ci, "warn");
+  assert.equal(status(facts(none, { hasCi: false })).ci, "warn");
+});
+
+test("repo with a pull_request workflow and no checks yet fails with a wait message", () => {
+  const none = { commits: { nodes: [{ commit: { statusCheckRollup: null } }] } };
+  const ci = mergeEligibility(facts(none, { hasCi: true }), want).find((c) => c.name === "ci");
+  assert.equal(ci?.status, "fail");
+  assert.equal(ci?.detail, "no checks reported yet: wait and retry");
+  assert.equal(status(facts({}, { hasCi: true })).ci, "pass");
+});
+
+test("triggersOnPullRequest detects pull_request triggers only", () => {
+  assert.ok(triggersOnPullRequest("on:\n  pull_request:\n    branches: [develop]\n"));
+  assert.ok(triggersOnPullRequest("on: [push, pull_request]\n"));
+  assert.ok(!triggersOnPullRequest("on:\n  push:\n"));
+  assert.ok(!triggersOnPullRequest("on:\n  pull_request_review:\n"));
+  assert.ok(!triggersOnPullRequest("# pull_request\non: push\n"));
 });
 
 test("no branch protection: warn on public, fail on private unless risk accepted (D5)", () => {
