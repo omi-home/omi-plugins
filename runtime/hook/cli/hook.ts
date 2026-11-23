@@ -153,8 +153,11 @@ function gitEscapes(seg: string, s: string, bash: boolean, repo: string | undefi
         if (v === undefined || !repoOk(v)) return true;
         continue;
       }
-      if (/^-[cC]/.test(t)) return true; // `-c k=v` runs config; other `-C…` forms are no grant
-      if (!t.startsWith("-")) subcommand = true;
+      if (t.startsWith("-")) return true; // only `-C <repo>` is a grant before the subcommand
+      subcommand = true;
+    } else {
+      const attached = /^-[A-Za-z](.+)$/.exec(t)?.[1]; // `-O/etc/x`, `-O../x`
+      if (attached !== undefined && argEscapes(attached)) return true;
     }
     const name = t.startsWith("--") ? (t.split("=")[0] as string) : "";
     if (name.length >= 3 && GIT_REFUSED_OPTIONS.some((b) => b === name || b.startsWith(name))) {
@@ -202,8 +205,19 @@ export function agentPreToolUse(
   const segments = (input.tool_input?.command ?? "")
     .split(/[;&|\n\r]+/)
     .map((x) => x.trim())
-    .map((seg) => ({ seg, s: seg.replace(/^(?:\w+=\S*\s+)+/, "") })); // `s` without `VAR=x` prefixes
+    .map((seg) => ({ seg, s: seg.replace(/^(?:\w+=[^\s"'`\\]*\s+)+/, "") })); // `s` without `VAR=value` prefixes
   const isGit = (s: string) => /^git(?:\.exe)?(?:\s|$)/.test(s);
+  const mentionsGit = /git/i.test(input.tool_input?.command ?? "");
+  // Fail closed: a git word anywhere means every segment holding it must itself be a plain
+  // lowercase `git` command (no wrapper such as timeout/env/command, no `(`, `{`, `!`, no then/do/else).
+  if (
+    mentionsGit &&
+    (/(?:^|[\s;&|(){}!])(?:then|do|else)(?:\s|$)/i.test(input.tool_input?.command ?? "") ||
+      segments.some(({ s }) => /git/i.test(s) && !isGit(s)))
+  ) {
+    const gh = segments.some(({ s }) => /^gh(?:\.exe)?(?:\s|$)/.test(s));
+    if (!gh) return GIT_ESCAPE_REASON;
+  }
   const runsGit = segments.some(({ s }) => isGit(s));
   const bash = tool === "Bash";
   for (const { seg, s } of segments) {

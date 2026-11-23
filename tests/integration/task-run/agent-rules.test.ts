@@ -202,7 +202,6 @@ test("agent hook: ordinary git (refs, ranges, relative paths, the task repo) pas
     "git -C 'app' show HEAD",
     "git diff -C --stat",
     "git log -c -1",
-    "git --no-pager diff --name-only",
     "FOO=1 git status",
     "git.exe status",
     "cd app && git status",
@@ -212,6 +211,43 @@ test("agent hook: ordinary git (refs, ranges, relative paths, the task repo) pas
     assert.equal(call("Bash", { command: c }), null, c);
   }
   assert.equal(call("PowerShell", { command: "git diff src\\a.ts" }), null, "\\ is a separator");
+});
+
+// #395 round 2 SEC-001: a hidden git fails closed.
+test("agent hook: a command that mentions git runs only plain lowercase git segments", () => {
+  for (const c of [
+    "timeout 5 git diff --no-index /dev/null x",
+    "time git diff ~/x y",
+    "nohup git log",
+    "command git log",
+    "env GIT_DIR=/x git log",
+    "(git diff a b)",
+    "{ git diff a b; }",
+    "! git log",
+    "GIT diff a b",
+    "Git.EXE log",
+    "X='a b' git diff a b",
+    "if true; then git log; fi",
+    "for i in 1; do git log; done",
+  ]) {
+    assert.equal(call("Bash", { command: c }), GIT_ESCAPE, c);
+  }
+});
+
+// #395 round 2 SEC-002: only `-C <repo>` before the subcommand; attached short-option values are paths.
+test("agent hook: global git options other than -C are refused; attached values are checked", () => {
+  for (const c of [
+    "git --config-env=core.fsmonitor=FOO status",
+    "git --super-prefix=x status",
+    "git --attr-source=x status",
+    "git --no-pager diff",
+    "git -p diff",
+    "git log -O/etc/x",
+    "git diff -O../x",
+  ]) {
+    assert.equal(call("Bash", { command: c }), GIT_ESCAPE, c);
+  }
+  assert.equal(call("Bash", { command: "git log -5 -U3 --stat" }), null);
 });
 
 test("agent hook: -C names only the task repo (env OMI_REPO / third argument)", () => {
