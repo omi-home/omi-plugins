@@ -29,8 +29,11 @@ const TABLE =
 
 function fakeGitHub() {
   const comments: { id: number; body: string; html_url: string; author_association: string }[] = [];
+  // sub-issues of the Story (#8): by default the sibling Test design QATask with the table
+  const siblings: unknown[] = [{ number: 10, body: TABLE, labels: [{ name: "qa:test-design" }] }];
   const run: GhRunner = (args, input) => {
     const ok = (v: unknown) => ({ status: 0, stdout: JSON.stringify(v), stderr: "" });
+    if (args.some((a) => a.includes("/sub_issues"))) return ok([siblings]);
     if (args.includes("graphql")) {
       const node = (n: number, body: string, type: string, parent: unknown) => ({
         number: n,
@@ -64,7 +67,7 @@ function fakeGitHub() {
     if (c) c.body = body;
     return ok(c);
   };
-  return { comments, run };
+  return { comments, run, siblings };
 }
 
 interface Reply {
@@ -146,6 +149,7 @@ function setup(replies: Reply[], plan: QaPlan, checkScript = "console.log('TC-8-
     taskRoot: mkdtempSync(join(tmpdir(), "omi-task-")),
     baseSha: base,
     plan,
+    parent: 8,
   };
   return { db, gh, deps, target, launches, packets, written, closed: () => closed, upstream, dir };
 }
@@ -257,6 +261,73 @@ test("TC-385-12: an Auto = Y case without a test carrying its TC id is blocked, 
   assert.equal(r.qa?.verdict, "FAILED");
   const run = s.gh.comments.find((c) => c.body.startsWith("<!-- omi:qa-run=1"));
   assert.match(run?.body ?? "", /- TC-8-01: blocked — no automated test carries this id/);
+});
+
+test("TC-385-14: a Verify without a Test design table is refused, never PASSED", () => {
+  const s = setup([{ qa: verify("pass", "pass") }], VERIFY);
+  s.gh.siblings.length = 0;
+  const none = runQa(s.deps, s.target);
+  assert.equal(none.ctx.state, "BLOCKED");
+  assert.equal(none.qa, undefined);
+  assert.equal(s.closed(), 0);
+  assert.equal(s.launches.length, 0);
+  // a sibling without the design label, or a table of another Story, is no table either
+  s.gh.siblings.push(
+    { number: 11, body: TABLE, labels: [{ name: "qa:manual" }] },
+    {
+      number: 12,
+      body: TABLE.replaceAll("TC-8-", "TC-7-"),
+      labels: [{ name: "qa:test-design" }],
+    },
+  );
+  repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+  assert.equal(runQa(s.deps, s.target).ctx.state, "BLOCKED");
+  assert.equal(s.closed(), 0);
+});
+
+test("TC-385-15: a Verify reporting zero cases is not PASSED (Retest included)", () => {
+  const s = setup([{ qa: { cases: [], defects: [], manualRegression: [] } }], {
+    ...VERIFY,
+    retest: true,
+  });
+  const r = runQa(s.deps, s.target);
+  assert.equal(r.ctx.state, "BLOCKED");
+  assert.equal(r.qa, undefined);
+  assert.equal(s.closed(), 0);
+});
+
+test("TC-385-16: a QATask without a parent Issue is refused (POLICY_VIOLATION)", () => {
+  const s = setup([{ qa: verify("pass", "pass") }], VERIFY);
+  const r = runQa(s.deps, { ...s.target, parent: undefined });
+  assert.equal(r.ctx.state, "BLOCKED");
+  assert.equal(s.launches.length, 0);
+  assert.equal(s.closed(), 0);
+});
+
+test("TC-385-17: a rerun on the same commit updates Run #k, it does not post a second comment", () => {
+  const s = setup(
+    [
+      {
+        qa: verify("pass", "fail", [
+          {
+            title: "t",
+            repro: "r",
+            expected: "e",
+            actual: "a",
+            severity: "low",
+            tc: ["TC-8-02"],
+          },
+        ]),
+      },
+    ],
+    VERIFY,
+  );
+  const first = runQa(s.deps, s.target);
+  assert.equal(first.qa?.verdict, "FAILED");
+  repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+  const again = runQa(s.deps, s.target);
+  assert.equal(again.qa?.run, 1);
+  assert.equal(s.gh.comments.filter((c) => c.body.startsWith("<!-- omi:qa-run=")).length, 1);
 });
 
 test("TC-385-13: a QA Engineer that cannot assess BLOCKs the run without a Run comment", () => {

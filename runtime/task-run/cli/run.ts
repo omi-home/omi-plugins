@@ -76,7 +76,13 @@ export function taskRun(deps: AgentRunDeps, issue: number): RunResult {
   );
   const skills = parseSkillChoice(PLUGIN_ROOT, deps.pick?.skills, deps.pick?.reason);
   // Plan first: a bad role label or a non-delivery type fails before any worktree exists.
-  const plan = planFor(config, fetchTicket(config, issue, gh), gh);
+  const ticket = fetchTicket(config, issue, gh);
+  const plan = planFor(config, ticket, gh);
+  const repoName = `${config.github.owner}/${config.github.repo}`.toLowerCase();
+  const parent =
+    ticket.parent && ticket.parent.repository.nameWithOwner.toLowerCase() === repoName
+      ? ticket.parent.number
+      : undefined;
   if (plan.kind !== "delivery" && plan.kind !== "qa") {
     throw new OmiError("POLICY_VIOLATION", `${plan.workflow}: use \`omi task analyze ${issue}\``);
   }
@@ -115,7 +121,7 @@ export function taskRun(deps: AgentRunDeps, issue: number): RunResult {
       // A QATask is read-only: no commit, no PR; PASSED closes the Issue and finalize cleans up.
       const done =
         plan.kind === "qa"
-          ? runQa(sliceDeps, { ...target, plan })
+          ? runQa(sliceDeps, { ...target, plan, parent })
           : { ctx: runSlice(sliceDeps, { ...target, plan }) };
       const ctx = done.ctx;
       const closed = done.qa?.verdict === "PASSED";

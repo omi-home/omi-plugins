@@ -135,6 +135,8 @@ export interface SliceTarget {
   taskRoot: string;
   /** Defaults to the original slice: Software Engineer, Feature Implementation. */
   plan?: WorkflowPlan;
+  /** Number of the Issue's parent in this repository (QATask: the Story or Bug under test). */
+  parent?: number;
 }
 
 interface StepSpec {
@@ -1150,7 +1152,7 @@ const QA_FORMAT = {
   "test-design": (story: number) =>
     `QATask mode: TEST DESIGN (read-only, no commit, no PR). Reply status PASSED with sectionUpdates [{"section":"qa","markdown":"<JSON>"}] where the JSON is {"acCoverage": string, "cases": [{"id":"TC-${story}-01","ac":string,"steps":string,"expected":string,"auto":boolean,"regression":boolean}]}. Case ids are TC-${story}-<n>, unique, each mapped to one Acceptance Criterion of the parent Issue #${story}. No other field.`,
   verify: (story: number) =>
-    `QATask mode: VERIFY (read-only, no commit, no PR; changedFiles empty, the worktree stays clean). Reply status PASSED with sectionUpdates [{"section":"qa","markdown":"<JSON>"}] where the JSON is {"cases":[{"id":"TC-${story}-01","result":"pass|fail|blocked","note"?:string}],"defects":[{"title","repro","expected","actual","severity":"critical|high|medium|low","tc":["TC-…"]}],"manualRegression":[string]}. Report every case of the TC table (the Test design QATask listed in Sources) or, for a Bug's Retest, the parent's Steps to reproduce as cases. An Auto = Y case takes its result from the test carrying its TC id in checkResults/logs; a manual case you perform yourself; manualRegression lists the manual Regression = Y cases that apply. A defect is a real failure with steps to reproduce; no other field.`,
+    `QATask mode: VERIFY (read-only, no commit, no PR; changedFiles empty, the worktree stays clean). Reply status PASSED with sectionUpdates [{"section":"qa","markdown":"<JSON>"}] where the JSON is {"cases":[{"id":"TC-${story}-01","result":"pass|fail|blocked","note"?:string}],"defects":[{"title","repro","expected","actual","severity":"critical|high|medium|low","tc":["TC-…"]}],"manualRegression":[string]}. Report every case of the TC table (the Test design QATask of the same Story, found by the runtime) or, for a Bug's Retest, the parent's Steps to reproduce as cases. An Auto = Y case takes its result from the test carrying its TC id in checkResults/logs; a manual case you perform yourself; manualRegression lists the manual Regression = Y cases that apply. A defect is a real failure with steps to reproduce; no other field.`,
 } as const;
 
 const trustedComments = (d: SliceDeps, issue: { repository: string; number: number }) => {
@@ -1169,11 +1171,39 @@ const trustedComments = (d: SliceDeps, issue: { repository: string; number: numb
     .filter((c) => trusted(c.author_association, c.user?.login));
 };
 
+const RestSubIssue = z.looseObject({
+  number: z.int(),
+  body: z.string().nullable(),
+  labels: z.array(z.union([z.string(), z.looseObject({ name: z.string() })])),
+});
+
+/** TC cases of the Test design QATask(s) among the Story's sub-issues, read in full (not the packet copy). */
+const designTable = (
+  d: SliceDeps,
+  repository: string,
+  story: number,
+): ReturnType<typeof parseTestTable> => {
+  const pages = api(
+    d.gh,
+    ["--paginate", "--slurp", `repos/${repository}/issues/${story}/sub_issues?per_page=100`],
+    "list sub-issues",
+  );
+  return parseContract(z.array(z.array(RestSubIssue)), pages, "list sub-issues")
+    .flat()
+    .filter((s) =>
+      s.labels.some((l) => (typeof l === "string" ? l : l.name) === d.config.qa.designLabel),
+    )
+    .flatMap((s) => parseTestTable(s.body ?? ""))
+    .filter((c) => c.id.startsWith(`TC-${story}-`));
+};
+
 /**
  * Read-only QATask run (DevTask-0134 #385): one QA Engineer step on a freshly fetched base HEAD, no
  * commit, no PR, no review. Test design writes the TC table into the Issue's `qa` section; Verify
  * runs the repo's checks, reconciles the agent's per-TC results and posts or updates `Run #k`.
  * PASSED leaves the run for `omi task finalize` (noCode); FAILED holds it BLOCKED for the Coordinator.
+ * A rerun on the same develop commit keeps `Run #k` (same agent step id): it reuses the stored QA
+ * assessment, re-runs the checks and updates the existing comment; a new commit starts `Run #k+1`.
  */
 export function runQa(
   d: SliceDeps,
@@ -1206,8 +1236,7 @@ export function runQa(
   const head = git(["rev-parse", "HEAD"], target.worktree);
   const t = { ...target, baseSha: head };
 
-  const fetched = d.ports.issueContext.fetchIssueContext(d.config, t.run.issue, d.gh);
-  const story = fetched.issueContext[1]?.issue.number;
+  const story = target.parent;
   if (!story) return stop("POLICY_VIOLATION", "a QATask needs a parent Issue (the Story or Bug)");
   const spec: StepSpec = { ...QA, title: plan.workflow, notes: [QA_FORMAT[plan.mode](story)] };
   const dirty = () => git(["status", "--porcelain", "--untracked-files=all"], t.worktree);
@@ -1237,6 +1266,22 @@ export function runQa(
   }
 
   // Verify / Retest: Run #k comes from the comments already on the Issue.
+  // The TC table is the sibling Test design QATask's, read in full; no table = nothing to verify
+  // (a Verify with zero cases must never PASS). A Bug's Retest reports its Steps to reproduce.
+  let table: ReturnType<typeof parseTestTable> = [];
+  if (!plan.retest) {
+    try {
+      table = designTable(d, issue.repository, story);
+    } catch (e) {
+      return stop("CONTRACT_INVALID", (e as Error).message);
+    }
+    if (!table.length) {
+      return stop(
+        "POLICY_VIOLATION",
+        `no Test design table (label ${d.config.qa.designLabel}) found under #${story}: run the Test design QATask first`,
+      );
+    }
+  }
   const k = nextRun(trustedComments(d, issue), head).k;
   const kctx = { ...ctx, qaReworks: k - 1 }; // distinct step ids per run: `qa`, `qa-qa1`, …
   const gate = checksStep(d, t, kctx, [], {
@@ -1259,11 +1304,12 @@ export function runQa(
           `${c.summary}\n${c.logPath && existsSync(c.logPath) ? readFileSync(c.logPath, "utf8") : ""}`,
       )
       .join("\n");
-    const table = fetched.issueContext
-      .slice(1)
-      .flatMap((e) => parseTestTable(e.body))
-      .filter((c) => c.id.startsWith(`TC-${story}-`));
     result = reconcile(table, parseVerify(jsonOf(md)), output);
+    if (!result.cases.length) {
+      throw new OmiError("CONTRACT_INVALID", "verify result: no case reported", {
+        issues: [{ path: "cases", message: "at least one case is required" }],
+      });
+    }
   } catch (e) {
     return stop("CONTRACT_INVALID", (e as Error).message);
   }
