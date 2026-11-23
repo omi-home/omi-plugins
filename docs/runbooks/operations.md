@@ -79,7 +79,7 @@ Finding hoãn sang task khác: comment `<!-- omi:carried-findings=<ID> -->` trê
 
 ### Năm role agent (DevTask-0131 #382, ADR-0005 D4)
 
-Role thực thi: `software-engineer`, `qa-engineer`, `ui-ux-designer`, `code-reviewer`, `security-reviewer`; `business-analyst` và `solution-architect` chỉ do `omi task analyze` chọn (Architect còn được gọi khi vòng review leo thang). Áp cho cả `github.model: legacy` lẫn `v2`. Ánh xạ legacy: `role:frontend|backend|database|devops` (vẫn được chấp nhận, chỉ một nhãn) và type `dev-task`/`devops-task`/`documentation-task` → `software-engineer`; type `test-task` → `qa-engineer`. `agents.routing.<role>` và `--skills <role>=…` dùng tên role mới (`omi skill list`).
+Role thực thi: `software-engineer`, `qa-engineer`, `ui-ux-designer`, `code-reviewer`, `security-reviewer`; `business-analyst` chỉ do `omi task analyze` chọn; `solution-architect` do `omi task analyze` chọn và chạy ở bước leo thang review của `omi task run` (sau 2 round FAILED; quyết định PO 2026-11-23, #382 CR-002). Một kế hoạch delivery không bao giờ chứa BA hay Architect. Áp cho cả `github.model: legacy` lẫn `v2`. Ánh xạ legacy: `role:frontend|backend|database|devops` (vẫn được chấp nhận, chỉ một nhãn) và type `dev-task`/`devops-task`/`documentation-task` → `software-engineer`; type `test-task` → `qa-engineer`. `agents.routing.<role>` và `--skills <role>=…` dùng tên role mới (`omi skill list`).
 
 Quyền tool: engineer chạy được `git mv` và `npm run check|arch|test|format` (có hoặc không đối số) ngoài các lệnh `checks` của repo; reviewer đọc được bằng `git show|diff|log|status`, `grep`, `cat`, `head`, `tail`, `wc`, kể cả khi nối bằng pipe. Vẫn cấm `git add|commit|push` và mọi `gh`.
 

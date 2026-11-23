@@ -1,7 +1,7 @@
-// T5.3 Code/Security Reviewer, Manual/Automation QA, DevOps, live (costs tokens: OMI_LIVE=1):
+// T5.3 Code/Security Reviewer, QA Engineer, Software Engineer (deploy scope), live (costs tokens: OMI_LIVE=1):
 // each sees exactly its default skills; on a diff with an injection + hard-coded secret the Security
-// Reviewer owns the finding and the Code Reviewer only routes it; Automation QA authors tests (not
-// just runs them); Manual QA reports through its section; DevOps stays in its scope.
+// Reviewer owns the finding and the Code Reviewer only routes it; the QA Engineer authors tests (not
+// just runs them) and reports through its section; the Software Engineer stays in its scope.
 import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

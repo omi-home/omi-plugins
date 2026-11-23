@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  ANALYSIS_ONLY_ROLES,
+  NON_DELIVERY_ROLES,
   READ_ONLY_ROLES,
   Role,
   VERDICT_ROLES,
@@ -75,8 +75,8 @@ test("DevTask-0131 #382: seven roles, the six merged ones are gone from agents a
   // Both QA duties in one role: it writes test files (not read-only) and has a verdict.
   assert.ok(!READ_ONLY_ROLES.includes("qa-engineer"));
   assert.ok(VERDICT_ROLES.includes("qa-engineer"));
-  // Only `omi task analyze` selects the analysts: they are never a delivery plan's engineer.
-  for (const r of ANALYSIS_ONLY_ROLES) assert.ok(Role.options.includes(r));
+  // The analysts are never in a delivery plan (the SA only runs as the escalation step).
+  for (const r of NON_DELIVERY_ROLES) assert.ok(Role.options.includes(r));
 });
 
 test("READ_ONLY_ROLES is exactly the agents that cannot Edit/Write", () => {

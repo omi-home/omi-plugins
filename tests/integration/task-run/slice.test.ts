@@ -58,9 +58,9 @@ interface Script {
   security?: Verdict | "CRITICAL";
   /** This analyst stops with an open question. */
   analysisBlocks?: string;
-  /** Manual QA verdicts, one per QA run (default PASSED); INVALID cites an absolute path. */
+  /** QA Engineer verdicts, one per QA run (default PASSED); INVALID cites an absolute path. */
   qa?: (Verdict | "INVALID")[];
-  /** Manual QA leaves a stray file in the worktree (#124). */
+  /** QA Engineer leaves a stray file in the worktree (#124). */
   qaDirties?: boolean;
   /** Engineer leaves an uncommitted file after its first step (release validation). */
   leavesDirt?: boolean;
@@ -355,7 +355,7 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
     ],
   );
   assert.ok(s.gh.comments.some((c) => c.body.includes("| Skills | semantic-code-review |")));
-  // Checks already passed on this HEAD: release validation reuses them, no Manual QA planned.
+  // Checks already passed on this HEAD: release validation reuses them, no QA Engineer planned.
   assert.deepEqual(titles(s.gh.comments.map((c) => c.body)), [
     "implement:1",
     "checks:1",
@@ -612,6 +612,33 @@ test("planned engineer runs; no Security Reviewer unless required", () => {
   assert.deepEqual(s.agents.calls, ["qa-engineer:1", "code-reviewer:1"]);
 });
 
+test("task run never launches the BA; the SA only as the 'architect' step after 2 FAILED rounds (#382 CR-002)", () => {
+  const analysts = ["business-analyst", "solution-architect"];
+  // (a) runs whose reviews pass: software engineer, test task (qa-engineer), manualQa plan.
+  for (const plan of [
+    delivery(),
+    delivery({ engineer: "qa-engineer" }),
+    delivery({ manualQa: true }),
+  ]) {
+    const s = setup({}, plan);
+    assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+    assert.deepEqual(
+      s.agents.packets.filter((p) => analysts.includes(p.role)),
+      [],
+      `no analyst in a passing ${plan.engineer} run`,
+    );
+  }
+  // (b) 2 FAILED review rounds: exactly one SA launch, step 'architect', never a BA.
+  const s = setup({ review: () => "FAILED" });
+  runSlice(s.deps, s.target);
+  const sa = s.agents.packets.filter((p) => p.role === "solution-architect");
+  assert.deepEqual(
+    sa.map((p) => p.stepId),
+    ["architect"],
+  );
+  assert.equal(s.agents.packets.filter((p) => p.role === "business-analyst").length, 0);
+});
+
 test("security label: Security Reviewer after Code Review; its FAILED is a review round", () => {
   const s = setup({ security: "FAILED" }, delivery({ security: true }));
   const ctx = runSlice(s.deps, s.target);
@@ -729,7 +756,7 @@ test("analysis: an open question stops before the next analyst and waits for the
 
 // ---- DevTask-0027 #56: QA stage ----
 
-test("Manual QA FAILED: same-round rework under new step ids, then QA passes → PR_PENDING", () => {
+test("QA Engineer FAILED: same-round rework under new step ids, then QA passes → PR_PENDING", () => {
   const s = setup({ qa: ["FAILED", "PASSED"] }, delivery({ manualQa: true }));
   const ctx = runSlice(s.deps, s.target);
   assert.equal(ctx.state, "PR_PENDING");
@@ -806,7 +833,7 @@ test("rework round 2 with changes: second commit names round 2 (#262)", () => {
   assert.match(git(wt, "log", "-1", "--format=%B"), /round 2, attempt 1/);
 });
 
-test("Manual QA BLOCKED stops for a person", () => {
+test("QA Engineer BLOCKED stops for a person", () => {
   const s = setup({ qa: ["BLOCKED"] }, delivery({ manualQa: true }));
   assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
 });
@@ -828,7 +855,7 @@ test("agent BLOCKED → unblock → run: that step runs again, PASSED steps repl
   assert.equal(roles(s.agents.calls).filter((r) => r === "code-reviewer").length, 1);
 });
 
-test("Manual QA technical failure: unblocked run resumes in QA and still gets checks (#121)", () => {
+test("QA Engineer technical failure: unblocked run resumes in QA and still gets checks (#121)", () => {
   const s = setup({ qa: ["INVALID", "PASSED"] }, delivery({ manualQa: true }));
   assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
   assert.equal(lastStepError(s.deps.evidenceDir)?.code, "CONTRACT_INVALID");
@@ -840,7 +867,7 @@ test("Manual QA technical failure: unblocked run resumes in QA and still gets ch
   assert.equal(qa[1]?.checkResults?.find((c) => c.name === "test")?.outcome, "pass");
 });
 
-test("Manual QA may run the repo's check commands; reviewers may not (PO #124)", () => {
+test("QA Engineer may run the repo's check commands; reviewers may not (PO #124)", () => {
   const s = setup({}, delivery({ manualQa: true }));
   assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
   const repoRel = (
@@ -925,7 +952,7 @@ test("refused commands are kept in evidence and listed in the step report (#252)
   assert.ok(!review.body.includes("Permission denied"));
 });
 
-test("Manual QA that leaves the worktree dirty blocks the run, with the reason kept (#124)", () => {
+test("QA Engineer that leaves the worktree dirty blocks the run, with the reason kept (#124)", () => {
   const s = setup({ qaDirties: true }, delivery({ manualQa: true }));
   assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
   const err = lastStepError(s.deps.evidenceDir);

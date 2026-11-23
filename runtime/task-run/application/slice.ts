@@ -1,6 +1,6 @@
 // Delivery workflow (spec §10–§12): the planned engineer → deterministic checks → Code Reviewer
 // (→ Security Reviewer when required), with the Solution Architect once after two failed review
-// rounds, then QA: release validation (→ Manual QA when planned) up to PR_PENDING; and the
+// rounds, then QA: release validation (→ QA Engineer when planned) up to PR_PENDING; and the
 // analysis workflow (analysts write Issue sections, the PO decides). Every step: task packet → named
 // agent process (ADR-0001 D1) → verified result → persisted with its report → report posted
 // before the next step. The FSM decides every move; agents only recommend.
@@ -61,7 +61,7 @@ export interface SliceDeps {
   /** Skills the Coordinator chose per role (#199); every step also gets its role's defaults. */
   skills?: SkillChoice;
   now?: () => Date;
-  /** Writes a `<!-- omi:section=… -->` of the Issue body (the Manual QA test cases). */
+  /** Writes a `<!-- omi:section=… -->` of the Issue body (the QA Engineer test cases). */
   writeSection?: (section: string, markdown: string) => void;
 }
 
@@ -94,7 +94,7 @@ export interface SliceTarget {
   baseSha: string;
   /** Task workspace (ADR-0002 D2): the agent's cwd; role files are written there. */
   taskRoot: string;
-  /** Defaults to the original slice: Backend Engineer, Feature Implementation. */
+  /** Defaults to the original slice: Software Engineer, Feature Implementation. */
   plan?: WorkflowPlan;
 }
 
@@ -104,7 +104,7 @@ interface StepSpec {
   category: ReportCategory;
   title: string;
   edits: boolean;
-  /** May run the repo's configured check commands without editing (Manual QA, PO #124). */
+  /** May run the repo's configured check commands without editing (QA Engineer, PO #124). */
   runsChecks?: boolean;
 }
 
@@ -198,7 +198,7 @@ export function prepareAgent(o: {
   category: ReportCategory;
   /** Implementing roles may edit files in the clone. */
   edits: boolean;
-  /** May run the check commands without editing (Manual QA, PO #124). */
+  /** May run the check commands without editing (QA Engineer, PO #124). */
   runsChecks?: boolean;
   /** The repo's configured check commands. */
   checks: string[];
@@ -700,7 +700,7 @@ function releaseStep(
       next: "Release validation.",
     });
     findings.push(...gate.findings);
-    checks = gate.results; // e.g. after a resume, Manual QA still gets this HEAD's checks (#121)
+    checks = gate.results; // e.g. after a resume, the QA Engineer still gets this HEAD's checks (#121)
   }
   const stepId = `release-validation${qaSuffix(ctx)}`;
   const comment = parseContract(
@@ -860,7 +860,7 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
               d.evidenceDir,
               `${QA.stepId}${qaSuffix(ctx)}-r${ctx.round}${ERROR_SUFFIX}`,
             );
-            const message = `Manual QA left the worktree dirty:
+            const message = `QA Engineer left the worktree dirty:
 ${dirty}`;
             writeFileSync(
               file,

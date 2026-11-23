@@ -80,8 +80,12 @@ export const Role = z.enum([
 ]);
 export type Role = z.infer<typeof Role>;
 
-/** Roles only `omi task analyze` selects into a plan (ADR-0005 D3); `omi task run` plans never do. */
-export const ANALYSIS_ONLY_ROLES: readonly Role[] = ["business-analyst", "solution-architect"];
+/**
+ * Roles that never appear in a delivery plan (ADR-0005 D3): `omi task analyze` plans the BA (and the
+ * SA); the SA also runs as the escalation step of `omi task run` after 2 FAILED review rounds
+ * (PO 2026-11-23, #382 CR-002), never as a planned step.
+ */
+export const NON_DELIVERY_ROLES: readonly Role[] = ["business-analyst", "solution-architect"];
 
 /** Roles whose agent cannot edit (agents/*.md disallow Edit/Write): no files, no commit. */
 export const READ_ONLY_ROLES: readonly Role[] = [

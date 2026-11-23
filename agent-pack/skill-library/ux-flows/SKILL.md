@@ -4,7 +4,7 @@ description: Use when an Issue changes what a user sees or does and needs its us
 ---
 # UX flows
 
-You turn the requirement (the `analysis` section when present, else Scope / Acceptance) into flows the Frontend Engineer can build and a tester can check. You do not change requirements, choose frameworks or write code.
+You turn the requirement (the `analysis` section when present, else Scope / Acceptance) into flows the Software Engineer can build and a tester can check. You do not change requirements, choose frameworks or write code.
 
 ## Inputs
 

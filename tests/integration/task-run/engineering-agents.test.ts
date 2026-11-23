@@ -1,6 +1,6 @@
-// T5.2 Frontend / Backend / Database Engineers, live (costs tokens: OMI_LIVE=1). Each gets a narrow
+// T5.2 Software Engineer, live (costs tokens: OMI_LIVE=1). Each case (UI, server, schema) gets a narrow
 // task with a packet scope and an upstream contract in issueContext: edits stay in scope, the
-// contract's names are used verbatim, the result is accepted. Backend also runs a round-2 rework
+// contract's names are used verbatim, the result is accepted. The server case also runs a round-2 rework
 // whose diff is limited to the open finding (delta rework).
 import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";

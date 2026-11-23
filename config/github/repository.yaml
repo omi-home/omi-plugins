@@ -39,8 +39,12 @@ labels:
   - { name: "role:devops", color: "bfdadc", description: "Engineer: DevOps" }
   # Workflow flags the engine reads by these exact names (renaming breaks routing).
   - { name: security, color: "ee0701", description: "Security Reviewer is mandatory" }
-  - { name: ui, color: "c5def5", description: "UI change: UI/UX analysis, Manual QA" }
-  - { name: "qa:manual", color: "d4c5f9", description: "Manual QA checks the acceptance criteria" }
+  - { name: ui, color: "c5def5", description: "UI change: UI/UX analysis, QA Engineer" }
+  - {
+      name: "qa:manual",
+      color: "d4c5f9",
+      description: "QA Engineer checks the acceptance criteria",
+    }
   - { name: refactor, color: "ededed", description: "Refactor workflow" }
   # Why an Issue was Cancelled (DocumentationTask-0007 #99).
   - { name: "resolution:duplicate", color: "cfd3d7", description: "Cancelled: duplicate" }

@@ -110,7 +110,8 @@ Commands:
                          or it needs a person (Waiting PO, Blocked). Runs agents: spends tokens.
   task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
                          write their sections into the Issue body, then Waiting PO. No worktree. Only
-                         this command picks the BA and the Architect into a plan.
+                         this command plans the BA; the Architect runs here and on task run's review
+                         escalation.
                          Runs agents: spends tokens.
                          task run / task analyze: --profile <name> [--model <id>] [--effort <level>]
                          --reason <text> runs every agent step on that profile (\`profile list\`);
