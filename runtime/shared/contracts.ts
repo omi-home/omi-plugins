@@ -127,6 +127,10 @@ export const PASSED_REQUIRES: Partial<Record<Role, "section" | "files" | "by-ste
 /** Step id of the acceptance QA step (also with a rework suffix, `qa-qa1`). */
 export const isAcceptanceQaStep = (stepId: string) => /^qa(-|$)/.test(stepId);
 
+/** Read-only by role, or the QA Engineer in the acceptance step (edits:false): no files, no commit. */
+export const isReadOnlyStep = (role: Role, stepId: string) =>
+  READ_ONLY_ROLES.includes(role) || (role === "qa-engineer" && isAcceptanceQaStep(stepId));
+
 /** Who executed a step: a specialist, the main session, or the deterministic CLI. */
 export const Executor = z.union([Role, z.enum(["coordinator", "omi-cli"])]);
 export type Executor = z.infer<typeof Executor>;

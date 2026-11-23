@@ -133,8 +133,30 @@ export type OmiConfig = z.infer<typeof OmiConfig>;
 export const workflowModel = (config: Pick<OmiConfig, "github">): WorkflowModel =>
   config.github.model;
 
-export const parseConfig = (input: unknown): OmiConfig =>
-  parseContract(OmiConfig, input, "config", "CONFIG_INVALID");
+/** Role keys removed by the 5-role agent pack (ADR-0005 D4) and the key that replaces each. */
+export const RENAMED_ROLES: Readonly<Record<string, Role>> = {
+  "frontend-engineer": "software-engineer",
+  "backend-engineer": "software-engineer",
+  "database-engineer": "software-engineer",
+  "devops-engineer": "software-engineer",
+  "manual-qa-engineer": "qa-engineer",
+  "automation-qa-engineer": "qa-engineer",
+};
+
+export function parseConfig(input: unknown): OmiConfig {
+  const routing = (input as { agents?: { routing?: unknown } } | null)?.agents?.routing;
+  if (routing && typeof routing === "object") {
+    const old = Object.keys(routing).filter((k) => Object.hasOwn(RENAMED_ROLES, k));
+    if (old.length) {
+      throw new OmiError(
+        "CONFIG_INVALID",
+        `config: agents.routing uses removed roles: ${old.map((k) => `${k} → ${RENAMED_ROLES[k]}`).join(", ")}; rename the keys`,
+        { removed: old },
+      );
+    }
+  }
+  return parseContract(OmiConfig, input, "config", "CONFIG_INVALID");
+}
 
 export const CONFIG_PATH = CONFIG_FILE;
 

@@ -298,6 +298,32 @@ test("acceptStepResult: reviewer is not affected by files the engineer changed (
   assert.deepEqual(acceptStepResult(p, result({ role: "code-reviewer" })).changedFiles, []);
 });
 
+test("acceptStepResult: acceptance QA step is read-only, test-writing QA step is not (CR-001)", () => {
+  const { dir, base } = repo();
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "src", "eng.ts"), "e");
+  git(dir, "add", ".");
+  git(dir, "commit", "-qm", "engineer work");
+  const sha = git(dir, "rev-parse", "HEAD");
+  const section = [{ section: "qa", markdown: "### Test cases" }];
+  const accept = (stepId: string, extra: Record<string, unknown>) =>
+    acceptStepResult(
+      buildTaskPacket({ ...input(dir, base), stepId, role: "qa-engineer", scope: [] }),
+      result({ role: "qa-engineer", stepId, ...extra }),
+    );
+  assert.deepEqual(accept("qa", { sectionUpdates: section }).changedFiles, []);
+  assert.equal(
+    codeOf(() => accept("qa", { sectionUpdates: section, commitSha: sha })),
+    "CONTRACT_INVALID",
+  );
+  assert.equal(
+    codeOf(() => accept("qa", { sectionUpdates: section, changedFiles: ["src/eng.ts"] })),
+    "CONTRACT_INVALID",
+  );
+  // The test-writing step keeps the git-derived `files` rule.
+  assert.deepEqual(accept("tests", { commitSha: sha }).changedFiles, ["src/eng.ts"]);
+});
+
 test("acceptStepResult: foreign commit, missing evidence, no change, out-of-scope change rejected", () => {
   const { dir, base } = repo();
   const p = buildTaskPacket(input(dir, base));
