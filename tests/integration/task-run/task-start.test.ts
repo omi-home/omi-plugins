@@ -20,6 +20,7 @@ import { openState, statePath } from "../../../runtime/shared/sqlite/db.ts";
 import {
   acquireLease,
   advanceRun,
+  createRun,
   getRun,
   transitionRun,
 } from "../../../runtime/task-run/adapters/repository.ts";
@@ -28,6 +29,7 @@ import { taskStart } from "../../../runtime/task-run/cli/start.ts";
 import { taskStatus } from "../../../runtime/task-run/cli/task-status.ts";
 import { taskUnblock as unblock } from "../../../runtime/task-run/cli/unblock.ts";
 import type { Ticket } from "../../../runtime/ticket/adapters/ticket.ts";
+import { engineDeps, fakeGithub, routeGh } from "../../unit/github/lifecycle-fake.ts";
 
 /** `omi task unblock` with the reporting adapter the composition root hands it. */
 const taskUnblock = (deps: Omit<Parameters<typeof unblock>[0], "reports">, issue: number) =>
@@ -36,7 +38,7 @@ const taskUnblock = (deps: Omit<Parameters<typeof unblock>[0], "reports">, issue
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
-function repo(withDevelop = true) {
+function repo(withDevelop = true, model = "legacy") {
   const base = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-task-")));
   git(base, "init", "-q", "--bare", "-b", "main", "origin.git");
   git(base, "clone", "-q", "origin.git", "repo");
@@ -46,7 +48,7 @@ function repo(withDevelop = true) {
   mkdirSync(join(root, ".omi-plugins"));
   writeFileSync(
     join(root, ".omi-plugins", "omi.config.yaml"),
-    "github:\n  owner: o\n  repo: repo\n  projectNumber: 2\n",
+    `github:\n  owner: o\n  repo: repo\n  projectNumber: 2\n  model: ${model}\n`,
   );
   git(root, "add", ".");
   git(root, "commit", "-q", "-m", "init");
@@ -343,6 +345,77 @@ test("unblock: only a BLOCKED run; FSM resumes it, one report names who and why 
     code(() => taskUnblock({ cwd: root, gh: run }, 5)),
     "INVALID_TRANSITION",
   );
+});
+
+// ---- DevTask-0128 #373: github.model v2 vs legacy ----
+
+test("legacy: task start writes Status itself and never calls the engine", () => {
+  const { root } = repo();
+  const gh = fakeGh(tree());
+  const r = taskStart({ cwd: root, gh: gh.run }, 5);
+  assert.equal(r.engine, undefined);
+  assert.ok(gh.mutations.length > 0);
+});
+
+test("v2: task start is refused by the start gate (no worktree, no write); lifecycleStart is tested in tests/unit/github/lifecycle.test.ts", () => {
+  const { root } = repo(true, "v2");
+  const issues = tree();
+  (issues[5] as FakeIssue).ticket = { issueType: { name: "DevTask" } };
+  const gh = fakeGh(issues);
+  assert.equal(
+    code(() => taskStart({ cwd: root, gh: gh.run }, 5)),
+    "POLICY_VIOLATION",
+  );
+  assert.deepEqual(gh.mutations, []);
+});
+
+/** A BLOCKED run of #5 in a workspace of the given model, without going through `task start`. */
+function blockedRun(model: string) {
+  const { root } = repo(true, model);
+  const db = openState(statePath(root));
+  createRun(db, { id: "run5", issue: { repository: "o/repo", number: 5 }, workflow: "dev-task" });
+  advanceRun(db, "run5", { type: "TICKET_VALID" });
+  advanceRun(db, "run5", { type: "WORKSPACE_CREATED" });
+  advanceRun(db, "run5", { type: "BLOCK" });
+  db.close();
+  const issues = tree();
+  (issues[5] as FakeIssue).status = "Blocked";
+  const gh = fakeGh(issues);
+  const run: GhRunner = (args, input) => {
+    if ((args[3] ?? "").includes("viewer{login}")) {
+      return {
+        status: 0,
+        stdout: JSON.stringify({ data: { viewer: { login: "po" } } }),
+        stderr: "",
+      };
+    }
+    if (args.includes("--paginate")) return { status: 0, stdout: "[[]]", stderr: "" };
+    if (args.includes("POST")) {
+      return { status: 0, stdout: JSON.stringify({ id: 1, html_url: "u", body: "" }), stderr: "" };
+    }
+    return gh.run(args, input);
+  };
+  return { root, gh, run };
+}
+
+test("unblock legacy: mirrors the run state into Status and never calls the engine", () => {
+  const s = blockedRun("legacy");
+  const r = taskUnblock({ cwd: s.root, gh: s.run }, 5);
+  assert.equal(r.engine, undefined);
+  assert.deepEqual(r.status, { issue: "o/repo#5", from: "Blocked", to: "In Progress" });
+  assert.deepEqual(s.gh.mutations, [5]);
+});
+
+test("unblock v2: omi sync, status null, no direct Status write", () => {
+  const s = blockedRun("v2");
+  const project = fakeGithub([{ number: 5, type: "DevTask", status: "Blocked" }]);
+  const routed = routeGh(project.run, s.run, /viewer\{login\}/);
+  const r = taskUnblock({ cwd: s.root, gh: routed.run, state: engineDeps() }, 5);
+  assert.equal(r.engine?.command, "sync");
+  assert.equal(r.status, null);
+  assert.equal(r.state, "WORKSPACE_READY");
+  assert.deepEqual(s.gh.mutations, []); // the task fake's setStatus path was never taken
+  assert.ok(routed.seen.some((q) => q.includes("items(first:")));
 });
 
 test("Definition of Ready: real parent chain checked, wrong pair / title / Objective refused (#128)", () => {

@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { setStatus } from "../../github/adapters/project.ts";
+import { isV2, lifecycleStart, lifecycleSync } from "../../github/cli/lifecycle.ts";
 import { writeSection } from "../../handoff/adapters/context.ts";
 import { loadProfiles, profileSecretResolver } from "../../profile/adapters/profile-config.ts";
 import { selectProfile } from "../../profile/domain/selection.ts";
@@ -68,7 +69,10 @@ export function taskAnalyze(deps: AgentRunDeps, issue: number): RunResult {
         workflow: typeOf(ticket) as IssueType,
       });
       if (run.state === "CREATED") run = step(db, run, "TICKET_VALID");
-      setStatus(config, issue, "Analysis", gh);
+      // v2 has no Analysis status: the work is "In progress" (omi move). Legacy keeps Analysis.
+      const v2 = isV2(config);
+      const move = v2 ? lifecycleStart({ cwd: deps.cwd, gh, state: deps.state }, issue) : undefined;
+      if (!v2) setStatus(config, issue, "Analysis", gh);
       const evidenceOf = (id: string) => join(dirname(file), "evidence", id);
       const ctx = runAnalysis(
         {
@@ -95,17 +99,18 @@ export function taskAnalyze(deps: AgentRunDeps, issue: number): RunResult {
         },
       );
       // Analysis done or an open question: either way the PO decides next.
-      const status = setStatus(
-        config,
-        issue,
-        ctx.state === "BLOCKED" ? "Blocked" : "Waiting PO",
-        gh,
-      );
+      // v2 (no Waiting PO / direct Blocked): `omi sync`; the Coordinator moves the Issue on from there.
+      const engine = v2 ? lifecycleSync({ cwd: deps.cwd, gh, state: deps.state }) : undefined;
+      const status = v2
+        ? null
+        : setStatus(config, issue, ctx.state === "BLOCKED" ? "Blocked" : "Waiting PO", gh);
       return {
         run: getRun(db, run.id) as RunRow,
         state: ctx.state,
         round: ctx.round,
         status,
+        ...(move ? { move } : {}),
+        ...(engine ? { engine } : {}),
         ...blockedBy(ctx.state, evidenceOf(run.id)),
       };
     } finally {

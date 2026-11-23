@@ -4,6 +4,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { type StatusChange, setStatus } from "../../github/adapters/project.ts";
+import { type EngineOutcome, isV2, lifecycleSync } from "../../github/cli/lifecycle.ts";
 import { repo } from "../../shared/config.ts";
 import {
   commentMarker,
@@ -33,6 +34,8 @@ export interface UnblockResult {
   state: WorkflowContext["state"];
   by: string;
   status: StatusChange | null;
+  /** github.model v2: the `omi sync` that replaced the direct Status write. */
+  engine?: EngineOutcome;
 }
 
 export function taskUnblock(
@@ -100,6 +103,11 @@ export function taskUnblock(
       enqueueReport(db, { runId: run.id, marker: commentMarker(comment), body });
       deps.reports.publish(db, run.id, { gh }); // a failure leaves it pending: `task run` posts it
       // A failure here leaves the board behind; `omi task run` sets it from the run state.
+      // v2: `omi sync` (Blocked leaves through the blockers_done rule); legacy mirrors the state.
+      if (isV2(config)) {
+        const engine = lifecycleSync({ cwd: deps.cwd, gh, state: deps.state });
+        return { run, state: context.state, by, status: null, engine };
+      }
       const status = setStatus(config, issue, PROJECT_STATUS[context.state], gh);
       return { run, state: context.state, by, status };
     } finally {

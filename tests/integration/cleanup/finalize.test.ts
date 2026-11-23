@@ -34,6 +34,7 @@ import {
 } from "../../../runtime/task-run/adapters/repository.ts";
 import { ensureTaskWorkspace } from "../../../runtime/task-run/adapters/worktree.ts";
 import { taskStatus } from "../../../runtime/task-run/cli/task-status.ts";
+import { engineDeps, fakeGithub, routeGh } from "../../unit/github/lifecycle-fake.ts";
 
 /** `omi task finalize` with the reporting adapter the composition root hands it. */
 const taskFinalize = (deps: Omit<Parameters<typeof finalize>[0], "reports">, issue: number) =>
@@ -221,7 +222,7 @@ const rest = (c: { id: number; body: string }) => ({
  * Task #5 (Feature #3 → Milestone #2) with a pushed commit, PR #9 squash-merged; `code: false`
  * is a closed task that never committed (Spike): no PR, no remote branch.
  */
-function merged({ code = true } = {}) {
+function merged({ code = true, model = "legacy" } = {}) {
   const base = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-fin-")));
   git(base, "init", "-q", "--bare", "-b", "main", "origin.git");
   git(base, "clone", "-q", "origin.git", "repo");
@@ -231,12 +232,12 @@ function merged({ code = true } = {}) {
   mkdirSync(join(repo, ".omi-plugins"));
   writeFileSync(
     join(repo, ".omi-plugins", "omi.config.yaml"),
-    "github:\n  owner: o\n  repo: repo\n  projectNumber: 2\n",
+    `github:\n  owner: o\n  repo: repo\n  projectNumber: 2\n  model: ${model}\n`,
   );
   git(repo, "add", ".");
   git(repo, "commit", "-q", "-m", "init");
   git(repo, "push", "-q", "origin", "main", "main:develop");
-  const config = parseConfig({ github: { owner: "o", repo: "repo", projectNumber: 2 } });
+  const config = parseConfig({ github: { owner: "o", repo: "repo", projectNumber: 2, model } });
   const db = openState(statePath(repo));
   const runId = createRun(db, {
     id: "run5",
@@ -430,6 +431,64 @@ test("cleanup fails (dirty worktree): CLEANUP_FAILED, Blocked, FAILED report; fi
   assert.equal(s.f.comments.length, 1);
   assert.match(s.f.comments[0]?.body ?? "", /\| Status \| PASSED \|/);
   assert.equal(s.f.status[5], "Done");
+});
+
+// ---- DevTask-0128 #373: github.model v2 goes through the state engine, legacy never does ----
+
+/** v2: the command's PR/REST calls hit the finalize fake, the Project hits the engine's fake. */
+function v2Finalize(opts: { code?: boolean } = {}) {
+  const s = merged({ ...opts, model: "v2" });
+  const project = fakeGithub([{ number: 5, type: "DevTask", status: "In review" }]);
+  const routed = routeGh(
+    project.run,
+    s.gh,
+    /viewerPermission|closingIssuesReferences|id state labels|\{state\}/,
+  );
+  return { ...s, project, routed, state: engineDeps() };
+}
+
+test("finalize v2: CLEANUP_SUCCEEDED → omi sync; no direct Status write, no markFinished", () => {
+  const s = v2Finalize();
+  const r = taskFinalize({ cwd: s.repo, gh: s.routed.run, state: s.state }, 5);
+  assert.equal(r.run.state, "COMPLETED");
+  assert.equal(r.engine?.command, "sync");
+  assert.deepEqual(r.status, []);
+  assert.equal(r.held, undefined);
+  assert.ok(s.routed.seen.some((q) => q.includes("items(first:"))); // the engine read the Project
+  assert.deepEqual(s.f.status, { 5: "In Review", 3: "In Progress", 2: "In Progress" }); // legacy fake untouched
+  assert.deepEqual(s.f.open, new Set([3, 2, 4])); // markFinished closed nothing
+});
+
+test("finalize v2: a COMPLETED run replays as sync only", () => {
+  const s = v2Finalize();
+  taskFinalize({ cwd: s.repo, gh: s.routed.run, state: s.state }, 5);
+  const again = taskFinalize({ cwd: s.repo, gh: s.routed.run, state: s.state }, 5);
+  assert.equal(again.engine?.command, "sync");
+  assert.deepEqual(again.status, []);
+  assert.equal(again.cleanup, null);
+});
+
+test("finalize v2: CLEANUP_FAILED writes no Status and does not call the engine", () => {
+  const s = v2Finalize();
+  writeFileSync(join(s.wt, "scratch.txt"), "x\n");
+  const r = taskFinalize({ cwd: s.repo, gh: s.routed.run, state: s.state }, 5);
+  assert.equal(r.run.state, "CLEANUP_FAILED");
+  assert.deepEqual(r.status, []);
+  assert.equal(r.engine, undefined);
+  assert.deepEqual(s.project.mutations, []);
+  assert.equal(s.f.status[5], "In Review");
+});
+
+test("finalize legacy: writes Status directly and never calls the engine", () => {
+  const s = merged();
+  const r = taskFinalize({ cwd: s.repo, gh: s.gh }, 5);
+  assert.equal(r.engine, undefined);
+  assert.equal(s.f.status[5], "Done");
+  const failed = merged();
+  writeFileSync(join(failed.wt, "scratch.txt"), "x\n");
+  const f = taskFinalize({ cwd: failed.repo, gh: failed.gh }, 5);
+  assert.equal(f.engine, undefined);
+  assert.equal(failed.f.status[5], "Blocked");
 });
 
 test("status write fails after cleanup: COMPLETED kept, rerun only repairs the Project", () => {

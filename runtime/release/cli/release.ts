@@ -5,6 +5,12 @@
 // pin with `marketplace add owner/repo#<tag>`), push it, close the Release Issue and roll up.
 import { type FinishChange, markFinished } from "../../github/adapters/project.ts";
 import { labelType } from "../../github/application/hierarchy.ts";
+import {
+  type EngineOutcome,
+  isV2,
+  type LifecycleDeps,
+  lifecycleSync,
+} from "../../github/cli/lifecycle.ts";
 import { repo } from "../../shared/config.ts";
 import type { Check } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
@@ -169,13 +175,15 @@ export interface TagResult {
   closed: boolean;
   changes: FinishChange[];
   held?: string;
+  /** github.model v2: what `omi sync` did instead of the direct Status writes. */
+  engine?: EngineOutcome;
 }
 
 /**
  * `omi release tag <n>`: after the PO merged Release Issue #n's PR (develop → main), tag the
  * merge commit, push the tag, close the Issue and roll up. Re-running changes nothing.
  */
-export function releaseTag(deps: { cwd: string; gh?: GhRunner }, issue: number): TagResult {
+export function releaseTag(deps: LifecycleDeps, issue: number): TagResult {
   const gh = deps.gh ?? spawnGh;
   const { root, config, ticket } = releaseTicket(deps.cwd, issue, gh);
   const { baseBranch: head, releaseBranch: base } = config.git;
@@ -217,6 +225,10 @@ export function releaseTag(deps: { cwd: string; gh?: GhRunner }, issue: number):
   if (close) {
     const r = gh(["issue", "close", String(issue), "--repo", primary.split("#")[0] as string]);
     if (r.status !== 0) throw classify(r, "close release issue");
+  }
+  if (isV2(config)) {
+    const engine = lifecycleSync({ ...deps, gh });
+    return { tag, commit, pr: pr.url, created: !existing, closed: close, changes: [], engine };
   }
   const fin = markFinished(config, issue, gh);
   return { tag, commit, pr: pr.url, created: !existing, closed: close, ...fin };

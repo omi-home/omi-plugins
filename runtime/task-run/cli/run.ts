@@ -4,6 +4,7 @@
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { type StatusChange, setStatus } from "../../github/adapters/project.ts";
+import { type EngineOutcome, isV2, lifecycleSync } from "../../github/cli/lifecycle.ts";
 import { writeSection } from "../../handoff/adapters/context.ts";
 import { loadProfiles, profileSecretResolver } from "../../profile/adapters/profile-config.ts";
 import { type Selection, selectProfile } from "../../profile/domain/selection.ts";
@@ -30,6 +31,10 @@ export interface RunResult {
   state: WorkflowContext["state"];
   round: number;
   status: StatusChange | null;
+  /** github.model v2: the `omi sync` that replaced the direct Status write. */
+  engine?: EngineOutcome;
+  /** github.model v2, `task analyze`: the `omi move <n> "In progress"` made before the agents ran. */
+  move?: EngineOutcome;
   /** Why the last agent attempt failed technically, when the run ended BLOCKED (#121). */
   error?: { code: string; message: string; file: string };
 }
@@ -100,12 +105,16 @@ export function taskRun(deps: AgentRunDeps, issue: number): RunResult {
           plan,
         },
       );
-      const status = setStatus(config, issue, PROJECT_STATUS[ctx.state], gh);
+      // v2: `omi sync` after the agent's result (In review / Done are `auto` rules); legacy: mirror.
+      const v2 = isV2(config);
+      const engine = v2 ? lifecycleSync({ cwd: deps.cwd, gh, state: deps.state }) : undefined;
+      const status = v2 ? null : setStatus(config, issue, PROJECT_STATUS[ctx.state], gh);
       return {
         run: getRun(db, start.run.id) as RunRow,
         state: ctx.state,
         round: ctx.round,
         status,
+        ...(engine ? { engine } : {}),
         ...blockedBy(ctx.state, evidenceDir),
       };
     } finally {

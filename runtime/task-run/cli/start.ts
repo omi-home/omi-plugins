@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { markStarted, type StatusChange } from "../../github/adapters/project.ts";
+import { type EngineOutcome, isV2, lifecycleStart } from "../../github/cli/lifecycle.ts";
 import { repo } from "../../shared/config.ts";
 import type { Check, IssueType } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
@@ -28,6 +29,8 @@ export interface StartResult {
   workspace: Workspace;
   checks: Check[];
   status: StatusChange[];
+  /** github.model v2: the `omi move` that replaced the direct Status writes. */
+  engine?: EngineOutcome;
 }
 
 export function taskStart(deps: TaskDeps, issue: number): StartResult {
@@ -80,6 +83,11 @@ export function taskStart(deps: TaskDeps, issue: number): StartResult {
       if (run.state === "TICKET_VALIDATED") run = step(db, run, "WORKSPACE_CREATED");
 
       // Last, and idempotent: a failure here leaves a ready workspace and a retry finishes it.
+      // v2: `omi move <n> "In progress"` (the engine is the only Project writer; parents are `auto`).
+      if (isV2(config)) {
+        const engine = lifecycleStart({ cwd: deps.cwd, gh, state: deps.state }, issue);
+        return { run, workspace, checks, status: [], engine };
+      }
       const status = markStarted(config, issue, gh);
       return { run, workspace, checks, status };
     } finally {

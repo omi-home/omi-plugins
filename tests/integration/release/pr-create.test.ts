@@ -19,7 +19,7 @@ import type { Ticket } from "../../../runtime/ticket/adapters/ticket.ts";
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
-function repo() {
+function repo(model = "legacy") {
   const base = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-pr-")));
   git(base, "init", "-q", "--bare", "-b", "main", "origin.git");
   git(base, "clone", "-q", "origin.git", "repo");
@@ -29,7 +29,7 @@ function repo() {
   mkdirSync(join(root, ".omi-plugins"));
   writeFileSync(
     join(root, ".omi-plugins", "omi.config.yaml"),
-    "github:\n  owner: o\n  repo: repo\n  projectNumber: 2\n",
+    `github:\n  owner: o\n  repo: repo\n  projectNumber: 2\n  model: ${model}\n`,
   );
   git(root, "add", ".");
   git(root, "commit", "-q", "-m", "init");
@@ -49,6 +49,8 @@ interface Fake {
   /** Merge-gate view of the task PR (T4.2); merged by `mergePullRequest`. */
   merge?: Record<string, unknown>;
   mergeSent?: { id: string; oid: string; method: string }[];
+  /** Native issue type (model v2). */
+  nativeType?: string;
 }
 
 function fakeGh(f: Fake) {
@@ -172,7 +174,7 @@ function fakeGh(f: Fake) {
         title: `${titleType(type as IssueType)}-${String(n).padStart(4, "0")}-Task ${n}`,
         state: "OPEN",
         body: "## Objective\nx\n\n## Scope / Acceptance\n- [ ] done",
-        issueType: { name: "Task" },
+        issueType: { name: f.nativeType ?? "Task" },
         labels: { totalCount: 1, nodes: [{ name: `type:${type}` }] },
         parent: null,
         subIssuesSummary: { total: 0, completed: 0 },
@@ -319,6 +321,54 @@ test("release: develop → main, primary proven by the body marker (no closing l
     ["pr-base", "pr-head", "pr-primary"],
   );
   assert.equal(r.status, null);
+});
+
+// ---- DevTask-0128 #373: github.model v2 vs legacy ----
+// Under v2 `startGates` refuses a task Issue for work (task start/run are not available yet), so
+// `pr create` and `pr merge` of a task stop at the gate before any push, merge or Status write; the
+// v2 `omi sync` after them runs once the gate opens. Release PRs have no gate and no Status.
+
+test("legacy: pr create writes In Review itself and never calls the engine", () => {
+  const s = started({ issues: { 5: "dev-task" } });
+  const r = prCreate({ cwd: s.root, gh: s.gh.run, sleep: noSleep }, 5);
+  assert.equal(r.engine, undefined);
+  assert.equal(r.status?.to, "In Review");
+});
+
+test("legacy: pr merge never calls the engine (risk:high → Waiting PO is tested above)", () => {
+  const f: Fake = { issues: { 5: "dev-task" } };
+  const s = started(f);
+  mergeable(s, f);
+  assert.equal(prMerge({ cwd: s.root, gh: s.gh.run }, 5).engine, undefined);
+});
+
+test("v2: pr create / pr merge of a task are refused at the gate: nothing pushed, merged or written", () => {
+  const f: Fake = { issues: { 5: "dev-task" }, nativeType: "DevTask" };
+  const root = repo("v2");
+  const gh = fakeGh(f);
+  gh.setRoot(root);
+  assert.equal(
+    code(() => prCreate({ cwd: root, gh: gh.run, sleep: noSleep }, 5)),
+    "POLICY_VIOLATION",
+  );
+  assert.equal(
+    code(() => prMerge({ cwd: root, gh: gh.run }, 5)),
+    "POLICY_VIOLATION",
+  );
+  assert.deepEqual(gh.created, []);
+  assert.deepEqual(gh.statuses, []);
+  assert.equal(f.mergeSent, undefined);
+});
+
+test("v2: a release PR is created with no Status write and no engine call", () => {
+  const root = repo("v2");
+  const gh = fakeGh({ issues: { 7: "release" } });
+  gh.setRoot(root);
+  const r = prCreate({ cwd: root, gh: gh.run }, 7);
+  assert.equal(r.created, true);
+  assert.equal(r.status, null);
+  assert.equal(r.engine, undefined);
+  assert.deepEqual(gh.statuses, []);
 });
 
 test("validatePr: body naming two primaries is dual-primary", () => {
