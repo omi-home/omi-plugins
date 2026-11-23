@@ -531,6 +531,23 @@ export const CarriedFinding = z.strictObject({
 });
 export type CarriedFinding = z.infer<typeof CarriedFinding>;
 
+/** One comment of the executable Issue by a trusted author (evidence/direction, never scope). */
+export const IssueComment = z.strictObject({
+  author: z.string().max(100),
+  createdAt: z.string().max(40),
+  body: z.string(),
+  /** Body was cut to PER_COMMENT_CHARS. */
+  truncated: z.boolean(),
+});
+export type IssueComment = z.infer<typeof IssueComment>;
+
+/** Trusted Issue comments, newest first, plus how many the budget left out. */
+export const IssueComments = z.strictObject({
+  comments: z.array(IssueComment).max(100),
+  omittedCount: z.int().min(0),
+});
+export type IssueComments = z.infer<typeof IssueComments>;
+
 export const CheckOutcome = z.enum(["pass", "fail", "timeout", "missing-tool", "skipped"]);
 export type CheckOutcome = z.infer<typeof CheckOutcome>;
 
@@ -557,6 +574,8 @@ export const TaskPacket = z.strictObject({
   worktree: z.string().refine((p) => isAbsolute(p), { message: "expected absolute path" }),
   baseSha: sha,
   issueContext: z.array(IssueContextEntry).min(1).max(10),
+  /** Comments of the executable Issue by trusted authors (evidence and direction, not scope). */
+  issueComments: IssueComments.optional(),
   /** Delta findings this step must address (spec §10: rework consumes findings, not the chat). */
   openFindings: z.array(Finding).max(100),
   carriedFindings: z.array(CarriedFinding).max(50),

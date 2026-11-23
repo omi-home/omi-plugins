@@ -429,7 +429,7 @@ function agentStep(
       // repair can resume it.
       const persists = SESSION_ROLES.includes(spec.role);
       const contextHash = createHash("sha256")
-        .update(JSON.stringify(fetched.issueContext))
+        .update(JSON.stringify([fetched.issueContext, fetched.issueComments ?? null]))
         .digest("hex");
       const saved = persists ? d.ports.store.agentSession(db, t.run.id, spec.role) : undefined;
       let sessionNote: string | undefined;
@@ -506,7 +506,9 @@ function agentStep(
       if (resumes) {
         const notes: string[] = [...unblockNotes];
         const issueChanged = saved?.contextHash !== null && saved?.contextHash !== contextHash;
-        if (issueChanged) notes.push("The Issue or its parents changed since your last run.");
+        if (issueChanged) {
+          notes.push("The Issue, its parents or its trusted comments changed since your last run.");
+        }
         try {
           obs = runOnce(
             resumePrompt(packet, {
@@ -517,6 +519,9 @@ function agentStep(
               })),
               notes,
               ...(issueChanged ? { issueContext: packet.issueContext } : {}),
+              ...(issueChanged && packet.issueComments
+                ? { issueComments: packet.issueComments }
+                : {}),
             }),
             "resume",
           );

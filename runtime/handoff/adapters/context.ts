@@ -7,6 +7,7 @@ import type { OmiConfig } from "../../shared/config.ts";
 import {
   AuthorAssociation,
   type CarriedFinding,
+  type IssueComments,
   type IssueContextEntry,
   type IssueType,
 } from "../../shared/contracts.ts";
@@ -23,6 +24,11 @@ export const TOTAL_CHARS = 40_000;
 /** Budget of the Issues a task body lists in its `Sources` section (taken out of TOTAL_CHARS). */
 export const PER_SOURCE_CHARS = 6_000;
 export const SOURCES_TOTAL_CHARS = 16_000;
+/** Budget of the trusted Issue comments (taken out of TOTAL_CHARS before the parent chain). */
+export const COMMENTS_TOTAL_CHARS = 10_000;
+export const PER_COMMENT_CHARS = 4_000;
+/** Comments OMI posts itself (step/cleanup reports, handoffs, carried findings, QA run reports…). */
+const OMI_NOISE = /^\s*<!--\s*omi:[\w-]+=/;
 
 const NODE = "number title body repository{nameWithOwner} labels(first:20){nodes{name}}";
 let parents = "";
@@ -32,7 +38,7 @@ const SOURCE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
 }`;
 const QUERY = `query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){issue(number:$number){
-    ${NODE} comments(last:100){nodes{body authorAssociation author{login}}} ${parents}
+    ${NODE} comments(last:100){nodes{body createdAt authorAssociation author{login}}} ${parents}
   }}
 }`;
 
@@ -62,6 +68,7 @@ const Response = z.strictObject({
             nodes: z.array(
               z.strictObject({
                 body: z.string(),
+                createdAt: z.string(),
                 authorAssociation: AuthorAssociation,
                 author: z.strictObject({ login: z.string() }).nullable(),
               }),
@@ -190,6 +197,47 @@ export function parseCarriedFindings(comments: string[]): CarriedFinding[] {
 export interface IssueContext {
   issueContext: IssueContextEntry[];
   carriedFindings: CarriedFinding[];
+  issueComments: IssueComments;
+}
+
+/**
+ * Trusted comments of the Issue, newest first, redacted, within COMMENTS_TOTAL_CHARS. Reports,
+ * handoffs and carried findings are not comments an agent needs; a comment that does not fit
+ * the budget is counted in `omittedCount`.
+ */
+export function selectComments(
+  nodes: {
+    body: string;
+    createdAt: string;
+    authorAssociation: AuthorAssociation;
+    author: { login: string } | null;
+  }[],
+  trusted: (association: AuthorAssociation, login: string | undefined) => boolean,
+): IssueComments {
+  const kept = nodes
+    .filter((c) => trusted(c.authorAssociation, c.author?.login))
+    .filter((c) => !OMI_NOISE.test(c.body) && !/omi:carried-findings=/.test(c.body))
+    .map((c) => ({ ...c, text: redact(c.body).trim() }))
+    .filter((c) => c.text)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const comments: IssueComments["comments"] = [];
+  let room = COMMENTS_TOTAL_CHARS;
+  let omittedCount = 0;
+  for (const c of kept) {
+    const body = cutAt(c.text, PER_COMMENT_CHARS);
+    if (body.length > room) {
+      omittedCount++;
+      continue;
+    }
+    room -= body.length;
+    comments.push({
+      author: c.author?.login ?? "ghost",
+      createdAt: c.createdAt,
+      body,
+      truncated: body.length < c.text.length,
+    });
+  }
+  return { comments, omittedCount };
 }
 
 export function fetchIssueContext(
@@ -252,7 +300,9 @@ export function fetchIssueContext(
   }
 
   const issueContext: IssueContextEntry[] = [];
-  let budget = TOTAL_CHARS - sources.reduce((n, s) => n + s.body.length, 0);
+  const issueComments = selectComments(issue.comments.nodes, trusted);
+  const commentChars = issueComments.comments.reduce((n, c) => n + c.body.length, 0);
+  let budget = TOTAL_CHARS - sources.reduce((n, s) => n + s.body.length, 0) - commentChars;
   for (let n: Node | null | undefined = issue; n && budget > 0; n = n.parent) {
     const made = entry(n, PER_ISSUE_CHARS, budget);
     budget -= made.keep;
@@ -261,6 +311,7 @@ export function fetchIssueContext(
   issueContext.push(...sources);
   return {
     issueContext,
+    issueComments,
     carriedFindings: parseCarriedFindings(
       issue.comments.nodes
         .filter((c) => /omi:carried-findings=/.test(c.body))
