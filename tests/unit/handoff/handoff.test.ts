@@ -549,7 +549,7 @@ test("fetchIssueContext: Sources section pulls listed Issues in, bounded and red
   const task = {
     ...node(
       40,
-      "## Scope\nx\n\n## Sources\n- #302 mục 3\n- x/y#5\n- #41\n- #43\n- #44",
+      "## Scope\nx\n\n## Sources\n- #302 mục 3\n- o/y#5\n- #41\n- #43\n- #44",
       "dev-task",
       node(41, "parent", "feature"),
     ),
@@ -558,7 +558,7 @@ test("fetchIssueContext: Sources section pulls listed Issues in, bounded and red
   const gh = ghFor({
     "o/r#40": task,
     "o/r#302": plain(302, `spec ${tok} ${"z".repeat(PER_ISSUE_CHARS)}`),
-    "x/y#5": { ...plain(5, "other repo"), repository: { nameWithOwner: "x/y" } },
+    "o/y#5": { ...plain(5, "other repo"), repository: { nameWithOwner: "o/y" } },
     "o/r#43": plain(43, "four"),
     "o/r#44": plain(44, "five"),
   });
@@ -566,7 +566,7 @@ test("fetchIssueContext: Sources section pulls listed Issues in, bounded and red
   // chain first, then sources: #41 is already in the chain, #44 is past the 4-source cap.
   assert.deepEqual(
     ctx.issueContext.map((e) => `${e.issue.repository}#${e.issue.number}`),
-    ["o/r#40", "o/r#41", "o/r#302", "x/y#5", "o/r#43"],
+    ["o/r#40", "o/r#41", "o/r#302", "o/y#5", "o/r#43"],
   );
   const spec = ctx.issueContext[2];
   assert.ok((spec?.body.length ?? 0) <= PER_SOURCE_CHARS);
@@ -582,6 +582,22 @@ test("fetchIssueContext: Sources section pulls listed Issues in, bounded and red
     return quiet(a);
   });
   assert.ok(!calls.some((c) => c.includes("number=302")));
+
+  // A cross-owner reference is never fetched.
+  const foreign: string[] = [];
+  const victim = ghFor({
+    "o/r#40": {
+      ...node(40, "## Sources\n- victim/private#9", "dev-task"),
+      comments: { nodes: [] },
+    },
+    "victim/private#9": { ...plain(9, "secret"), repository: { nameWithOwner: "victim/private" } },
+  });
+  const out = fetchIssueContext(config, 40, (a) => {
+    foreign.push(a.join(" "));
+    return victim(a);
+  });
+  assert.ok(!foreign.some((c) => c.includes("owner=victim")));
+  assert.ok(!JSON.stringify(out).includes("secret"));
 });
 
 test("fetchIssueContext: over-budget parent keeps marked sections and Scope, names what it dropped", () => {

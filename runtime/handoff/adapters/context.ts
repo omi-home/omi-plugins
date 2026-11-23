@@ -232,6 +232,8 @@ export function fetchIssueContext(
     if (sourceRoom <= 0) break;
     if (chain.has(`${ref.repository.toLowerCase()}#${ref.number}`)) continue;
     const [o, r] = ref.repository.split("/") as [string, string];
+    // The body is untrusted: never read a repository outside the configured owner.
+    if (o.toLowerCase() !== owner.toLowerCase()) continue;
     try {
       const found = graphql(
         SOURCE_QUERY,
