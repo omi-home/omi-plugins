@@ -15,7 +15,7 @@ const PAGE = 50;
 const MAX_VISITED = 200;
 
 const NODE = `query($owner:String!,$repo:String!,$number:Int!){ repository(owner:$owner,name:$repo){
-  issue(number:$number){ id number repository{ nameWithOwner }
+  issue(number:$number){ id number state stateReason repository{ nameWithOwner }
     blockedBy(first:${PAGE}){ totalCount nodes{ number repository{ nameWithOwner } } } } } }`;
 
 const Ref = z.strictObject({
@@ -27,6 +27,8 @@ const NodeData = z.strictObject({
     .strictObject({
       issue: Ref.extend({
         id: z.string(),
+        state: z.string().optional(),
+        stateReason: z.string().nullable().optional(),
         blockedBy: z.strictObject({ totalCount: z.int(), nodes: z.array(Ref) }),
       }).nullable(),
     })
@@ -64,13 +66,28 @@ export interface DependResult {
   added: boolean;
 }
 
-/** Makes `issue` blocked by `on`. Refuses itself, cycles and graphs it cannot fully read. */
-export function addDependency(issue: IssueAt, on: IssueAt, run: GhRunner = spawnGh): DependResult {
+/**
+ * Makes `issue` blocked by `on`. Refuses itself, cycles and graphs it cannot fully read; with
+ * `refuseDone` also a blocker already closed as completed (USAGE_INVALID, BLOCKER_DONE), before any write.
+ */
+export function addDependency(
+  issue: IssueAt,
+  on: IssueAt,
+  run: GhRunner = spawnGh,
+  opts: { refuseDone?: boolean } = {},
+): DependResult {
   const a = read(issue, run);
   const b = read(on, run);
   const result = { issue: key(a), blockedBy: key(b) };
   if (result.issue === result.blockedBy) {
     throw new OmiError("USAGE_INVALID", "an Issue cannot block itself");
+  }
+  if (opts.refuseDone && b.state === "CLOSED" && b.stateReason !== "NOT_PLANNED") {
+    throw new OmiError(
+      "USAGE_INVALID",
+      `${result.blockedBy} is already done: it cannot block ${result.issue}; nothing was changed`,
+      { reason: "BLOCKER_DONE", blocker: result.blockedBy },
+    );
   }
   if (a.blockedBy.nodes.some((x) => key(x) === result.blockedBy))
     return { ...result, added: false };

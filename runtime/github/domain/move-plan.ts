@@ -183,6 +183,8 @@ export function validateFetched(
 ): ValidateReport {
   const findings: Finding[] = [];
   const clean: FetchedIssue[] = [];
+  // Items with an unknown status get the type's initial status in the model: not judged further.
+  const unjudged = new Set<number>();
   for (const f of fetched) {
     if (f.type !== null && !IssueTypeV2.safeParse(f.type).success) {
       findings.push({
@@ -201,6 +203,7 @@ export function validateFetched(
           issue: f.number,
           message: `#${f.number}: status '${f.status}' is not one of ${ProjectStatusV2.options.join(", ")}`,
         });
+        unjudged.add(f.number);
         clean.push({ ...f, status: null });
         continue;
       }
@@ -218,6 +221,7 @@ export function validateFetched(
   }
   const { items, skipped } = build(clean);
   for (const it of items) {
+    if (unjudged.has(it.number)) continue;
     if (it.state === "closed" && it.closeReason === "not_planned") continue;
     const want = desiredIssueState(it.type, it.status, w).state;
     if (want !== it.state) {
@@ -230,6 +234,7 @@ export function validateFetched(
     }
   }
   for (const a of computeFixpoint(items, w).applied) {
+    if (unjudged.has(a.item)) continue;
     findings.push({
       kind: "auto_pending",
       issue: a.item,

@@ -121,10 +121,21 @@ export function issueMove(
   planMove(model, issue, to.data, workflow); // refuses before anything is written
   let dependency: ReturnType<typeof addDependency> | undefined;
   if (blocker) {
+    const sameRepo =
+      blocker.owner.toLowerCase() === config.github.owner.toLowerCase() &&
+      blocker.repo.toLowerCase() === config.github.repo.toLowerCase();
+    if (sameRepo && model.find((i) => i.number === blocker.number)?.status === "Done") {
+      throw new OmiError(
+        "USAGE_INVALID",
+        `#${blocker.number} is already Done: it cannot block #${issue}; nothing was changed`,
+        { reason: "BLOCKER_DONE", blocker: blocker.number },
+      );
+    }
     dependency = addDependency(
       { owner: config.github.owner, repo: config.github.repo, number: issue },
       blocker,
       run,
+      { refuseDone: true },
     );
     model = fetchProjectModel(config, run).items;
   }

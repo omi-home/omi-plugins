@@ -144,6 +144,8 @@ function fakeGithub(items: Item[]) {
             id: `ID${i.number}`,
             number: i.number,
             repository: repo,
+            state: i.state ?? "OPEN",
+            stateReason: i.stateReason ?? null,
             blockedBy: {
               totalCount: (i.blockedBy ?? []).length,
               nodes: (i.blockedBy ?? []).map((b) => ({ number: b, repository: repo })),
@@ -318,6 +320,20 @@ test("move to Blocked needs --on; the dependency is recorded and holds the Issue
   assert.deepEqual((again.data as { writes: unknown[] }).writes, []);
 });
 
+test("move to Blocked --on a Done Issue is refused and writes nothing (CR-001)", () => {
+  const gh = fakeGithub([
+    { number: 4, type: "DevTask", status: "In progress" },
+    { number: 12, type: "DevTask", status: "Done", state: "CLOSED", stateReason: "COMPLETED" },
+  ]);
+  const { d } = deps(gh);
+  assert.throws(
+    () => issueMove(4, "Blocked", { on: "12" }, d),
+    code("USAGE_INVALID", "BLOCKER_DONE"),
+  );
+  assert.deepEqual(gh.mutations, []);
+  assert.equal(gh.byNumber(4).status, "In progress");
+});
+
 test("close --not-planned: closes as not planned, updates the snapshot, is idempotent", () => {
   const gh = fakeGithub([{ number: 7, type: "ADR", status: "Awaiting PO" }]);
   const { d, db } = deps(gh);
@@ -350,6 +366,7 @@ test("validate: reports wrong status for the type, open/closed drift and pending
     { number: 5, type: "DevTask", status: "Ready", state: "CLOSED", stateReason: "COMPLETED" },
     { number: 6, type: "ADR", status: "Draft", state: "CLOSED", stateReason: "NOT_PLANNED" }, // fine
     { number: 7, type: "DevTask", status: "Bogus" },
+    { number: 8, type: "DevTask", status: "Bogus", state: "CLOSED", stateReason: "COMPLETED" }, // only invalid_status (CR-002)
   ]);
   const before = JSON.stringify(gh.items);
   const r = issueValidate(deps(gh).d);
@@ -360,6 +377,7 @@ test("validate: reports wrong status for the type, open/closed drift and pending
   assert.deepEqual(found.sort(), [
     "auto_pending:1",
     "invalid_status:7",
+    "invalid_status:8",
     "state_mismatch:4",
     "state_mismatch:5",
     "status_not_allowed:3",
