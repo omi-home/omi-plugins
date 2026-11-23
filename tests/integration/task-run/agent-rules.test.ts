@@ -132,6 +132,13 @@ test("agent hook: git stays read-only (no difftool, --ext-diff, --extcmd, --outp
 });
 
 // DevTask-0138 #395 (Bug-0012 #391, #393 SEC-001/005/007): a token ban on git arguments.
+// DevTask-0139 #397 (CR-004): git.exe after a backslash path is still a git word.
+test("agent hook: git.exe behind a backslash path is refused", () => {
+  assert.ok(call("Bash", { command: '"C:\\Git\\bin\\git.exe" diff --no-index /dev/null x' }));
+  assert.ok(call("PowerShell", { command: "& C:\\Git\\bin\\git.exe diff --no-index /dev/null x" }));
+  assert.ok(call("Bash", { command: "C:/Git/bin/git.exe log" }));
+});
+
 test("agent hook: git arguments cannot leave the task workspace", () => {
   for (const c of [
     "git diff --no-index /dev/null x",

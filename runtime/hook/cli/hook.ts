@@ -217,7 +217,8 @@ export function agentPreToolUse(
   // The shell removes quotes, backslashes and (PowerShell) backticks after the hook read the text,
   // so `g''it` is `git`: look for the git word in a copy without them.
   const plainText = (t: string) => t.replace(/["'`\\]/g, "");
-  const mentionsGit = GIT_WORD.test(plainText(rawCommand));
+  const hasGitWord = (t: string) => GIT_WORD.test(t) || GIT_WORD.test(plainText(t));
+  const mentionsGit = hasGitWord(rawCommand);
   // PowerShell is denied by the harness allowlist; as hardening, with git in the command a
   // PowerShell segment may not hold a variable, a location method or a `::` accessor.
   const psHidden = (t: string) =>
@@ -233,7 +234,7 @@ export function agentPreToolUse(
       segments.some(({ seg, s }) => {
         if (/^[({!]/.test(seg) || seg === "}" || seg === ")") return true;
         if (psHidden(seg)) return true;
-        if (GIT_WORD.test(plainText(s)) && !isGit(s)) return true;
+        if (hasGitWord(s) && !isGit(s)) return true;
         if (isGit(s)) return false;
         if (/^(?:builtin|command|eval|exec|source|\.)(?:\s|$)/i.test(s)) return true;
         const cds = seg.match(new RegExp(CD_WORD.source, "gi")) ?? [];
