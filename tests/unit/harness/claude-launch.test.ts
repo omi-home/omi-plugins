@@ -138,7 +138,28 @@ test("spawnAgent: no token → CONFIG_INVALID before anything runs; config dir f
     code: "INTERNAL",
   });
   assert.ok(existsSync(l.configDir));
-  assert.ok(!existsSync(stale));
+  assert.ok(existsSync(stale), "sessions of earlier runs live there: never wiped (#407)");
+});
+
+test("launch: a session starts under its id, resumes by id, none keeps --no-session-persistence (#407)", () => {
+  const base = {
+    pluginRoot: root,
+    role: "software-engineer" as const,
+    taskRoot: task,
+    worktree: repo,
+    prompt: "p",
+    hostEnv: host,
+  };
+  const none = buildAgentLaunch(base).args;
+  assert.ok(none.includes("--no-session-persistence"));
+  const id = "7d9c3b1e-0000-4000-8000-000000000001";
+  const first = buildAgentLaunch({ ...base, session: { mode: "new", id } }).args;
+  assert.equal(first[first.indexOf("--session-id") + 1], id);
+  assert.ok(!first.includes("--no-session-persistence") && !first.includes("--resume"));
+  const again = buildAgentLaunch({ ...base, session: { mode: "resume", id } }).args;
+  assert.equal(again[again.indexOf("--resume") + 1], id);
+  assert.ok(!again.includes("--session-id") && !again.includes("--no-session-persistence"));
+  assert.ok(again.includes("--agent"), "agent, tools and model are passed again on resume");
 });
 
 test("observeRun: cut transcript lines skipped (#19 CR-001); host usage read; no result → OmiError", () => {

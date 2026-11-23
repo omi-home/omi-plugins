@@ -56,6 +56,7 @@ test("migrate: fresh database reaches latest version; re-run is a no-op", () => 
     .all()
     .map((r) => r.name);
   assert.deepEqual(tables, [
+    "agent_session",
     "artifact",
     "lease",
     "outbox",

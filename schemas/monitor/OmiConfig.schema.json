@@ -346,6 +346,18 @@
             }
           },
           "additionalProperties": false
+        },
+        "contractRepairs": {
+          "default": 2,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "sessionMaxTokens": {
+          "default": 3000000,
+          "type": "integer",
+          "minimum": 10000,
+          "maximum": 9007199254740991
         }
       },
       "additionalProperties": false

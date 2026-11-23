@@ -23,7 +23,7 @@ export interface AgentLaunch {
   args: string[];
   cwd: string;
   env: Record<string, string>;
-  /** Wiped and recreated before every run. */
+  /** Created when missing, never wiped: it holds the sessions a later run may resume (#407). */
   configDir: string;
   /** Prompt goes through stdin: no shell quoting, no Windows command-line length limit. */
   stdin: string;
@@ -46,6 +46,11 @@ export interface LaunchRequest {
   selection?: Selection;
   /** `agents.routing[role]`: used when there is no profile selection. */
   route?: { model: string; effort: string };
+  /**
+   * The harness session of this run (#407): `new` starts it under that id, `resume` continues the
+   * one a previous run saved under it. Without it the run keeps no session.
+   */
+  session?: { mode: "new" | "resume"; id: string };
 }
 
 /** What the host observed of a finished run, never what the agent claims. */

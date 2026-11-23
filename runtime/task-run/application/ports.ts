@@ -19,6 +19,13 @@ import type { RunFindings } from "../domain/findings.ts";
 import type { Policy, WorkflowEvent } from "../domain/fsm.ts";
 import type { GateResult, RunRow, SkillChoice, StepRow } from "../domain/run.ts";
 
+export interface AgentSessionRow {
+  sessionId: string;
+  /** Input tokens (incl. cache) the session has used. */
+  tokens: number;
+  contextHash: string | null;
+}
+
 /** Persistence of runs, steps, attempts, artifacts and queued reports (repository adapter). */
 export interface RunStore {
   runContext(db: Db, runId: string): WorkflowContext;
@@ -31,6 +38,14 @@ export interface RunStore {
   /** Open findings of the run, persisted so a resumed `task run` starts from them (Bug-0013 #392). */
   runFindings(db: Db, runId: string): RunFindings;
   saveRunFindings(db: Db, runId: string, findings: RunFindings): void;
+  /** Session a role keeps across the reruns of a run (#407). */
+  agentSession(db: Db, runId: string, role: Role): AgentSessionRow | undefined;
+  saveAgentSession(
+    db: Db,
+    o: { runId: string; role: Role; sessionId: string; tokens: number; contextHash?: string },
+  ): void;
+  /** Why a person unblocked the run, cleared as it is read. */
+  takeUnblockReason(db: Db, runId: string): string | undefined;
   startStep(db: Db, o: { runId: string; stepId: string; round: number; role: Role }): StepRow;
   stepResult(db: Db, id: number): StepResult;
   beginAttempt(

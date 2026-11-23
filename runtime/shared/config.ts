@@ -98,6 +98,10 @@ export const OmiConfig = z.strictObject({
     .strictObject({
       maxConcurrent: z.int().min(1).max(3).default(3),
       routing: ModelRouting.prefault({}),
+      /** Resumes of a session with the contract issues before a CONTRACT_INVALID result blocks (#407). */
+      contractRepairs: z.int().min(0).max(5).default(2),
+      /** Input tokens (incl. cache read) a role session may total before a fresh one replaces it (#407). */
+      sessionMaxTokens: z.int().min(10_000).default(3_000_000),
     })
     .prefault({}),
   /** Optional dependency install run in a task clone, e.g. `npm ci`, before agent and checks. */

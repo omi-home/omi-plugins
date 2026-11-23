@@ -79,7 +79,10 @@ function cost(c: StepComment): string {
     c.durationMs === undefined
       ? "wall time not_available"
       : `${(c.durationMs / 1000).toFixed(1)} s wall`;
-  return `${tokens} · ${wall}`;
+  const session = c.session
+    ? ` · session ${c.session}${c.contractRepairs ? ` (${c.contractRepairs} contract repair${c.contractRepairs > 1 ? "s" : ""})` : ""}${c.sessionNote ? ` — ${c.sessionNote}` : ""}`
+    : "";
+  return `${tokens} · ${wall}${session}`;
 }
 
 export function renderStepReport(c: StepComment): string {

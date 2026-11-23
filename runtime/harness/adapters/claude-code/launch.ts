@@ -153,7 +153,9 @@ export function buildAgentLaunch(o: LaunchRequest): AgentLaunch {
       ...(o.allowedTools?.length ? ["--allowedTools", ...o.allowedTools] : []),
       ...(o.acceptEdits ? ["--permission-mode", "acceptEdits"] : []),
       ...(chosen ? ["--model", chosen.model, "--effort", chosen.effort] : []),
-      "--no-session-persistence",
+      ...(o.session
+        ? [o.session.mode === "resume" ? "--resume" : "--session-id", o.session.id]
+        : ["--no-session-persistence"]),
       "--output-format",
       "stream-json",
       "--verbose",
