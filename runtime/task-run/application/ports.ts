@@ -160,7 +160,7 @@ export interface IssueContextPort {
     config: OmiConfig,
     number: number,
     run?: GhRunner,
-  ): Pick<TaskPacket, "issueContext" | "carriedFindings">;
+  ): Pick<TaskPacket, "issueContext" | "carriedFindings" | "issueComments">;
 }
 
 export interface SlicePorts {
