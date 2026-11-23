@@ -128,9 +128,9 @@ export function statusField(config: OmiConfig, run: GhRunner): StatusField {
   };
 }
 
-type At = { owner: string; repo: string; number: number };
+export type At = { owner: string; repo: string; number: number };
 
-function projectItem(config: OmiConfig, at: At, run: GhRunner) {
+export function projectItem(config: OmiConfig, at: At, run: GhRunner) {
   const { owner, projectNumber } = config.github;
   const found = graphql(ITEM_QUERY, at, ItemData, "project item", run).repository?.issue;
   const item = found?.projectItems.nodes.find(

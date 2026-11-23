@@ -32,7 +32,7 @@ export interface GithubCliResult {
 const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
 
 /** `59`, `#59` or `owner/repo#59`. */
-const parentArg = (a: string, home: { owner: string; repo: string }, flag = "--parent") => {
+export const parentArg = (a: string, home: { owner: string; repo: string }, flag = "--parent") => {
   const m = /^(?:([\w.-]+)\/([\w.-]+)#|#?)(\d+)$/.exec(a);
   if (!m || Number(m[3]) < 1)
     throw new OmiError("USAGE_INVALID", `${flag} expects n or owner/repo#n`);
