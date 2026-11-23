@@ -4,7 +4,12 @@ const RULES: [RegExp, string][] = [
   [/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, "[REDACTED:github-token]"],
   [/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, "[REDACTED:github-token]"],
   [/\bsk-ant-[A-Za-z0-9_-]{10,}/g, "[REDACTED:anthropic-key]"],
-  [/\b(Bearer|token|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 [REDACTED]"],
+  // Only values that look like a secret: 8+ chars containing a digit or an inner . _ ~ + =
+  // (so prose such as "token management" or "Bearer authentication." is left alone).
+  [
+    /\b(Bearer|token|Basic)\s+(?=[A-Za-z0-9._~+/=-]*(?:\d|[._~+=][A-Za-z0-9]))[A-Za-z0-9._~+/=-]{8,}/gi,
+    "$1 [REDACTED]",
+  ],
   [/(\w+:\/\/)[^\s/:@]+:[^\s/@]+@/g, "$1[REDACTED]@"],
   [
     /\b(password|passwd|secret|token|api[_-]?key)(["']?\s*[:=]\s*["']?)[^\s"',;&]+/gi,

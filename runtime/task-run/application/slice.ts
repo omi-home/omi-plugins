@@ -32,6 +32,7 @@ import { OmiError } from "../../shared/errors/errors.ts";
 import type { GhRunner } from "../../shared/github/client.ts";
 import { redact, redactDeep } from "../../shared/redact.ts";
 import type { Db } from "../../shared/sqlite/db.ts";
+import { cutAt } from "../../shared/text.ts";
 import { policyFrom, type WorkflowEvent } from "../domain/fsm.ts";
 import type { AnalysisPlan, DeliveryPlan, WorkflowPlan } from "../domain/plan.ts";
 import type { RunRow, SkillChoice } from "../domain/run.ts";
@@ -237,7 +238,11 @@ export function prepareAgent(o: {
   return o.harness.launch(request);
 }
 
-const cut = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+/** Redacts first (a secret cut in half escapes its pattern), then cuts without splitting a surrogate pair. */
+const cut = (s: string, max: number) => {
+  const safe = redact(s);
+  return safe.length > max ? `${cutAt(safe, max - 1)}…` : safe;
+};
 
 /** Invisible characters a gateway was seen inserting into model output (Spike-0009 Q2). */
 const ZERO_WIDTH = /[\u200B-\u200D\u2060]/;

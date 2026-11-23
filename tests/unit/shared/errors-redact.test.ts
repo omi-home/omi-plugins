@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { parseContract, StepResult } from "../../../runtime/shared/contracts.ts";
 import { isTransient, OmiError } from "../../../runtime/shared/errors/errors.ts";
 import { redact, redactDeep, registerSecret } from "../../../runtime/shared/redact.ts";
+import { cutAt } from "../../../runtime/shared/text.ts";
 
 const cases: [string, string][] = [
   [`ghp_${"a".repeat(36)}`, "[REDACTED:github-token]"],
@@ -19,6 +20,26 @@ const cases: [string, string][] = [
 test("redact: known credential formats and user paths", () => {
   for (const [input, expected] of cases) assert.equal(redact(`x ${input} y`), `x ${expected} y`);
   assert.equal(redact("plain text, commit abcdef1"), "plain text, commit abcdef1");
+});
+
+test("redact: prose with token/Bearer/Basic is untouched, secret-looking values are not", () => {
+  for (const prose of [
+    "the profile's token management is documented",
+    "Bearer authentication. Basic configuration needed",
+    "each token expires quickly",
+  ]) {
+    assert.equal(redact(prose), prose);
+  }
+  const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123def";
+  assert.equal(redact(`Bearer ${jwt}`), "Bearer [REDACTED]");
+  assert.equal(redact("token abcd1234efgh"), "token [REDACTED]");
+  assert.equal(redact(`token ghp_${"a".repeat(30)}`), "token [REDACTED:github-token]");
+});
+
+test("cutAt never splits a surrogate pair", () => {
+  assert.equal(cutAt("ab😀cd", 3), "ab");
+  assert.equal(cutAt("ab😀cd", 4), "ab😀");
+  assert.equal(cutAt("abc", 10), "abc");
 });
 
 test("registerSecret: registered values are scrubbed; values below the minimum are ignored", () => {

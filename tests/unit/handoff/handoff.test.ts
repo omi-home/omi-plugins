@@ -169,6 +169,22 @@ test("acceptStepResult: an over-long free-text field is cut with a warning, not 
   assert.deepEqual(cutFinding.warnings, ["findings.0.observed: 1500 chars, cut to 1000"]);
 });
 
+test("acceptStepResult: a secret straddling the cut point does not leak, an emoji is not split (#380)", () => {
+  const { dir, base } = repo();
+  const p = buildTaskPacket(input(dir, base));
+  const at = 2000 - TRUNCATION_SUFFIX.length;
+  const secret = `ghp_${"A".repeat(36)}`;
+  const text = `${"x ".repeat(Math.floor((at - 10) / 2))}${secret}${" y".repeat(200)}`;
+  const { result: r } = acceptStepResultWithWarnings(p, result({ summary: text }));
+  assert.doesNotMatch(r.summary, /ghp_/);
+  assert.doesNotMatch(r.summary, /AAAA/);
+  assert.ok(r.summary.length <= 2000);
+  const emoji = `${"x".repeat(at - 1)}😀${"z".repeat(300)}`;
+  const e = acceptStepResultWithWarnings(p, result({ summary: emoji })).result.summary;
+  assert.doesNotMatch(e, /[\ud800-\udbff](?![\udc00-\udfff])/);
+  assert.ok(e.endsWith(TRUNCATION_SUFFIX));
+});
+
 test("acceptStepResult: a long summary does not excuse any other contract violation (#318)", () => {
   const { dir, base } = repo();
   const p = buildTaskPacket(input(dir, base));
