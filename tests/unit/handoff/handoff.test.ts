@@ -9,6 +9,7 @@ import { test } from "node:test";
 import {
   fetchIssueContext,
   PER_ISSUE_CHARS,
+  PER_SOURCE_CHARS,
   parseCarriedFindings,
   TOTAL_CHARS,
 } from "../../../runtime/handoff/adapters/context.ts";
@@ -520,6 +521,97 @@ test("fetchIssueContext: chain nearest first, bounded, redacted, carried finding
     codeOf(() => fetchIssueContext(config, 9, missing)),
     "TICKET_INVALID",
   );
+});
+
+const ghFor =
+  (issues: Record<string, unknown>): GhRunner =>
+  (a) => {
+    if (a.some((x) => x.includes("viewer"))) {
+      return {
+        status: 0,
+        stderr: "",
+        stdout: JSON.stringify({ data: { viewer: { login: "b" } } }),
+      };
+    }
+    const owner = a.find((x) => x.startsWith("owner="))?.slice(6);
+    const repo = a.find((x) => x.startsWith("repo="))?.slice(5);
+    const num = a.find((x) => x.startsWith("number="))?.slice(7);
+    const issue = issues[`${owner}/${repo}#${num}`] ?? null;
+    return { status: 0, stderr: "", stdout: JSON.stringify({ data: { repository: { issue } } }) };
+  };
+
+test("fetchIssueContext: Sources section pulls listed Issues in, bounded and redacted", () => {
+  const tok = `ghp_${"a".repeat(36)}`;
+  const plain = (n: number, body: string) => {
+    const { parent: _p, ...rest } = node(n, body, "change-request");
+    return rest;
+  };
+  const task = {
+    ...node(
+      40,
+      "## Scope\nx\n\n## Sources\n- #302 mục 3\n- x/y#5\n- #41\n- #43\n- #44",
+      "dev-task",
+      node(41, "parent", "feature"),
+    ),
+    comments: { nodes: [] },
+  };
+  const gh = ghFor({
+    "o/r#40": task,
+    "o/r#302": plain(302, `spec ${tok} ${"z".repeat(PER_ISSUE_CHARS)}`),
+    "x/y#5": { ...plain(5, "other repo"), repository: { nameWithOwner: "x/y" } },
+    "o/r#43": plain(43, "four"),
+    "o/r#44": plain(44, "five"),
+  });
+  const ctx = fetchIssueContext(config, 40, gh);
+  // chain first, then sources: #41 is already in the chain, #44 is past the 4-source cap.
+  assert.deepEqual(
+    ctx.issueContext.map((e) => `${e.issue.repository}#${e.issue.number}`),
+    ["o/r#40", "o/r#41", "o/r#302", "x/y#5", "o/r#43"],
+  );
+  const spec = ctx.issueContext[2];
+  assert.ok((spec?.body.length ?? 0) <= PER_SOURCE_CHARS);
+  assert.equal(spec?.truncated, true);
+  assert.ok(!JSON.stringify(ctx).includes(tok));
+  // No Sources section: no extra reads.
+  const calls: string[] = [];
+  const quiet = ghFor({
+    "o/r#40": { ...node(40, "## Scope\nsee #302", "dev-task"), comments: { nodes: [] } },
+  });
+  fetchIssueContext(config, 40, (a) => {
+    calls.push(a.join(" "));
+    return quiet(a);
+  });
+  assert.ok(!calls.some((c) => c.includes("number=302")));
+});
+
+test("fetchIssueContext: over-budget parent keeps marked sections and Scope, names what it dropped", () => {
+  const filler = (n: number) => "f".repeat(n);
+  const body = [
+    "## Objective\nship it",
+    `## Context / Parent\n${filler(9_000)}`,
+    `<!-- omi:section=analysis -->\n## Analysis\nkeep-analysis\n${filler(1_000)}\n<!-- /omi:section=analysis -->`,
+    `<!-- omi:section=architecture -->\n## Architecture\nkeep-architecture\n${filler(1_000)}\n<!-- /omi:section=architecture -->`,
+    `## Scope / Acceptance\n- [ ] keep-scope`,
+    `## Notes\n${filler(5_000)}`,
+  ].join("\n\n");
+  assert.ok(body.length > PER_ISSUE_CHARS);
+  const issue = {
+    ...node(50, "## Scope\nx", "dev-task", node(51, body, "feature")),
+    comments: { nodes: [] },
+  };
+  const ctx = fetchIssueContext(config, 50, ghFor({ "o/r#50": issue }));
+  const parent = ctx.issueContext[1];
+  assert.ok(parent);
+  assert.ok(parent.body.length <= PER_ISSUE_CHARS);
+  for (const kept of ["ship it", "keep-analysis", "keep-architecture", "keep-scope"]) {
+    assert.ok(parent.body.includes(kept), kept);
+  }
+  assert.equal(parent.truncated, true);
+  const names = (parent.omitted ?? []).map((o) => o.section);
+  assert.ok(names.includes("Context / Parent") || names.includes("Notes"));
+  assert.ok((parent.omitted ?? []).every((o) => o.chars > 0));
+  // Markers survive in document order: analysis before architecture.
+  assert.ok(parent.body.indexOf("keep-analysis") < parent.body.indexOf("keep-architecture"));
 });
 
 test("red team: a hostile Issue body stays data inside the packet, the prompt says so", () => {

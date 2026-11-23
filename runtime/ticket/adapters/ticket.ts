@@ -13,8 +13,15 @@ import {
 } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { type GhRunner, graphql, spawnGh } from "../../shared/github/client.ts";
+import { mentionedIssues, parseSources } from "../../shared/sources.ts";
 
 const PAGE = 50;
+
+// The parent chain (nearest first) tells which `#n` references of the body are already in the
+// task's context.
+const LINK = "number state repository{nameWithOwner}";
+let PARENTS = LINK;
+for (let i = 0; i < 5; i++) PARENTS = `${LINK} parent{${PARENTS}}`;
 
 const QUERY = `query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){
@@ -22,7 +29,7 @@ const QUERY = `query($owner:String!,$repo:String!,$number:Int!){
       number title state body
       issueType{name}
       labels(first:${PAGE}){totalCount nodes{name}}
-      parent{number state repository{nameWithOwner}}
+      parent{${PARENTS}}
       subIssuesSummary{total completed}
       blockedBy(first:${PAGE}){totalCount nodes{number state repository{nameWithOwner}}}
       projectItems(first:${PAGE},includeArchived:false){totalCount nodes{id isArchived
@@ -41,6 +48,16 @@ const LinkedIssue = z.strictObject({
 const conn = <T extends z.ZodType>(node: T) =>
   z.strictObject({ totalCount: z.int().min(0), nodes: z.array(node) });
 
+interface Linked extends z.infer<typeof LinkedIssue> {
+  parent?: Linked | null;
+}
+const Parent: z.ZodType<Linked> = z.strictObject({
+  ...LinkedIssue.shape,
+  get parent() {
+    return Parent.nullable().optional(); // absent on the deepest level queried
+  },
+});
+
 export const Ticket = z.strictObject({
   number: z.int().positive(),
   title: z.string(),
@@ -48,7 +65,7 @@ export const Ticket = z.strictObject({
   body: z.string(),
   issueType: z.strictObject({ name: z.string() }).nullable(),
   labels: conn(z.strictObject({ name: z.string() })),
-  parent: LinkedIssue.nullable(),
+  parent: Parent.nullable(),
   subIssuesSummary: z.strictObject({ total: z.int().min(0), completed: z.int().min(0) }),
   blockedBy: conn(LinkedIssue),
   projectItems: conn(
@@ -195,6 +212,24 @@ export function validateTicket(t: Ticket, config: OmiConfig): Check[] {
         ? pass("acceptance", "acceptance criteria present")
         : warn("acceptance", "no acceptance / Definition of Done section or checklist"),
   );
+
+  const inChain = new Set<number>([t.number]);
+  for (let p: Linked | null | undefined = t.parent; p; p = p.parent) inChain.add(p.number);
+  const here = `${owner}/${config.github.repo}`.toLowerCase();
+  const sourced = new Set(
+    parseSources(t.body, here)
+      .filter((r) => r.repository.toLowerCase() === here)
+      .map((r) => r.number),
+  );
+  const stray = mentionedIssues(t.body).filter((n) => !inChain.has(n) && !sourced.has(n));
+  if (stray.length) {
+    checks.push(
+      warn(
+        "references",
+        `${stray.map((n) => `#${n}`).join(", ")} cited outside the parent chain and not in a Sources section: the agent packet will not carry it (list it under "## Sources" or copy the spec into the body)`,
+      ),
+    );
+  }
 
   const open = t.blockedBy.nodes.filter((b) => b.state === "OPEN");
   const unseen = t.blockedBy.totalCount - t.blockedBy.nodes.length;

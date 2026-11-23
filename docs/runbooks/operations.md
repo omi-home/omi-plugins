@@ -73,6 +73,8 @@ Policy mặc định của plugin: `config/github/*.yaml` (hierarchy, field/view
 
 Với `github.model: v2` các bước trên không ghi Status trực tiếp: `omi move <n> "In progress"` trước khi giao việc cho agent (`task start`, `task analyze`), và `omi sync` sau khi agent trả kết quả (`task run`, `task analyze`), sau `task unblock`, `pr create`, `pr merge`, `task finalize`, `release tag` (In review, Done, roll-up cha và đóng Issue do luật `auto`). Xem `github-project-v2-setup.md` mục 7.
 
+Context của agent (`issueContext` trong packet): Issue của task, chuỗi Issue cha, rồi các Issue khai trong section `## Sources` của body task (tùy chọn; mỗi dòng `#n` hoặc `owner/repo#n`, tối đa 4 Issue, mỗi Issue ≤ 6 000 ký tự, tổng ≤ 16 000, đã redact; Issue không đọc được thì bị bỏ qua). Dùng khi spec nằm ngoài chuỗi cha (vd. ChangeRequest ở nhánh khác của cây) thay vì chép tay. `omi ticket validate` cảnh báo (`references`, không chặn) khi body dẫn `#n` ngoài chuỗi cha và không có trong `Sources`. Body Issue vượt 12 000 ký tự: packet giữ Objective/Scope/Acceptance/Definition of Done, rồi các section `<!-- omi:section=… -->` (analysis, architecture, design…), rồi phần còn lại, theo thứ tự trong body; phần bị bỏ hoặc cắt nằm trong `omitted` của entry (tên section + số ký tự). Agent cần phần đó thì trả `BLOCKED` xin thêm, không tự đoán.
+
 Finding hoãn sang task khác: comment `<!-- omi:carried-findings=<ID> -->` trên Issue đích; `omi issue findings <n>` liệt kê khi bắt đầu. Tổng quan: `omi status`. Cuối phiên: `omi handoff post --body-file <f>`; đầu phiên: `omi handoff show` (skill `omi-resume`).
 
 ## 6. Escalation và khôi phục

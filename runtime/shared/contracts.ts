@@ -509,6 +509,10 @@ export const IssueContextEntry = z.strictObject({
   body: z.string(),
   /** Body was cut to fit the packet budget. */
   truncated: z.boolean(),
+  /** Sections (or the whole body, `body`) dropped or cut by the budget, with their lost size. */
+  omitted: z
+    .array(z.strictObject({ section: z.string().max(200), chars: z.int().positive() }))
+    .optional(),
 });
 export type IssueContextEntry = z.infer<typeof IssueContextEntry>;
 
