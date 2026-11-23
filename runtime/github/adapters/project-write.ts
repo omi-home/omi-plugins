@@ -67,6 +67,7 @@ export function applyWrites(
   writes: readonly ItemWrite[],
   done: (w: ItemWrite) => void,
   run: GhRunner = spawnGh,
+  before: (w: ItemWrite) => void = () => {},
 ): void {
   if (!writes.length) return;
   const field = statusField(config, run);
@@ -79,6 +80,7 @@ export function applyWrites(
         `#${w.issue} is not in Project #${config.github.projectNumber}`,
       );
     }
+    before(w);
     if (from !== w.to) setItemStatus(field, item.id, w.to, run);
     if (w.stateChange) {
       const id = issueId(config, w.issue, run);

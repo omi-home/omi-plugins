@@ -315,6 +315,33 @@ test("an invalid status change is reverted with a warning comment; the second ru
   assert.deepEqual(again.writes, []);
 });
 
+test("a write failing after a revert: the warning is already posted once and the next run does not repeat writes", () => {
+  const gh = fakeGithub([
+    { number: 5, type: "DevTask", status: "Done" },
+    { number: 6, type: "DevTask", status: "In review", mergedPr: true, state: "CLOSED" },
+  ]);
+  let fail = true;
+  const flaky: GhRunner = (args, input) => {
+    const all = `${args.join(" ")} ${input ?? ""}`;
+    return fail && all.includes("item6") && /updateProjectV2Item/.test(all)
+      ? { status: 1, stdout: "", stderr: "boom" }
+      : gh.run(args, input);
+  };
+  const { d, db } = setup({ run: flaky }, [snap(5, "In progress"), snap(6, "In review")]);
+  assert.throws(() => sync(d));
+  assert.equal(gh.posted.length, 1);
+  assert.equal(gh.byNumber(5).status, "In progress");
+  assert.equal(readSnapshot(db, "o/r", 2)?.find((s) => s.number === 5)?.status, "In progress");
+  fail = false;
+  const writes5 = () => gh.mutations.filter((m) => m.startsWith("status 5")).length;
+  const before = writes5();
+  const r = sync(d);
+  assert.equal(writes5(), before);
+  assert.equal(gh.posted.length, 1);
+  assert.deepEqual(r.reverted, []);
+  assert.equal(gh.byNumber(6).status, "Done");
+});
+
 test("a merged PR closing a DevTask: In review -> Done, then the Story cascades to Testing", () => {
   const gh = fakeGithub([
     { number: 4, type: "UserStory", status: "In progress" },

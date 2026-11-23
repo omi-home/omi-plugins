@@ -43,6 +43,9 @@ export function projectSync(
     const patches: SnapshotItem[] = [];
     let complete = false;
     try {
+      // A warning is posted before its revert is written, and the snapshot learns an Issue only after
+      // its write: a failure anywhere makes the next run see the change again and retry, never silently.
+      const revertOf = new Map(plan.reverted.map((r) => [r.issue, r]));
       applyWrites(
         config,
         plan.writes,
@@ -51,15 +54,17 @@ export function projectSync(
           if (s) patches.push(s);
         },
         run,
+        (w: ItemWrite) => {
+          const r = revertOf.get(w.issue);
+          if (!r) return;
+          commentOn(
+            config,
+            r.issue,
+            `omi sync: ${r.type} #${r.issue} was moved to ${r.from}, which ${r.reason}. Restoring ${r.to}. Status changes the PO may make are listed in the workflow.`,
+            run,
+          );
+        },
       );
-      for (const r of plan.reverted) {
-        commentOn(
-          config,
-          r.issue,
-          `omi sync: ${r.type} #${r.issue} was moved to ${r.from}, which ${r.reason}. Restored to ${r.to}. Status changes the PO may make are listed in the workflow.`,
-          run,
-        );
-      }
       for (const m of milestonesToClose) closeMilestone(config, m, run);
       complete = true;
     } finally {

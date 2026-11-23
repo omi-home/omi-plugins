@@ -127,18 +127,29 @@ export function planSync(
       a.issue - b.issue,
   );
 
+  // The report states the final outcome: a revert reports the status finally written, and one the
+  // fixpoint moved back to what the PO set is no revert at all.
+  const finalStatus = new Map(items.map((i) => [i.number, i.status]));
+  const finalReverted = reverted
+    .map((r) => ({ ...r, to: finalStatus.get(r.issue) ?? r.to }))
+    .filter((r) => r.to !== r.from);
+  const stillClosed = new Set(items.filter((i) => i.state === "closed").map((i) => i.number));
   const closedByPr = new Set<number>(
-    fx.applied.filter((a) => a.predicate.some((p) => "issue_closed_by_pr" in p)).map((a) => a.item),
+    fx.applied
+      .filter((a) => a.predicate.some((p) => "issue_closed_by_pr" in p))
+      .map((a) => a.item)
+      .filter((n) => stillClosed.has(n)),
   );
   for (const c of changes) {
-    if (c.kind === "closed" && original.get(c.issue)?.closedByMergedPr) closedByPr.add(c.issue);
+    if (c.kind === "closed" && original.get(c.issue)?.closedByMergedPr && stillClosed.has(c.issue))
+      closedByPr.add(c.issue);
   }
 
   return {
     firstSync: previous === null,
     changes,
     poDecisions,
-    reverted,
+    reverted: finalReverted,
     applied: fx.applied,
     closedByPr: [...closedByPr].sort((a, b) => a - b),
     writes,
