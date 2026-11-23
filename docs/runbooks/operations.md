@@ -37,6 +37,8 @@ checks:
 | `review.maxRounds` | `4` (cố định) | 2 round → Architect → 2 round → Waiting PO |
 | `agents.maxConcurrent` | `3` | Dự phòng: runtime hiện chạy agent tuần tự, chưa đọc khoá này |
 | `agents.routing.<role>` | sonnet/medium; opus cho Architect, Code/Security Reviewer | `{ model, effort }`. Nâng cấp từ 11 role: đổi khoá `frontend/backend/database/devops-engineer` → `software-engineer`, `manual/automation-qa-engineer` → `qa-engineer` (khoá cũ báo `CONFIG_INVALID` kèm tên khoá cần đổi). Không có `--profile`: truyền cho `claude` qua `--model`/`--effort` (frontmatter agent chỉ là default, trùng schema); có profile thì profile quyết định |
+| `agents.contractRepairs` | `2` | Số lần runtime resume ngay session của lần chạy để agent sửa kết quả `CONTRACT_INVALID` (parse hoặc "claims do not match the worktree") trước khi BLOCKED; `0` = BLOCKED ngay như trước. 0–5 (DevTask-0142 #407) |
+| `agents.sessionMaxTokens` | `3000000` | Tổng token input (gồm cache read/creation) cộng dồn của một session role; vượt thì lần chạy sau dùng session mới với packet đầy đủ và report ghi lý do. Mặc định ≈ 50 turn × 60k context; tối thiểu 10000 |
 | `setup` | không có | `{ run, timeoutSec }` (như một check), ví dụ `{ run: npm ci }`. `omi task start` chạy trong clone mới trước agent và check; dùng lại clone thì chạy lại chỉ khi lockfile (`package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`) hoặc lệnh đổi. Lỗi/quá hạn: `SETUP_FAILED`, log đã redact ở `evidence/<run>/setup/setup.log`, không chạy agent. `omi github project init` tự ghi `setup: { run: npm ci }` khi repo có `package-lock.json`; `omi doctor` báo mục `setup` |
 | `checks.<format\|lint\|build\|test\|scan>` | không có | `{ run, timeoutSec }` (timeout mặc định 600 s); tên khác bị từ chối. Không khai báo = không có gate xác định |
 | `cleanup.deleteRemoteBranch` | `false` | Dự phòng: cleanup hiện không xoá branch remote dù đặt `true` |
@@ -84,6 +86,25 @@ Role thực thi: `software-engineer`, `qa-engineer`, `ui-ux-designer`, `code-rev
 Quyền tool: engineer chạy được `git mv` và `npm run check|arch|test|format` (có hoặc không đối số) ngoài các lệnh `checks` của repo; reviewer không có lệnh đọc shell (`grep`, `cat`, `head`, `tail`, `wc` đã gỡ, DevTask-0138 #395, Bug-0012 #391): reviewer đọc bằng tool Read/Grep/Glob của harness (giới hạn trong task workspace) và git chỉ đọc `git show|diff|log|status`. Vẫn cấm `git add|commit|push` và mọi `gh`.
 
 Luật git của hook agent (`omi hook agent-pre-tool-use`, áp cho mọi agent; quyết định PO 2026-11-23 sau DevTask-0136 #393: luật cấm theo token, không theo dõi `cd`/subshell/symlink): trong mọi segment `git` (kể cả `git.exe`, sau `VAR=x`) cả lệnh bị từ chối (`OMI: agents run git only on paths inside their task workspace.`) khi có: `--no-index`, `-c`, `--git-dir`, `--work-tree`, `--namespace`, `--exec-path`, `--output`; `-C` với thư mục khác repo của task (`OMI_REPO` trong `.claude/settings.json` của workspace); tham số có thành phần đường dẫn `..` (kể cả `HEAD:../x`, `--opt=../x`), tham số tuyệt đối (`/`, `\\`, `X:`) hoặc bắt đầu bằng `~`; ký tự `$`, backtick, `{`, `}`, `*`, `?`, `[`, `<`, `>` (và `\` trong Bash); `GIT_*=` làm tiền tố. Ref như `origin/develop...HEAD`, `HEAD~1`, `abc123:path` vẫn hợp lệ. Một `cd` trong lệnh có git cũng bị cấm khi trỏ ra ngoài (`..`, tuyệt đối, `~`, trơn, `-`). Hook không theo dõi `cd` và không resolve symlink: một symlink trong workspace trỏ ra ngoài không bị bắt. Luật token dựa vào harness giữ thư mục làm việc của Bash trong task workspace giữa các lần gọi (Claude Code đặt lại cwd đã ra ngoài); thiếu giả định này, tham số git tương đối không còn bị giới hạn. Trong lệnh có từ `git` (khớp theo từ, không phải `github`/`.gitignore`), chỉ segment `git` thuần và `cd <dir>` tương đối thuần được chạy; wrapper, `(`/`{`/`!`, popd/source/eval, CDPATH làm cả lệnh bị từ chối.
+
+### Session agent (DevTask-0142 #407)
+
+Mục tiêu: một workflow trên một ticket tốn ít quota nhất. Runtime chạy `claude -p --agent … --output-format stream-json` như cũ, thêm `--session-id <uuid>` (lần đầu) hoặc `--resume <uuid>` (chạy lại) thay cho `--no-session-persistence`. Session nằm dưới `CLAUDE_CONFIG_DIR = <taskRoot>/.omi-home/claude` (thư mục này không còn bị xoá mỗi lần chạy), nên `omi task finalize` dọn cùng workspace; không có vị trí ngoài workspace.
+
+- **Theo role trong run**: bảng `agent_session (run_id, role, session_id, tokens, context_hash)` (migration 13) chỉ cho `software-engineer` và `qa-engineer`. Code/Security Reviewer, Architect và các role phân tích luôn session mới (review độc lập); chúng chỉ được resume để sửa lỗi contract của chính lần chạy đó.
+- **Resume khi chạy lại cùng role**: sửa sau `CHECKS_FAILED`, sau finding review, `implement-fix`, sau `omi task unblock`, sau hết quota. Prompt chỉ gồm định danh bước, finding mở, kết quả check (đã redact), lý do unblock (`--reason`, đọc một lần) và `issueContext` khi Issue đổi (so băm); không gửi lại packet. `--agent`, `--allowedTools`, `--model`/`--effort` vẫn truyền lại. Packet và contract kết quả không đổi.
+- **Tự sửa contract**: kết quả `CONTRACT_INVALID` → resume session đó với danh sách issue, tối đa `agents.contractRepairs` lần, rồi mới BLOCKED. Mọi role.
+- **Fallback = session mới + packet đầy đủ**: session vượt `agents.sessionMaxTokens`, hoặc resume không nạp được session: lần resume lỗi (`is_error`) mà không có usage, hoặc `num_turns` = 0, hoặc kết quả chứa "No conversation found with session ID". Lỗi thường của agent (hết turn, lỗi trong lúc làm việc) không phải tín hiệu này và không chạy lại bằng session mới. Lý do ghi ở dòng Cost của report (`session new — …`).
+- **Report**: dòng Cost thêm `session new|resumed|repair` (`repair` = đã resume để sửa contract, kèm số lần); usage/cost của một step là tổng các lần chạy của step đó (kể cả lần sửa), mỗi step vẫn tính riêng.
+- **Probe** (`OMI_LIVE=1 npm test -- tests/integration/task-run/session-probe.test.ts`; (c) cần `OMI_PROBE_TOKEN_2`): (a) `--session-id` lưu session dưới `CLAUDE_CONFIG_DIR`; (b) `--resume` nhớ nội dung lần đầu; (c) resume với `CLAUDE_CODE_OAUTH_TOKEN` của profile khác; (d) `--model` truyền lại khi resume có hiệu lực. Kết quả chạy live trên Claude Code 2.1.325 (Coordinator, 2026-11-23, hai token profile khác nhau). Nhánh nào không đạt không cần đổi code: runtime coi lỗi resume là fallback session mới.
+
+| Probe | Kết quả |
+|---|---|
+| (a) `--session-id` lưu dưới `CLAUDE_CONFIG_DIR` | ok |
+| (b) `--resume` nhớ lần đầu | ok |
+| (c) resume với token profile khác | ok (`isError=false remembers=true`) |
+| (d) `--agent`/`--allowedTools`/`--model` khi resume | ok |
+| (d2) tool ngoài `--allowedTools` vẫn bị từ chối sau `--resume` | ok |
 
 ## 6. Escalation và khôi phục
 

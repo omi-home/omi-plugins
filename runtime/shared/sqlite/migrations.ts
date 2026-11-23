@@ -195,6 +195,22 @@ export const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE workflow_run ADD COLUMN open_findings TEXT;
   `,
+  // 13 — Claude Code session per (run, role) for the roles that keep context across reruns, and the
+  // reason of the last `omi task unblock` for the resume prompt (DevTask-0142 #407). `tokens` = input
+  // tokens incl. cache the session has used; `context_hash` = the Issue context it was given.
+  `
+  CREATE TABLE agent_session (
+    run_id        TEXT NOT NULL REFERENCES workflow_run (id),
+    role          TEXT NOT NULL,
+    session_id    TEXT NOT NULL,
+    tokens        INTEGER NOT NULL DEFAULT 0,
+    context_hash  TEXT,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    PRIMARY KEY (run_id, role)
+  );
+  ALTER TABLE workflow_run ADD COLUMN unblock_reason TEXT;
+  `,
 ];
 
 /** `label` names the database in errors ("state", "profile"). */

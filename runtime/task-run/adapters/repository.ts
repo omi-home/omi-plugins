@@ -211,6 +211,63 @@ export function saveRunFindings(db: Db, runId: string, findings: RunFindings): v
   });
 }
 
+/** The Claude Code session a role keeps across the reruns of a run (#407). */
+export interface AgentSession {
+  sessionId: string;
+  /** Input tokens (incl. cache read/creation) the session has used so far. */
+  tokens: number;
+  /** Hash of the Issue context the session was last given. */
+  contextHash: string | null;
+}
+
+export function agentSession(db: Db, runId: string, role: Role): AgentSession | undefined {
+  const r = db
+    .prepare(
+      "SELECT session_id, tokens, context_hash FROM agent_session WHERE run_id = ? AND role = ?",
+    )
+    .get(runId, role);
+  return r
+    ? {
+        sessionId: String(r.session_id),
+        tokens: Number(r.tokens),
+        contextHash: r.context_hash === null ? null : String(r.context_hash),
+      }
+    : undefined;
+}
+
+/** Records (or replaces) the session of (run, role); `tokens` is the total, not a delta. */
+export function saveAgentSession(
+  db: Db,
+  o: { runId: string; role: Role; sessionId: string; tokens: number; contextHash?: string },
+): void {
+  tx(db, "save agent session", () => {
+    const now = iso();
+    db.prepare(
+      `INSERT INTO agent_session (run_id, role, session_id, tokens, context_hash, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (run_id, role) DO UPDATE SET session_id = excluded.session_id,
+         tokens = excluded.tokens, context_hash = excluded.context_hash, updated_at = excluded.updated_at`,
+    ).run(o.runId, o.role, o.sessionId, o.tokens, o.contextHash ?? null, now, now);
+  });
+}
+
+/** Remembers why a person unblocked the run; the next agent step reads it once, whatever its session. */
+export function saveUnblockReason(db: Db, runId: string, reason: string): void {
+  tx(db, "save unblock reason", () => {
+    db.prepare("UPDATE workflow_run SET unblock_reason = ? WHERE id = ?").run(reason, runId);
+  });
+}
+
+/** The unblock reason, cleared as it is read. */
+export function takeUnblockReason(db: Db, runId: string): string | undefined {
+  return tx(db, "take unblock reason", () => {
+    const r = db.prepare("SELECT unblock_reason FROM workflow_run WHERE id = ?").get(runId);
+    if (r?.unblock_reason === null || r === undefined) return undefined;
+    db.prepare("UPDATE workflow_run SET unblock_reason = NULL WHERE id = ?").run(runId);
+    return String(r.unblock_reason);
+  });
+}
+
 export function recordReviewRound(
   db: Db,
   o: { runId: string; round: number; outcome: ReviewOutcome },

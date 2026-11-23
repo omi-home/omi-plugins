@@ -657,6 +657,12 @@ export const StepComment = z
       .optional(),
     /** A thinking block was seen in the transcript: the observable trace of effort. */
     thinkingObserved: z.boolean().optional(),
+    /** How the agent session of the step began (#407): `repair` = a contract repair resumed it. */
+    session: z.enum(["new", "resumed", "repair"]).optional(),
+    /** Why a session that could have been resumed started fresh (limit, resume failure). */
+    sessionNote: text(300).optional(),
+    /** Resumes spent on contract errors of the result of this step. */
+    contractRepairs: z.int().min(0).max(10).optional(),
     commitSha: sha.optional(),
     status: StepOutcome,
     summary: text(2000),

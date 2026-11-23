@@ -5,6 +5,7 @@
 // agent process (ADR-0001 D1) → verified result → persisted with its report → report posted
 // before the next step. The FSM decides every move; agents only recommend.
 import { spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { archShow } from "../../architecture/application/arch.ts";
@@ -13,8 +14,15 @@ import {
   acceptStepResultWithWarnings,
   buildTaskPacket,
   packetPrompt,
+  repairPrompt,
+  resumePrompt,
 } from "../../handoff/application/packet.ts";
-import type { AgentLaunch, Harness, LaunchRequest } from "../../harness/domain/harness.ts";
+import type {
+  AgentLaunch,
+  AgentObservation,
+  Harness,
+  LaunchRequest,
+} from "../../harness/domain/harness.ts";
 import type { Selection } from "../../profile/domain/selection.ts";
 import type { OmiConfig } from "../../shared/config.ts";
 import {
@@ -44,7 +52,9 @@ import { policyFrom, type WorkflowEvent } from "../domain/fsm.ts";
 import { EDITOR_NPM_SCRIPTS } from "../domain/permissions.ts";
 import type { AnalysisPlan, DeliveryPlan, WorkflowPlan } from "../domain/plan.ts";
 import type { RunRow, SkillChoice } from "../domain/run.ts";
+import { sumUsage } from "../domain/usage.ts";
 import type { RoleFilesPort, SlicePorts } from "./ports.ts";
+import { resumeNotLoaded } from "./session.ts";
 
 export interface SliceDeps {
   db: Db;
@@ -71,6 +81,12 @@ export interface SliceDeps {
   /** Writes a `<!-- omi:section=… -->` of the Issue body (the QA Engineer test cases). */
   writeSection?: (section: string, markdown: string) => void;
 }
+
+/**
+ * Roles that keep one session per run and resume it when they run again (#407). Reviewers, the
+ * Architect and the analysts always start fresh: an independent view.
+ */
+const SESSION_ROLES: readonly Role[] = ["software-engineer", "qa-engineer"];
 
 /** Suffix of the file that keeps why an agent attempt failed technically (G6-002, #121). */
 export const ERROR_SUFFIX = ".error.json";
@@ -218,6 +234,8 @@ export function prepareAgent(o: {
   route?: { model: string; effort: string };
   /** Skills installed into the task workspace for this run (#199). */
   skills?: string[];
+  /** The harness session of the run (#407). */
+  session?: LaunchRequest["session"];
 }): AgentLaunch {
   const rel = relative(o.taskRoot, o.worktree);
   // ponytail: outside the task workspace (analysis) the absolute path must be typed verbatim.
@@ -373,48 +391,164 @@ function agentStep(
       writeFileSync(file, JSON.stringify(packet, null, 2));
       addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "task-packet", path: file });
       const started = Date.now();
-      const stdout = (d.runAgent ?? ((l: AgentLaunch) => d.harness.run(l)))(
-        prepareAgent({
-          harness: d.harness,
-          roleFiles: d.ports.roleFiles,
-          pluginRoot: d.pluginRoot,
-          role: spec.role,
-          category: spec.category,
-          edits: spec.edits,
-          taskRoot: t.taskRoot,
-          worktree: t.worktree,
-          runsChecks: spec.runsChecks,
-          checks: Object.values(config.checks).flatMap((c) => (c ? [c.run] : [])),
-          prompt: packetPrompt(packet),
-          hostEnv: d.hostEnv,
-          selection: sel,
-          route,
-          skills,
-        }),
-      );
-      const quota = d.harness.detectQuota(stdout);
-      if (quota) {
-        const name = sel?.profile.name ?? "default";
-        const n = t.run.issue;
-        throw new OmiError(
-          "QUOTA_EXHAUSTED",
-          `profile ${name} is out of quota (${quota.signal}): PO sets "disabled": true for it in .omi-plugins/omi.config.json; Coordinator runs \`omi task unblock ${n}\` then \`omi task run ${n} --profile <another>\``,
-          { profile: name, signal: quota.signal, event: quota.event },
+      const checkList = Object.values(config.checks).flatMap((c) => (c ? [c.run] : []));
+      const runAgent = d.runAgent ?? ((l: AgentLaunch) => d.harness.run(l));
+      // Session (#407): Software Engineer and QA Engineer keep one per run and resume it; every
+      // other role starts fresh (independent review), but its run still has an id so a contract
+      // repair can resume it.
+      const persists = SESSION_ROLES.includes(spec.role);
+      const contextHash = createHash("sha256")
+        .update(JSON.stringify(fetched.issueContext))
+        .digest("hex");
+      const saved = persists ? d.ports.store.agentSession(db, t.run.id, spec.role) : undefined;
+      let sessionNote: string | undefined;
+      let resumes = false;
+      if (saved && saved.tokens > config.agents.sessionMaxTokens) {
+        sessionNote = `session used ${saved.tokens} input tokens, over agents.sessionMaxTokens (${config.agents.sessionMaxTokens}): new session with the full packet`;
+      } else resumes = saved !== undefined;
+      let sessionId = resumes && saved ? saved.sessionId : randomUUID();
+      let sessionTokens = resumes && saved ? saved.tokens : 0;
+      const runs: AgentObservation[] = [];
+      const denials: string[] = [];
+      /** One agent process in the session: quota → error; observed, counted and remembered. */
+      const runOnce = (prompt: string, mode: "new" | "resume"): AgentObservation => {
+        const stdout = runAgent(
+          prepareAgent({
+            harness: d.harness,
+            roleFiles: d.ports.roleFiles,
+            pluginRoot: d.pluginRoot,
+            role: spec.role,
+            category: spec.category,
+            edits: spec.edits,
+            taskRoot: t.taskRoot,
+            worktree: t.worktree,
+            runsChecks: spec.runsChecks,
+            checks: checkList,
+            prompt,
+            hostEnv: d.hostEnv,
+            selection: sel,
+            route,
+            skills,
+            session: { mode, id: sessionId },
+          }),
         );
+        const quota = d.harness.detectQuota(stdout);
+        if (quota) {
+          const name = sel?.profile.name ?? "default";
+          const n = t.run.issue;
+          throw new OmiError(
+            "QUOTA_EXHAUSTED",
+            `profile ${name} is out of quota (${quota.signal}): PO sets "disabled": true for it in .omi-plugins/omi.config.json; Coordinator runs \`omi task unblock ${n}\` then \`omi task run ${n} --profile <another>\``,
+            { profile: name, signal: quota.signal, event: quota.event },
+          );
+        }
+        const o = d.harness.observe(stdout);
+        runs.push(o);
+        const u = o.usage;
+        sessionTokens +=
+          (u?.inputTokens ?? 0) + (u?.cacheReadTokens ?? 0) + (u?.cacheCreationTokens ?? 0);
+        if (persists) {
+          d.ports.store.saveAgentSession(db, {
+            runId: t.run.id,
+            role: spec.role,
+            sessionId,
+            tokens: sessionTokens,
+            contextHash,
+          });
+        }
+        // Kept even when the attempt errors: the refused commands explain a BLOCKED step (#252).
+        denials.push(...o.permissionDenials.map((s) => cut(s, 300)));
+        if (denials.length) {
+          const file = join(d.evidenceDir, `${spec.stepId}-r${ctx.round}-a${attempt}.denials.json`);
+          writeFileSync(file, JSON.stringify(redactDeep(denials.slice(0, 50)), null, 2));
+          addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "log", path: file });
+        }
+        return o;
+      };
+      let obs: AgentObservation;
+      // The unblock reason belongs to the step rerun right after `task unblock`, whoever runs it (#407).
+      const unblocked = d.ports.store.takeUnblockReason(db, t.run.id);
+      const unblockNotes = unblocked ? [`A person unblocked the run: ${cut(unblocked, 1000)}`] : [];
+      if (resumes) {
+        const notes: string[] = [...unblockNotes];
+        const issueChanged = saved?.contextHash !== null && saved?.contextHash !== contextHash;
+        if (issueChanged) notes.push("The Issue or its parents changed since your last run.");
+        try {
+          obs = runOnce(
+            resumePrompt(packet, {
+              openFindings: packet.openFindings,
+              checkResults: packet.checkResults?.map((c) => ({
+                ...c,
+                summary: cut(c.summary, 1000),
+              })),
+              notes,
+              ...(issueChanged ? { issueContext: packet.issueContext } : {}),
+            }),
+            "resume",
+          );
+          // Only a session that could not be loaded starts over; a real agent error is a normal failed attempt.
+          if (resumeNotLoaded(obs)) {
+            throw new OmiError("INTERNAL", "resumed run ended in an error");
+          }
+        } catch (e) {
+          if (e instanceof OmiError && e.code === "QUOTA_EXHAUSTED") throw e;
+          // The session is gone or unusable (e.g. another profile's token): start over with the whole packet.
+          sessionNote = cut(
+            `resume failed (${(e as Error).message}): new session with the full packet`,
+            300,
+          );
+          resumes = false;
+          sessionId = randomUUID();
+          sessionTokens = 0;
+          obs = runOnce(packetPrompt({ ...packet, priorAttemptCut: true }, unblockNotes), "new");
+        }
+      } else {
+        obs = runOnce(packetPrompt(packet, unblockNotes), "new");
       }
-      const obs = d.harness.observe(stdout);
-      // Kept even when the attempt errors: the refused commands explain a BLOCKED step (#252).
-      const denials = obs.permissionDenials.map((s) => cut(s, 300)).slice(0, 50);
-      if (denials.length) {
-        const file = join(d.evidenceDir, `${spec.stepId}-r${ctx.round}-a${attempt}.denials.json`);
-        writeFileSync(file, JSON.stringify(redactDeep(denials), null, 2));
-        addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "log", path: file });
-      }
-      const durationMs = obs.durationMs ?? Date.now() - started;
       if (obs.isError) throw new OmiError("INTERNAL", `${spec.role} run ended in an error`);
       // Token usage is what the host observed, never what the agent claims.
-      rawOutput = obs.result;
-      const accepted = acceptStepResultWithWarnings(packet, obs.result);
+      let repairs = 0;
+      let accepted: ReturnType<typeof acceptStepResultWithWarnings>;
+      for (;;) {
+        rawOutput = obs.result;
+        try {
+          accepted = acceptStepResultWithWarnings(packet, obs.result);
+          break;
+        } catch (e) {
+          // A refused result is repaired in the very session that wrote it, before BLOCKED (#407).
+          if (
+            !(e instanceof OmiError && e.code === "CONTRACT_INVALID") ||
+            repairs >= config.agents.contractRepairs
+          ) {
+            throw e;
+          }
+          repairs++;
+          const issues = (e.details as { issues?: { path: string; message: string }[] } | undefined)
+            ?.issues;
+          obs = runOnce(
+            repairPrompt(packet, { message: e.message, issues: issues ?? [] }),
+            "resume",
+          );
+          if (obs.isError)
+            throw new OmiError("INTERNAL", `${spec.role} repair run ended in an error`);
+        }
+      }
+      const models = [...new Set(runs.flatMap((r) => r.actualModel.split(",")))].filter(
+        (m) => m !== "unknown",
+      );
+      const observed = {
+        actualModel: models.length ? models.join(",") : "unknown",
+        thinkingObserved: runs.some((r) => r.thinkingObserved),
+        usage: sumUsage(runs.flatMap((r) => (r.usage ? [r.usage] : []))),
+      };
+      const durationMs = runs.every((r) => r.durationMs !== undefined)
+        ? runs.reduce((n, r) => n + (r.durationMs ?? 0), 0)
+        : Date.now() - started;
+      const sessionKind: "new" | "resumed" | "repair" = repairs
+        ? "repair"
+        : resumes
+          ? "resumed"
+          : "new";
       const { usage: _claimed, ...claimed } = accepted.result;
       const warnings = accepted.warnings.map((w) => cut(`step result field cut: ${w}`, 300));
       if (warnings.length) {
@@ -428,7 +562,7 @@ function agentStep(
         addArtifact(db, { runId: t.run.id, stepRunId: step.id, kind: "log", path: outFile });
       }
       rawOutput = undefined;
-      let result: StepResult = obs.usage ? { ...claimed, usage: obs.usage } : claimed;
+      let result: StepResult = observed.usage ? { ...claimed, usage: observed.usage } : claimed;
       if (spec.edits && result.status === "PASSED") {
         // The runtime commits, not the agent (#262): its own claim of a SHA is dropped.
         const { commitSha: _sha, ...rest } = result;
@@ -441,7 +575,7 @@ function agentStep(
           attempt,
           stepId: spec.stepId,
           scope: spec.role.replace(/-engineer$/, ""),
-          model: obs.actualModel,
+          model: observed.actualModel,
         });
         result = sha
           ? { ...rest, commitSha: sha }
@@ -461,20 +595,23 @@ function agentStep(
           attempt,
           executor: spec.role,
           requestedModel: sel?.model ?? route.model,
-          actualModel: obs.actualModel,
+          actualModel: observed.actualModel,
           requestedEffort: sel?.effort ?? route.effort,
           actualEffort: "unknown",
           ...(sel ? { profile: sel.profile.name } : {}),
           ...(reason ? { selectionReason: reason } : {}),
           skills,
-          thinkingObserved: obs.thinkingObserved,
+          thinkingObserved: observed.thinkingObserved,
+          session: sessionKind,
+          ...(sessionNote ? { sessionNote } : {}),
+          contractRepairs: repairs,
           commitSha: result.commitSha,
           status: result.status,
           summary: result.summary,
           changedFiles: result.changedFiles,
           evidencePaths: result.evidencePaths,
           findings: result.findings,
-          ...(denials.length ? { permissionDenials: denials } : {}),
+          ...(denials.length ? { permissionDenials: denials.slice(0, 50) } : {}),
           ...(warnings.length ? { warnings } : {}),
           usage: result.usage,
           durationMs,
@@ -486,7 +623,7 @@ function agentStep(
       );
       report = {
         result,
-        actualModel: obs.actualModel,
+        actualModel: observed.actualModel,
         marker: commentMarker(comment),
         body: renderStepReport(comment),
       };

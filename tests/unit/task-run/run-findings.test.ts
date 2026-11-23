@@ -82,7 +82,7 @@ test("migration 12 upgrades a version-11 database in place: rows kept, no findin
   old.exec(
     "INSERT INTO workflow_run (id, repository, issue, workflow, state, created_at, updated_at) VALUES ('r1','o/r',1,'dev-task','BLOCKED','t','t')",
   );
-  assert.equal(migrate(old), 12);
+  assert.equal(migrate(old), 13);
   assert.equal(
     old.prepare("SELECT state FROM workflow_run WHERE id = 'r1'").get()?.state,
     "BLOCKED",

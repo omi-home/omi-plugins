@@ -1,6 +1,6 @@
 // Claude Code adapter of the `Harness` port: one `claude -p --agent` process per step.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { OmiError } from "../../../shared/errors/errors.ts";
 import { AGENT_PACK, type AgentLaunch, type Harness } from "../../domain/harness.ts";
 import {
@@ -25,7 +25,8 @@ export const spawnAgent = (l: AgentLaunch): string => {
       `${AUTH_ENV} is not set: run \`claude setup-token\` and export it, or pick a profile (agents do not use the host login)`,
     );
   }
-  rmSync(l.configDir, { recursive: true, force: true }); // a fresh config dir per run (D5)
+  // Not wiped: sessions of the task's roles live under it (#407); it sits in the task workspace,
+  // so `omi task finalize` removes it with the workspace.
   mkdirSync(l.configDir, { recursive: true });
   const r = spawnSync(l.command, l.args, {
     cwd: l.cwd,

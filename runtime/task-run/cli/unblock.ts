@@ -15,6 +15,7 @@ import {
 } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { graphql, spawnGh } from "../../shared/github/client.ts";
+import { redact } from "../../shared/redact.ts";
 import { openState, statePath } from "../../shared/sqlite/db.ts";
 import {
   acquireLease,
@@ -23,6 +24,7 @@ import {
   liveRun,
   releaseLease,
   runContext,
+  saveUnblockReason,
   transitions,
 } from "../adapters/repository.ts";
 import { PROJECT_STATUS, transition } from "../domain/fsm.ts";
@@ -100,6 +102,8 @@ export function taskUnblock(
       );
       const body = deps.reports.render(comment);
       const { run, context } = advanceRun(db, found.id, { type: "UNBLOCK" });
+      if (deps.reason?.trim())
+        saveUnblockReason(db, run.id, redact(deps.reason.trim()).slice(0, 1000));
       enqueueReport(db, { runId: run.id, marker: commentMarker(comment), body });
       deps.reports.publish(db, run.id, { gh }); // a failure leaves it pending: `task run` posts it
       // A failure here leaves the board behind; `omi task run` sets it from the run state.

@@ -4,6 +4,7 @@
 import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
@@ -61,7 +62,7 @@ interface Script {
   /** This analyst stops with an open question. */
   analysisBlocks?: string;
   /** QA Engineer verdicts, one per QA run (default PASSED); INVALID cites an absolute path. */
-  qa?: (Verdict | "INVALID")[];
+  qa?: (Verdict | "INVALID" | "NOSECTION")[];
   /** QA Engineer leaves a stray file in the worktree (#124). */
   qaDirties?: boolean;
   /** Engineer leaves an uncommitted file after its first step (release validation). */
@@ -175,13 +176,13 @@ function stubAgents(script: Script) {
     } else if (role === "qa-engineer" && /^qa(-|$)/.test(packet.stepId)) {
       const q = script.qa?.shift() ?? "PASSED";
       if (script.qaDirties) writeFileSync(join(packet.worktree, "qa-scratch.txt"), "x");
-      const v = q === "INVALID" ? "PASSED" : q;
+      const v = q === "INVALID" || q === "NOSECTION" ? "PASSED" : q;
       result = {
         ...base,
         status: v,
         ...(q === "INVALID" ? { evidencePaths: ["/abs/.git/omi/evidence/test.log"] } : {}),
         summary: `qa ${packet.stepId}`,
-        ...(v === "PASSED"
+        ...(v === "PASSED" && q !== "NOSECTION"
           ? { sectionUpdates: [{ section: "qa", markdown: "### Test cases" }] }
           : {}),
         findings:
@@ -298,7 +299,12 @@ function stubAgents(script: Script) {
   return { calls, packets, launches, runAgent };
 }
 
-function setup(script: Script = {}, plan?: WorkflowPlan, dbPath = ":memory:") {
+function setup(
+  script: Script = {},
+  plan?: WorkflowPlan,
+  dbPath = ":memory:",
+  agentsConfig: Record<string, unknown> = {},
+) {
   const { dir, base } = worktree();
   const db = openState(dbPath);
   const run = repo.createRun(db, {
@@ -311,6 +317,7 @@ function setup(script: Script = {}, plan?: WorkflowPlan, dbPath = ":memory:") {
   const config = parseConfig({
     github: { owner: "o", repo: "r", projectNumber: 1 },
     checks: { test: { run: `node -e "process.exit(require('fs').existsSync('broken')?1:0)"` } },
+    agents: agentsConfig,
   });
   const gh = fakeGitHub();
   const agents = stubAgents(script);
@@ -368,7 +375,7 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
   // Cost row: host-observed tokens, cache hit, list-price cost and host duration (spec §14).
   assert.match(
     s.gh.comments[0]?.body ?? "",
-    /\| Cost \| 100 in \/ 20 out tokens · 7 thinking · 5 cache read \(5% hit\) · 3 turns · ≈ \$0\.0123 \(list-price estimate\) · 4\.2 s wall \|/,
+    /\| Cost \| 100 in \/ 20 out tokens · 7 thinking · 5 cache read \(5% hit\) · 3 turns · ≈ \$0\.0123 \(list-price estimate\) · 4\.2 s wall · session new \|/,
   );
   assert.match(
     s.gh.comments[1]?.body ?? "",
@@ -693,7 +700,14 @@ test("PO resume after a critical finding re-runs the Security Reviewer, not its 
 const sec001 = (p: TaskPacket | undefined) => p?.openFindings.map((f) => f.id);
 
 test("FAILED security review → Architect BLOCKED → unblock → run: the Architect and round 3 get SEC-001 (#392)", () => {
-  const s = setup({ securityVerdicts: ["FAILED", "FAILED"] }, delivery({ security: true }));
+  const s = setup(
+    { securityVerdicts: ["FAILED", "FAILED"] },
+    delivery({ security: true }),
+    ":memory:",
+    {
+      contractRepairs: 0, // this test is about the BLOCKED path itself
+    },
+  );
   const real = s.deps.runAgent;
   let garbage = true;
   // First Architect answer is refused (CONTRACT_INVALID): the run is BLOCKED, as in run 382-7407f8b8.
@@ -974,7 +988,9 @@ test("agent BLOCKED → unblock → run: that step runs again, PASSED steps repl
 });
 
 test("QA Engineer technical failure: unblocked run resumes in QA and still gets checks (#121)", () => {
-  const s = setup({ qa: ["INVALID", "PASSED"] }, delivery({ manualQa: true }));
+  const s = setup({ qa: ["INVALID", "PASSED"] }, delivery({ manualQa: true }), ":memory:", {
+    contractRepairs: 0,
+  });
   assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
   assert.equal(lastStepError(s.deps.evidenceDir)?.code, "CONTRACT_INVALID");
   // A new invocation after the unblock has no in-memory checks of the first one.
@@ -1469,4 +1485,272 @@ test("profile chosen (#217): every agent runs on it; state and report record the
       reason: "hard review",
     },
   );
+});
+
+// ---- DevTask-0142 #407: sessions per role, resume on rerun, contract repair ----
+
+const isRole = (l: AgentLaunch, role: string) => l.stdin.includes(`"role": "${role}"`);
+const flag = (l: AgentLaunch, name: string) => l.args[l.args.indexOf(name) + 1];
+const sessionOf = (l: AgentLaunch) => flag(l, "--session-id") ?? flag(l, "--resume");
+const reportOf = (s: ReturnType<typeof setup>, step: string) =>
+  s.gh.comments.map((c) => c.body).find((b) => b.includes(`step=${step};`)) ?? "";
+
+test("a rerun of the engineer resumes its session with a delta prompt; reviewers never resume (#407)", () => {
+  const s = setup({ breakChecksInRound: 1, review: (r) => (r === 1 ? "FAILED" : "PASSED") });
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const eng = s.agents.launches.filter((l) => isRole(l, "software-engineer"));
+  assert.equal(eng.length, 3, "implement, fix after CHECKS_FAILED, round 2 after the review");
+  const first = eng[0] as AgentLaunch;
+  const id = flag(first, "--session-id");
+  assert.match(id ?? "", /^[0-9a-f-]{36}$/);
+  assert.ok(!first.args.includes("--resume") && !first.args.includes("--no-session-persistence"));
+  for (const l of eng.slice(1)) {
+    assert.equal(flag(l, "--resume"), id, "same session id as the first run");
+    assert.ok(!l.args.includes("--session-id"));
+    assert.ok(l.args.includes("--agent") && l.args.includes("--allowedTools"));
+    assert.match(l.stdin, /"resumed": true/);
+    assert.ok(!l.stdin.includes('"issueContext"'), "the Issue is not sent again");
+    assert.ok(l.stdin.length < first.stdin.length / 2, "delta, not the whole packet");
+  }
+  assert.match((eng[1] as AgentLaunch).stdin, /CHK-001/, "failed check result in the delta");
+  assert.match((eng[2] as AgentLaunch).stdin, /CR-001/, "open review finding in the delta");
+  const reviews = s.agents.launches.filter((l) => isRole(l, "code-reviewer"));
+  assert.equal(reviews.length, 2);
+  for (const l of reviews) assert.ok(!l.args.includes("--resume"), "independent review");
+  assert.notEqual(sessionOf(reviews[0] as AgentLaunch), sessionOf(reviews[1] as AgentLaunch));
+  assert.match(reportOf(s, "implement"), /session new/);
+  assert.match(reportOf(s, "implement-fix1"), /session resumed/);
+});
+
+test("a result refused as CONTRACT_INVALID is repaired in the same session, not BLOCKED (#407)", () => {
+  const s = setup({ qa: ["INVALID", "PASSED"] }, delivery({ manualQa: true }));
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const qa = s.agents.launches.filter((l) => isRole(l, "qa-engineer"));
+  assert.equal(qa.length, 2);
+  assert.equal(flag(qa[1] as AgentLaunch, "--resume"), flag(qa[0] as AgentLaunch, "--session-id"));
+  assert.match((qa[1] as AgentLaunch).stdin, /"repair": true/);
+  assert.match((qa[1] as AgentLaunch).stdin, /evidencePaths\.0/, "the contract issues are listed");
+  assert.match(reportOf(s, "qa"), /session repair \(1 contract repair\)/);
+});
+
+test("three wrong results in a row (two repairs) still BLOCK the run (#407)", () => {
+  const s = setup({ qa: ["INVALID", "INVALID", "INVALID"] }, delivery({ manualQa: true }));
+  assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
+  assert.equal(lastStepError(s.deps.evidenceDir)?.code, "CONTRACT_INVALID");
+  assert.equal(s.agents.launches.filter((l) => isRole(l, "qa-engineer")).length, 3);
+});
+
+test("agents.contractRepairs caps the repairs; 0 keeps the old BLOCKED behaviour (#407)", () => {
+  const s = setup({ qa: ["INVALID", "PASSED"] }, delivery({ manualQa: true }), ":memory:", {
+    contractRepairs: 0,
+  });
+  assert.equal(runSlice(s.deps, s.target).state, "BLOCKED");
+  assert.equal(s.agents.launches.filter((l) => isRole(l, "qa-engineer")).length, 1);
+});
+
+test("a reviewer repairs its own result in the session of that run (#407)", () => {
+  const s = setup();
+  const real = s.deps.runAgent;
+  let garbage = true;
+  const seen: AgentLaunch[] = [];
+  const runAgent = (l: AgentLaunch) => {
+    seen.push(l);
+    if (!garbage || !isRole(l, "code-reviewer")) return real(l);
+    garbage = false;
+    return JSON.stringify({ type: "result", is_error: false, result: "no json", usage: {} });
+  };
+  assert.equal(runSlice({ ...s.deps, runAgent }, s.target).state, "PR_PENDING");
+  const rev = seen.filter((l) => isRole(l, "code-reviewer"));
+  assert.equal(rev.length, 2);
+  assert.equal(
+    flag(rev[1] as AgentLaunch, "--resume"),
+    flag(rev[0] as AgentLaunch, "--session-id"),
+  );
+});
+
+test("a session over agents.sessionMaxTokens is replaced by a new one with the full packet (#407)", () => {
+  const s = setup({}, undefined, ":memory:", { sessionMaxTokens: 10_000 });
+  const old = randomUUID();
+  repo.saveAgentSession(s.db, {
+    runId: "run",
+    role: "software-engineer",
+    sessionId: old,
+    tokens: 20_000,
+  });
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const eng = s.agents.launches.find((l) => isRole(l, "software-engineer")) as AgentLaunch;
+  assert.ok(!eng.args.includes("--resume"));
+  assert.notEqual(flag(eng, "--session-id"), old);
+  assert.match(eng.stdin, /"issueContext"/, "the full packet");
+  assert.match(
+    reportOf(s, "implement"),
+    /session new — session used 20000 input tokens, over agents\.sessionMaxTokens/,
+  );
+});
+
+test("a resume that fails starts a new session with the full packet and says why (#407)", () => {
+  const s = setup();
+  const old = randomUUID();
+  repo.saveAgentSession(s.db, {
+    runId: "run",
+    role: "software-engineer",
+    sessionId: old,
+    tokens: 5,
+  });
+  const real = s.deps.runAgent;
+  const seen: AgentLaunch[] = [];
+  const runAgent = (l: AgentLaunch) => {
+    seen.push(l);
+    return l.args.includes("--resume")
+      ? JSON.stringify({ type: "result", is_error: true, result: "No conversation found" })
+      : real(l);
+  };
+  assert.equal(runSlice({ ...s.deps, runAgent }, s.target).state, "PR_PENDING");
+  const eng = seen.filter((l) => isRole(l, "software-engineer"));
+  assert.equal(flag(eng[0] as AgentLaunch, "--resume"), old);
+  const fresh = eng[1] as AgentLaunch;
+  assert.ok(!fresh.args.includes("--resume"));
+  assert.notEqual(flag(fresh, "--session-id"), old);
+  assert.match(fresh.stdin, /"issueContext"/);
+  assert.match(reportOf(s, "implement"), /resume failed/);
+  assert.equal(
+    repo.agentSession(s.db, "run", "software-engineer")?.sessionId,
+    flag(fresh, "--session-id"),
+  );
+});
+
+test("the reason of `task unblock` reaches the resumed session once (#407)", () => {
+  const s = setup();
+  const old = randomUUID();
+  repo.saveAgentSession(s.db, {
+    runId: "run",
+    role: "software-engineer",
+    sessionId: old,
+    tokens: 5,
+  });
+  repo.saveUnblockReason(s.db, "run", "PO: use the greet.ts module");
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const eng = s.agents.launches.find((l) => isRole(l, "software-engineer")) as AgentLaunch;
+  assert.equal(flag(eng, "--resume"), old);
+  assert.match(eng.stdin, /A person unblocked the run: PO: use the greet\.ts module/);
+  assert.equal(repo.takeUnblockReason(s.db, "run"), undefined, "read once");
+});
+
+test("the unblock reason is spent by the step rerun after the unblock, not kept for a later resume (#407)", () => {
+  const s = setup({ review: (r) => (r === 1 ? "FAILED" : "PASSED") }, undefined, ":memory:", {
+    sessionMaxTokens: 10_000,
+  });
+  repo.saveAgentSession(s.db, {
+    runId: "run",
+    role: "software-engineer",
+    sessionId: randomUUID(),
+    tokens: 20_000,
+  });
+  repo.saveUnblockReason(s.db, "run", "PO: use the greet.ts module");
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const eng = s.agents.launches.filter((l) => isRole(l, "software-engineer"));
+  assert.equal(eng.length, 2);
+  assert.ok(!(eng[0] as AgentLaunch).args.includes("--resume"), "over the limit: new session");
+  assert.match(
+    (eng[0] as AgentLaunch).stdin,
+    /A person unblocked the run: PO: use the greet\.ts module/,
+  );
+  assert.ok((eng[1] as AgentLaunch).args.includes("--resume"));
+  assert.ok(!(eng[1] as AgentLaunch).stdin.includes("A person unblocked the run"));
+});
+
+test("the unblock reason survives a failed resume and reaches the fallback full packet (#407)", () => {
+  const s = setup();
+  repo.saveAgentSession(s.db, {
+    runId: "run",
+    role: "software-engineer",
+    sessionId: randomUUID(),
+    tokens: 5,
+  });
+  repo.saveUnblockReason(s.db, "run", "PO: use the greet.ts module");
+  const real = s.deps.runAgent;
+  const seen: AgentLaunch[] = [];
+  const runAgent = (l: AgentLaunch) => {
+    seen.push(l);
+    return l.args.includes("--resume")
+      ? JSON.stringify({
+          type: "result",
+          is_error: true,
+          result: "No conversation found with session ID x",
+        })
+      : real(l);
+  };
+  assert.equal(runSlice({ ...s.deps, runAgent }, s.target).state, "PR_PENDING");
+  const eng = seen.filter((l) => isRole(l, "software-engineer"));
+  const fresh = eng[1] as AgentLaunch;
+  assert.ok(!fresh.args.includes("--resume"));
+  assert.match(fresh.stdin, /"issueContext"/);
+  assert.match(fresh.stdin, /A person unblocked the run: PO: use the greet\.ts module/);
+  assert.equal(repo.takeUnblockReason(s.db, "run"), undefined);
+});
+
+test("an agent error whose text mentions session and oauth is not a lost session (#407)", () => {
+  const s = setup();
+  repo.saveAgentSession(s.db, {
+    runId: "run",
+    role: "software-engineer",
+    sessionId: randomUUID(),
+    tokens: 5,
+  });
+  const real = s.deps.runAgent;
+  const seen: AgentLaunch[] = [];
+  const runAgent = (l: AgentLaunch) => {
+    seen.push(l);
+    if (!l.args.includes("--resume")) return real(l);
+    return JSON.stringify({
+      type: "result",
+      is_error: true,
+      result: "fixing the session token refresh failed (oauth)",
+      num_turns: 30,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+  };
+  runSlice({ ...s.deps, runAgent }, s.target);
+  assert.equal(seen.filter((l) => isRole(l, "software-engineer")).length, 1);
+});
+
+test("a resumed run that ends in an ordinary agent error is not restarted in a fresh session (#407)", () => {
+  const s = setup();
+  repo.saveAgentSession(s.db, {
+    runId: "run",
+    role: "software-engineer",
+    sessionId: randomUUID(),
+    tokens: 5,
+  });
+  const real = s.deps.runAgent;
+  const seen: AgentLaunch[] = [];
+  let failed = false;
+  const runAgent = (l: AgentLaunch) => {
+    seen.push(l);
+    if (failed || !l.args.includes("--resume")) return real(l);
+    failed = true;
+    return JSON.stringify({
+      type: "result",
+      is_error: true,
+      subtype: "error_max_turns",
+      result: "Reached max turns",
+      num_turns: 30,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+  };
+  runSlice({ ...s.deps, runAgent }, s.target);
+  const eng = seen.filter((l) => isRole(l, "software-engineer"));
+  assert.equal(eng.length, 1, "no second, fresh full-packet run in the same attempt");
+  assert.ok((eng[0] as AgentLaunch).args.includes("--resume"));
+  assert.ok(!(eng[0] as AgentLaunch).stdin.includes('"issueContext"'));
+});
+
+test("QA PASSED without its section is repaired in the session and the step PASSES (#407)", () => {
+  const s = setup({ qa: ["NOSECTION", "PASSED"] }, delivery({ manualQa: true }));
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const qa = s.agents.launches.filter((l) => isRole(l, "qa-engineer"));
+  assert.equal(qa.length, 2);
+  assert.match((qa[1] as AgentLaunch).stdin, /PASSED without its section/);
+  assert.equal(flag(qa[1] as AgentLaunch, "--resume"), flag(qa[0] as AgentLaunch, "--session-id"));
+  assert.match(reportOf(s, "qa"), /session repair \(1 contract repair\)/);
 });
