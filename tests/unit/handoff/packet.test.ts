@@ -15,7 +15,7 @@ const packet = (dir: string, architecture?: unknown) =>
     workflowRunId: "r1",
     issue: { repository: "o/r", number: 1 },
     stepId: "implement",
-    role: "backend-engineer",
+    role: "software-engineer",
     round: 1,
     attempt: 1,
     scope: [],

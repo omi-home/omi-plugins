@@ -31,7 +31,7 @@ const live = hasClaude && process.env.OMI_LIVE === "1";
 const worktree = () => mkdtempSync(join(tmpdir(), "omi-t14-"));
 
 test("the canary is a default skill of the Backend Engineer", () =>
-  assert.ok(roleSkills(pluginRoot, "backend-engineer").default.includes(CANARY)));
+  assert.ok(roleSkills(pluginRoot, "software-engineer").default.includes(CANARY)));
 
 /** `/context` of a fresh session with `--plugin-dir <dir>` (no tokens spent). */
 const context = (dir: string) => {
@@ -90,7 +90,7 @@ test("agent run in a task workspace: exactly the installed skills are listed (#1
   skip: !hasClaude && "claude CLI not on PATH",
 }, () => {
   const taskRoot = worktree();
-  const role = "backend-engineer";
+  const role = "software-engineer";
   const skills = [...roleSkills(pluginRoot, role).default, "minimal-change"];
   writeRoleFiles({
     taskRoot,
@@ -128,7 +128,7 @@ const runAgent = (roleFiles: boolean) => {
   mkdirSync(repo);
   const o = {
     pluginRoot,
-    role: "backend-engineer" as const,
+    role: "software-engineer" as const,
     taskRoot,
     worktree: repo,
     prompt: "Which skills are available to you? Reply with their names only.",

@@ -21,7 +21,7 @@ const base = {
   stepTitle: "Step",
   round: 2,
   attempt: 1,
-  executor: "backend-engineer",
+  executor: "software-engineer",
   requestedModel: "opus",
   actualModel: "claude-opus-5-5",
   requestedEffort: "medium",

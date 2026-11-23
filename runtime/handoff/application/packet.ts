@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import {
   FINDING_PREFIX,
+  isAcceptanceQaStep,
   PASSED_REQUIRES,
   parseContract,
   READ_ONLY_ROLES,
@@ -301,7 +302,9 @@ export function acceptStepResultWithWarnings(
   const changedFiles = READ_ONLY_ROLES.includes(r.role)
     ? []
     : [...changedSince(packet.worktree, packet.baseSha)].sort();
-  const needs = r.status === "PASSED" ? PASSED_REQUIRES[r.role] : undefined;
+  const required = r.status === "PASSED" ? PASSED_REQUIRES[r.role] : undefined;
+  const needs =
+    required === "by-step" ? (isAcceptanceQaStep(packet.stepId) ? "section" : "files") : required;
   if (needs === "files" && !changedFiles.length) {
     issues.push({ path: "changedFiles", message: `${r.role} PASSED without changing a file` });
   }

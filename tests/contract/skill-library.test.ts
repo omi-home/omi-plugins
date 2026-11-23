@@ -63,7 +63,7 @@ test("adapted skills cite repo, path and commit listed in THIRD_PARTY_NOTICES", 
 
 test("every role declares default and allowed skills that exist; each skill has a role", () => {
   const used = new Set<string>();
-  assert.equal(roles.length, 11);
+  assert.equal(roles.length, 7);
   for (const role of roles) {
     const s = roleSkills(pluginRoot, role as Role);
     assert.ok(s.default.length >= 1 && s.default.length <= 3, `${role}: default ≤ 3`);

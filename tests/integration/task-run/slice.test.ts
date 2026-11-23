@@ -170,7 +170,7 @@ function stubAgents(script: Script) {
           ? { blockerReason: "PO must decide the scope" }
           : { sectionUpdates: [{ section, markdown: `### ${section} by ${role}` }] }),
       };
-    } else if (role === "manual-qa-engineer") {
+    } else if (role === "qa-engineer" && /^qa(-|$)/.test(packet.stepId)) {
       const q = script.qa?.shift() ?? "PASSED";
       if (script.qaDirties) writeFileSync(join(packet.worktree, "qa-scratch.txt"), "x");
       const v = q === "INVALID" ? "PASSED" : q;
@@ -337,7 +337,7 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
   const s = setup();
   const ctx = runSlice(s.deps, s.target);
   assert.equal(ctx.state, "PR_PENDING");
-  assert.deepEqual(s.agents.calls, ["backend-engineer:1", "code-reviewer:1"]);
+  assert.deepEqual(s.agents.calls, ["software-engineer:1", "code-reviewer:1"]);
   // Each agent runs in the task workspace with its role files and its own config dir (#168).
   const launch = s.agents.launches.at(-1) as AgentLaunch;
   assert.equal(launch.cwd, s.target.taskRoot);
@@ -350,7 +350,7 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
   assert.deepEqual(
     attempts.map((r) => [r.role, JSON.parse(String(r.skills))]),
     [
-      ["backend-engineer", roleSkills(s.deps.pluginRoot, "backend-engineer").default],
+      ["software-engineer", roleSkills(s.deps.pluginRoot, "software-engineer").default],
       ["code-reviewer", roleSkills(s.deps.pluginRoot, "code-reviewer").default],
     ],
   );
@@ -409,7 +409,7 @@ test("happy path: Dev → checks → Review → release validation → PR_PENDIN
   assert.deepEqual(
     rows.map((r) => [r.stepId, r.round, r.attempt, r.role, r.actualModel]),
     [
-      ["implement", 1, 1, "backend-engineer", "claude-sonnet-5-5"],
+      ["implement", 1, 1, "software-engineer", "claude-sonnet-5-5"],
       ["code-review", 1, 1, "code-reviewer", "claude-sonnet-5-5"],
     ],
   );
@@ -421,14 +421,14 @@ test("2 + Architect + 2: every round reported, delta findings, no fifth Dev, one
   const ctx = runSlice(s.deps, s.target);
   assert.deepEqual([ctx.state, ctx.round], ["WAITING_PO", 4]);
   assert.deepEqual(s.agents.calls, [
-    "backend-engineer:1",
+    "software-engineer:1",
     "code-reviewer:1",
-    "backend-engineer:2",
+    "software-engineer:2",
     "code-reviewer:2",
     "solution-architect:2",
-    "backend-engineer:3",
+    "software-engineer:3",
     "code-reviewer:3",
-    "backend-engineer:4",
+    "software-engineer:4",
     "code-reviewer:4",
   ]);
   const t = titles(s.gh.comments.map((c) => c.body));
@@ -447,7 +447,7 @@ test("2 + Architect + 2: every round reported, delta findings, no fifth Dev, one
     ],
   );
   assert.equal(new Set(t).size, t.length, "markers unique");
-  const devPackets = s.agents.packets.filter((p) => p.role === "backend-engineer");
+  const devPackets = s.agents.packets.filter((p) => p.role === "software-engineer");
   assert.deepEqual(devPackets[0]?.openFindings, []);
   assert.deepEqual(
     devPackets[1]?.openFindings.map((f) => f.id),
@@ -465,14 +465,18 @@ test("2 + Architect + 2: every round reported, delta findings, no fifth Dev, one
 test("Architect scope change stops at WAITING_PO before any third round", () => {
   const s = setup({ review: () => "FAILED", architect: "FAILED" });
   assert.equal(runSlice(s.deps, s.target).state, "WAITING_PO");
-  assert.equal(s.agents.calls.filter((c) => c.startsWith("backend-engineer")).length, 2);
+  assert.equal(s.agents.calls.filter((c) => c.startsWith("software-engineer")).length, 2);
 });
 
 test("failed checks go back to the engineer as CHK findings, not as a review round", () => {
   const s = setup({ breakChecksInRound: 1 });
   const ctx = runSlice(s.deps, s.target);
   assert.equal(ctx.state, "PR_PENDING");
-  assert.deepEqual(s.agents.calls, ["backend-engineer:1", "backend-engineer:1", "code-reviewer:1"]);
+  assert.deepEqual(s.agents.calls, [
+    "software-engineer:1",
+    "software-engineer:1",
+    "code-reviewer:1",
+  ]);
   const fix = s.agents.packets[1];
   assert.equal(fix?.stepId, "implement-fix1");
   assert.deepEqual(
@@ -572,13 +576,13 @@ test("crash before the report is posted: rerun posts it without re-running the a
       ? { status: 1, stdout: "", stderr: "gh: Bad credentials (HTTP 401)" }
       : real(args, input);
   assert.throws(() => runSlice(s.deps, s.target), { code: "GITHUB_AUTH" });
-  assert.deepEqual(s.agents.calls, ["backend-engineer:1"]);
+  assert.deepEqual(s.agents.calls, ["software-engineer:1"]);
   assert.equal(repo.pendingReports(s.db, "run").length, 1);
   failPublish = false;
   assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
   assert.deepEqual(
     s.agents.calls,
-    ["backend-engineer:1", "code-reviewer:1"],
+    ["software-engineer:1", "code-reviewer:1"],
     "engineer not re-run",
   );
   assert.deepEqual(titles(s.gh.comments.map((c) => c.body)), [
@@ -594,7 +598,7 @@ test("crash before the report is posted: rerun posts it without re-running the a
 const delivery = (p: Partial<DeliveryPlan> = {}): DeliveryPlan => ({
   kind: "delivery",
   workflow: "Feature Implementation",
-  engineer: "backend-engineer",
+  engineer: "software-engineer",
   security: false,
   regressionTest: false,
   manualQa: false,
@@ -603,9 +607,9 @@ const delivery = (p: Partial<DeliveryPlan> = {}): DeliveryPlan => ({
 const roles = (calls: string[]) => calls.map((c) => c.split(":")[0]);
 
 test("planned engineer runs; no Security Reviewer unless required", () => {
-  const s = setup({}, delivery({ engineer: "frontend-engineer" }));
+  const s = setup({}, delivery({ engineer: "qa-engineer" }));
   assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
-  assert.deepEqual(s.agents.calls, ["frontend-engineer:1", "code-reviewer:1"]);
+  assert.deepEqual(s.agents.calls, ["qa-engineer:1", "code-reviewer:1"]);
 });
 
 test("security label: Security Reviewer after Code Review; its FAILED is a review round", () => {
@@ -613,13 +617,13 @@ test("security label: Security Reviewer after Code Review; its FAILED is a revie
   const ctx = runSlice(s.deps, s.target);
   assert.equal(ctx.state, "WAITING_PO"); // every round fails security: 2 + Architect + 2
   assert.deepEqual(roles(s.agents.calls).slice(0, 4), [
-    "backend-engineer",
+    "software-engineer",
     "code-reviewer",
     "security-reviewer",
-    "backend-engineer",
+    "software-engineer",
   ]);
   // The engineer's round 2 packet carries the security findings (delta rework).
-  const dev2 = s.agents.packets.find((p) => p.role === "backend-engineer" && p.round === 2);
+  const dev2 = s.agents.packets.find((p) => p.role === "software-engineer" && p.round === 2);
   assert.deepEqual(
     dev2?.openFindings.map((f) => f.id),
     ["SEC-001"],
@@ -630,7 +634,7 @@ test("Code Reviewer routes to security review without a label", () => {
   const s = setup({ reviewNext: "security-review: touches auth" }, delivery());
   assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
   assert.deepEqual(roles(s.agents.calls), [
-    "backend-engineer",
+    "software-engineer",
     "code-reviewer",
     "security-reviewer",
   ]);
@@ -662,8 +666,8 @@ test("Bug Resolution: a fix without a regression test is a failed gate, not a re
   );
   assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
   assert.deepEqual(roles(s.agents.calls), [
-    "backend-engineer",
-    "backend-engineer",
+    "software-engineer",
+    "software-engineer",
     "code-reviewer",
   ]);
   const checks = s.gh.comments.map((c) => c.body).filter((b) => /step=checks/.test(b));
@@ -732,12 +736,12 @@ test("Manual QA FAILED: same-round rework under new step ids, then QA passes →
   assert.equal(ctx.round, 1); // a QA rework is not a review round
   assert.equal(ctx.qaReworks, 1);
   assert.deepEqual(roles(s.agents.calls), [
-    "backend-engineer",
+    "software-engineer",
     "code-reviewer",
-    "manual-qa-engineer",
-    "backend-engineer",
+    "qa-engineer",
+    "software-engineer",
     "code-reviewer",
-    "manual-qa-engineer",
+    "qa-engineer",
   ]);
   assert.deepEqual(titles(s.gh.comments.map((c) => c.body)), [
     "implement:1",
@@ -766,7 +770,7 @@ test("runtime commits after implement: deterministic message, SHA from the runti
   const msg = git(wt, "log", "-1", "--format=%B");
   assert.match(
     msg,
-    /^feat\(backend\): #9 \(#9\)\n\nOMI step implement, round 1, attempt 1\.\n\nCo-Authored-By: claude-sonnet-5-5 </,
+    /^feat\(software\): #9 \(#9\)\n\nOMI step implement, round 1, attempt 1\.\n\nCo-Authored-By: claude-sonnet-5-5 </,
   );
   const dev = s.gh.comments.find((c) => c.body.includes("step=implement;")) ?? { body: "" };
   assert.ok(dev.body.includes(git(wt, "rev-parse", "HEAD").slice(0, 7)), "report shows the SHA");
@@ -813,7 +817,7 @@ test("agent BLOCKED → unblock → run: that step runs again, PASSED steps repl
   assert.equal(repo.runContext(s.db, "run").resumeFrom, "IN_QA");
   repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
   assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
-  const qa = s.agents.packets.filter((p) => p.role === "manual-qa-engineer");
+  const qa = s.agents.packets.filter((p) => p.role === "qa-engineer");
   assert.deepEqual(
     qa.map((p) => [p.stepId, p.attempt]),
     [
@@ -831,7 +835,7 @@ test("Manual QA technical failure: unblocked run resumes in QA and still gets ch
   // A new invocation after the unblock has no in-memory checks of the first one.
   repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
   assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
-  const qa = s.agents.packets.filter((p) => p.role === "manual-qa-engineer");
+  const qa = s.agents.packets.filter((p) => p.role === "qa-engineer");
   assert.equal(qa.length, 2);
   assert.equal(qa[1]?.checkResults?.find((c) => c.name === "test")?.outcome, "pass");
 });
@@ -845,28 +849,28 @@ test("Manual QA may run the repo's check commands; reviewers may not (PO #124)",
   const check = `Bash(cd ${repoRel} && ${s.deps.config.checks.test?.run})`;
   const args = (role: string) =>
     s.agents.launches.find((l) => l.stdin.includes(`"role": "${role}"`))?.args ?? [];
-  assert.ok(args("manual-qa-engineer").includes(check));
+  assert.ok(args("qa-engineer").includes(check));
   const commit = (role: string) =>
     args(role).some((t) => /^Bash\(git -C .+ (commit|add)\*\)$/.test(t));
-  assert.ok(!commit("backend-engineer"), "the runtime commits, not the engineer (#262)");
-  assert.ok(!commit("manual-qa-engineer"));
+  assert.ok(!commit("software-engineer"), "the runtime commits, not the engineer (#262)");
+  assert.ok(!commit("qa-engineer"));
   assert.ok(!args("code-reviewer").includes(check));
-  assert.ok(args("backend-engineer").includes(check));
+  assert.ok(args("software-engineer").includes(check));
   // #252: a check may take arguments (one test file); reviewers still get none of it.
   const withArgs = `Bash(cd ${repoRel} && ${s.deps.config.checks.test?.run} *)`;
-  assert.ok(args("backend-engineer").includes(withArgs));
-  assert.ok(args("manual-qa-engineer").includes(withArgs));
+  assert.ok(args("software-engineer").includes(withArgs));
+  assert.ok(args("qa-engineer").includes(withArgs));
   assert.ok(!args("code-reviewer").includes(withArgs));
   // #275: bare forms for when a previous `cd` left the shell inside the repo.
   const run = s.deps.config.checks.test?.run;
   for (const bare of [`Bash(${run})`, `Bash(${run} *)`]) {
-    assert.ok(args("backend-engineer").includes(bare));
-    assert.ok(args("manual-qa-engineer").includes(bare));
+    assert.ok(args("software-engineer").includes(bare));
+    assert.ok(args("qa-engineer").includes(bare));
     assert.ok(!args("code-reviewer").includes(bare));
   }
   // CR-001: read-only git also bare (cwd inside the repo), never a bare write.
   for (const sub of ["status", "diff", "log", "show"]) {
-    for (const role of ["backend-engineer", "code-reviewer"]) {
+    for (const role of ["software-engineer", "code-reviewer"]) {
       for (const form of [
         `Bash(git -C ${repoRel} ${sub})`,
         `Bash(git -C ${repoRel} ${sub} *)`,
@@ -883,7 +887,27 @@ test("Manual QA may run the repo's check commands; reviewers may not (PO #124)",
       "no prefix `*` without a space (git difftool)",
     );
   }
-  assert.ok(!args("backend-engineer").some((t) => /^Bash\(git (add|commit|push)/.test(t)));
+  assert.ok(!args("software-engineer").some((t) => /^Bash\(git (add|commit|push)/.test(t)));
+  // DevTask-0131 #382: engineers move files and run the repo's npm scripts; reviewers read through pipes.
+  for (const form of [
+    `Bash(git -C ${repoRel} mv)`,
+    `Bash(git -C ${repoRel} mv *)`,
+    `Bash(git mv *)`,
+    ...["check", "arch", "test", "format"].flatMap((n) => [
+      `Bash(cd ${repoRel} && npm run ${n})`,
+      `Bash(cd ${repoRel} && npm run ${n} *)`,
+      `Bash(npm run ${n})`,
+      `Bash(npm run ${n} *)`,
+    ]),
+  ]) {
+    assert.ok(args("software-engineer").includes(form), form);
+    assert.ok(!args("qa-engineer").includes(form), `no ${form} for the read-only QA step`);
+    assert.ok(!args("code-reviewer").includes(form), `no ${form} for a reviewer`);
+  }
+  for (const c of ["grep", "cat", "head", "tail", "wc"]) {
+    assert.ok(args("code-reviewer").includes(`Bash(${c} *)`), c);
+    assert.ok(!args("software-engineer").includes(`Bash(${c} *)`), c);
+  }
 });
 
 test("refused commands are kept in evidence and listed in the step report (#252)", () => {
@@ -986,7 +1010,7 @@ for (const [name, transcript] of [
     repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
     const second = { ...s.deps, runAgent, hostEnv, selection: gatewaySelection() };
     assert.equal(runSlice(second, s.target).state, "PR_PENDING");
-    const dev = s.agents.packets.filter((p) => p.role === "backend-engineer");
+    const dev = s.agents.packets.filter((p) => p.role === "software-engineer");
     assert.deepEqual(
       dev.map((p) => [p.stepId, p.attempt, p.priorAttemptCut]),
       [
@@ -1197,7 +1221,7 @@ test("no profile (#250): each role launches with its agents.routing; state and r
     checks: { test: { run: `node -e "process.exit(0)"` } },
     agents: {
       routing: {
-        "backend-engineer": { model: "haiku", effort: "low" },
+        "software-engineer": { model: "haiku", effort: "low" },
         "code-reviewer": { model: "opus", effort: "high" },
       },
     },
@@ -1205,12 +1229,12 @@ test("no profile (#250): each role launches with its agents.routing; state and r
   const ctx = runSlice({ ...s.deps, config }, s.target);
   assert.equal(ctx.state, "PR_PENDING");
   const routes: Record<string, [string, string]> = {
-    "backend-engineer": ["haiku", "low"],
+    "software-engineer": ["haiku", "low"],
     "code-reviewer": ["opus", "high"],
   };
   assert.equal(s.agents.launches.length, 2);
   s.agents.launches.forEach((l, i) => {
-    const role = i === 0 ? "backend-engineer" : "code-reviewer";
+    const role = i === 0 ? "software-engineer" : "code-reviewer";
     const at = l.args.indexOf("--model");
     assert.deepEqual(l.args.slice(at, at + 4), [
       "--model",
@@ -1227,7 +1251,7 @@ test("no profile (#250): each role launches with its agents.routing; state and r
     .map((r) => ({ ...r }));
   assert.deepEqual(rows, [
     {
-      role: "backend-engineer",
+      role: "software-engineer",
       profile: null,
       requested_model: "haiku",
       requested_effort: "low",

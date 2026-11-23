@@ -58,7 +58,7 @@ const SAMPLE = `## Context Usage
 
 | Agent Type | Source | Tokens |
 |------------|--------|--------|
-| omi-engineering:backend-engineer | Plugin | 51 |
+| omi-engineering:software-engineer | Plugin | 51 |
 | helper | User | 40 |
 `;
 
@@ -121,15 +121,15 @@ test("plan: workspace runs plain claude -p; a role runs as omi task run would, f
   };
   const ws = measureWorkspace({ workspace: WS, keep: [], run });
   const pluginRoot = fileURLToPath(new URL("../../../", import.meta.url));
-  const role = measureRole({ role: "backend-engineer", keep: [], run, pluginRoot, hostEnv: {} });
+  const role = measureRole({ role: "software-engineer", keep: [], run, pluginRoot, hostEnv: {} });
   assert.deepEqual(calls[0], { cwd: WS, args: ["-p"] });
   assert.deepEqual(calls[1]?.args.slice(0, 3), [
     "-p",
     "--agent",
-    "omi-engineering:backend-engineer",
+    "omi-engineering:software-engineer",
   ]);
   assert.ok(calls[1]?.env?.CLAUDE_CONFIG_DIR, "fresh config dir");
-  assert.equal(role.target, "backend-engineer");
+  assert.equal(role.target, "software-engineer");
   const lines = humanContextPlan({ keep: [], targets: [ws] });
   assert.match(lines[0] ?? "", /^workspace\s+38\.7k tokens at start \(2\.0k in unneeded items\)$/);
   assert.ok(lines.includes("  fixed     System tools 17.7k (no switch: reported only)"));

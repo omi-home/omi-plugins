@@ -73,7 +73,7 @@ interface Case {
 
 const CASES: Case[] = [
   {
-    role: "backend-engineer",
+    role: "software-engineer",
     stepId: "implement",
     edits: true,
     scope: ["src/"],

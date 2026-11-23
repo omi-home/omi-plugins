@@ -117,13 +117,7 @@ const LOGIN = {
 const LOGIN_ISSUE =
   "## Scope / Acceptance\n- `login(user, password)` in `src/login.js` returns the matching user row for valid credentials.\n";
 
-const ROLES: Role[] = [
-  "code-reviewer",
-  "security-reviewer",
-  "manual-qa-engineer",
-  "automation-qa-engineer",
-  "devops-engineer",
-];
+const ROLES: Role[] = ["code-reviewer", "security-reviewer", "qa-engineer", "software-engineer"];
 for (const role of ROLES) {
   test(`live ${role}: sees exactly its default skills; model observed, effort unknown`, {
     skip,
@@ -174,34 +168,31 @@ const SEARCH = {
 const SEARCH_ISSUE =
   "## Scope / Acceptance\n- AC-1: `searchNotes(notes, q)` returns notes whose title contains `q`, case-insensitive.\n- AC-2: an empty or missing `q` returns all notes.\n";
 
-test("live automation-qa-engineer: authors tests for the criteria, production code untouched", {
+test("live qa-engineer (test task): authors tests for the criteria, production code untouched", {
   skip,
 }, () => {
   const { dir, base } = fixture(SEARCH);
   const tip = git(dir, "rev-parse", "HEAD");
   const p = packet(
-    "automation-qa-engineer",
+    "qa-engineer",
     dir,
     base,
     "qa-automation",
     `${SEARCH_ISSUE}\nAutomated coverage for AC-1 and AC-2 is missing.\n`,
     ["src/"],
   );
-  const r = acceptStepResult(
-    p,
-    launch("automation-qa-engineer", packetPrompt(p), dir, true).result,
-  );
+  const r = acceptStepResult(p, launch("qa-engineer", packetPrompt(p), dir, true).result);
   assert.equal(r.status, "PASSED", r.summary);
   const changed = git(dir, "diff", "--name-only", tip).split("\n").filter(Boolean);
   assert.ok(changed.length && changed.every((f) => /\.test\.js$/.test(f)), `${changed}`);
 });
 
-test("live manual-qa-engineer: test cases per criterion in its qa section, no edits", {
+test("live qa-engineer (acceptance): test cases per criterion in its qa section, no edits", {
   skip,
 }, () => {
   const { dir, base } = fixture(SEARCH);
-  const p = packet("manual-qa-engineer", dir, base, "qa-manual", SEARCH_ISSUE);
-  const r = acceptStepResult(p, launch("manual-qa-engineer", packetPrompt(p), dir, false).result);
+  const p = packet("qa-engineer", dir, base, "qa", SEARCH_ISSUE);
+  const r = acceptStepResult(p, launch("qa-engineer", packetPrompt(p), dir, false).result);
   assert.notEqual(r.status, "BLOCKED", r.blockerReason);
   const qa = r.sectionUpdates.find((u) => u.section === "qa")?.markdown ?? "";
   if (r.status === "PASSED")
@@ -209,19 +200,19 @@ test("live manual-qa-engineer: test cases per criterion in its qa section, no ed
   assert.equal(git(dir, "status", "--porcelain"), "");
 });
 
-test("live devops-engineer: CI workflow running the repo's own test command, inside .github/", {
+test("live software-engineer (devops): CI workflow running the repo's own test command, inside .github/", {
   skip,
 }, () => {
   const { dir, base } = fixture();
   const p = packet(
-    "devops-engineer",
+    "software-engineer",
     dir,
     base,
     "implement",
     "## Scope / Acceptance\n- A GitHub Actions workflow runs `npm test` on every pull request (Node 22).\n",
     [".github/"],
   );
-  const r = acceptStepResult(p, launch("devops-engineer", packetPrompt(p), dir, true).result);
+  const r = acceptStepResult(p, launch("software-engineer", packetPrompt(p), dir, true).result);
   assert.equal(r.status, "PASSED", r.summary);
   const changed = git(dir, "diff", "--name-only", base).split("\n").filter(Boolean);
   assert.ok(

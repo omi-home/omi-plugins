@@ -77,6 +77,12 @@ Context của agent (`issueContext` trong packet): Issue của task, chuỗi Iss
 
 Finding hoãn sang task khác: comment `<!-- omi:carried-findings=<ID> -->` trên Issue đích; `omi issue findings <n>` liệt kê khi bắt đầu. Tổng quan: `omi status`. Cuối phiên: `omi handoff post --body-file <f>`; đầu phiên: `omi handoff show` (skill `omi-resume`).
 
+### Năm role agent (DevTask-0131 #382, ADR-0005 D4)
+
+Role thực thi: `software-engineer`, `qa-engineer`, `ui-ux-designer`, `code-reviewer`, `security-reviewer`; `business-analyst` và `solution-architect` chỉ do `omi task analyze` chọn (Architect còn được gọi khi vòng review leo thang). Áp cho cả `github.model: legacy` lẫn `v2`. Ánh xạ legacy: `role:frontend|backend|database|devops` (vẫn được chấp nhận, chỉ một nhãn) và type `dev-task`/`devops-task`/`documentation-task` → `software-engineer`; type `test-task` → `qa-engineer`. `agents.routing.<role>` và `--skills <role>=…` dùng tên role mới (`omi skill list`).
+
+Quyền tool: engineer chạy được `git mv` và `npm run check|arch|test|format` (có hoặc không đối số) ngoài các lệnh `checks` của repo; reviewer đọc được bằng `git show|diff|log|status`, `grep`, `cat`, `head`, `tail`, `wc`, kể cả khi nối bằng pipe. Vẫn cấm `git add|commit|push` và mọi `gh`.
+
 ## 6. Escalation và khôi phục
 
 | Tình huống | Dấu hiệu | Xử lý |

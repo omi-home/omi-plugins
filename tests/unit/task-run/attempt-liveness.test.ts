@@ -44,7 +44,7 @@ test("migration 7: old schema upgrades in place, keeps data, old attempt has nul
   migrate(db, MIGRATIONS.slice(0, 6));
   db.exec(
     "INSERT INTO workflow_run VALUES ('r1','o/r',1,'dev-task','RUNNING','t','t', NULL);" +
-      "INSERT INTO step_run VALUES (1,'r1','implement',1,'backend-engineer','RUNNING',NULL,'t','t');" +
+      "INSERT INTO step_run VALUES (1,'r1','implement',1,'software-engineer','RUNNING',NULL,'t','t');" +
       "INSERT INTO step_attempt (step_run_id, attempt, started_at) VALUES (1,1,'t');",
   );
   assert.equal(migrate(db), MIGRATIONS.length);
@@ -61,7 +61,7 @@ test("beginAttempt stores the PID of this process", () => {
     runId: "r",
     stepId: "implement",
     round: 1,
-    role: "backend-engineer",
+    role: "software-engineer",
   });
   const attempt = repo.beginAttempt(db, step.id);
   assert.deepEqual(repo.openAttempts(db, "r"), [{ stepRunId: step.id, attempt, pid: process.pid }]);

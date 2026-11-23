@@ -26,7 +26,7 @@ test("ADR-0003 D3: role agents live only in agent-pack (omi-engineering), skills
   assert.equal(agentPack.name, PLUGIN_NAME);
   assert.equal(agentPack.version, plugin.version, "bump agent-pack with the plugin");
   assert.equal(existsSync(root + "agents"), false);
-  assert.ok(readdirSync(root + "agent-pack/agents").length >= 11);
+  assert.ok(readdirSync(root + "agent-pack/agents").length === 7);
   assert.equal(existsSync(root + "agent-pack/skills"), false);
   assert.ok(readdirSync(root + "skills").every((s) => s.startsWith("omi-")));
 });

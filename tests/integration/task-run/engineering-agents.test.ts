@@ -133,11 +133,11 @@ function assertInScope(dir: string, from: string, scope: string[]) {
 const ARCH_BACKEND =
   "## Scope / Acceptance\nBackend part of the search feature.\n\n<!-- omi:section=architecture -->\n### Contracts\n- `src/search.js` exports `searchNotes(notes, query)` → array of notes whose `title` contains `query`, case-insensitive; empty or missing query returns `notes` unchanged.\n### Work split\n- Backend: `src/search.js` + `src/search.test.js`. Frontend and database are separate tasks.\n<!-- /omi:section=architecture -->\n";
 
-test("live backend-engineer: contract names verbatim, stays in scope; round-2 rework is a delta", {
+test("live software-engineer: contract names verbatim, stays in scope; round-2 rework is a delta", {
   skip,
 }, () => {
   const { dir, base } = fixture();
-  const r1 = step("backend-engineer", dir, base, { scope: ["src/"], body: ARCH_BACKEND });
+  const r1 = step("software-engineer", dir, base, { scope: ["src/"], body: ARCH_BACKEND });
   assertInScope(dir, base, ["src/"]);
   assert.match(readFileSync(join(dir, "src/search.js"), "utf8"), /searchNotes/);
   const tip1 = git(dir, "rev-parse", "HEAD");
@@ -151,7 +151,7 @@ test("live backend-engineer: contract names verbatim, stays in scope; round-2 re
     expected:
       "Trim the query before matching; a whitespace-only query returns all notes. Add a test.",
   };
-  const r2 = step("backend-engineer", dir, base, {
+  const r2 = step("software-engineer", dir, base, {
     scope: ["src/"],
     body: ARCH_BACKEND,
     round: 2,
@@ -166,24 +166,26 @@ test("live backend-engineer: contract names verbatim, stays in scope; round-2 re
   assert.ok(r1.commitSha && r2.commitSha && r1.commitSha !== r2.commitSha);
 });
 
-test("live frontend-engineer: builds the design contract inside public/ only", { skip }, () => {
+test("live software-engineer (frontend): builds the design contract inside public/ only", {
+  skip,
+}, () => {
   const { dir, base } = fixture();
   const body =
     '## Scope / Acceptance\nFrontend part of the search feature.\n\n<!-- omi:section=design -->\n### Screens and components\n- Above `#notes`: a text input `id="search"` with a visible `<label for="search">Search notes</label>`; typing filters the list client-side by title, case-insensitive.\n### Accessibility\n- The label is visible and tied to the input; the list keeps its semantics.\n<!-- /omi:section=design -->\n';
-  step("frontend-engineer", dir, base, { scope: ["public/"], body });
+  step("software-engineer", dir, base, { scope: ["public/"], body });
   assertInScope(dir, base, ["public/"]);
   const html = readFileSync(join(dir, "public/index.html"), "utf8");
   assert.match(html, /id="search"/);
   assert.match(html, /Search notes/);
 });
 
-test("live database-engineer: new migration for the contract, applied one untouched", {
+test("live software-engineer (database): new migration for the contract, applied one untouched", {
   skip,
 }, () => {
   const { dir, base } = fixture();
   const body =
     "## Scope / Acceptance\nDatabase part of the search feature.\n\n<!-- omi:section=architecture -->\n### Contracts\n- Search filters `notes` by `lower(title)`; add an index named `idx_notes_title_lower` on `lower(title)`.\n<!-- /omi:section=architecture -->\n";
-  step("database-engineer", dir, base, { scope: ["db/"], body });
+  step("software-engineer", dir, base, { scope: ["db/"], body });
   const changed = assertInScope(dir, base, ["db/"]);
   assert.ok(!changed.includes("db/migrations/001_init.sql"), "edited an applied migration");
   const added = changed.filter((f) => /^db\/migrations\/\d{3}_.+\.sql$/.test(f));

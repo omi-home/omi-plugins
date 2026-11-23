@@ -27,7 +27,7 @@ const result = (runId: string) =>
       stepId: "implementation",
       round: 1,
       attempt: 1,
-      role: "backend-engineer",
+      role: "software-engineer",
       status: "PASSED",
       summary: "done",
     },
@@ -41,7 +41,7 @@ function running(db: ReturnType<typeof openState>, runId = "run-1") {
     runId,
     stepId: "implementation",
     round: 1,
-    role: "backend-engineer",
+    role: "software-engineer",
   });
   const attempt = repo.beginAttempt(db, step.id);
   return { step, attempt };
@@ -123,7 +123,7 @@ test("transaction failure: result and outbox commit together or not at all", () 
     runId: "run-2",
     stepId: "x",
     round: 1,
-    role: "backend-engineer",
+    role: "software-engineer",
   });
   repo.persistStepResult(db, {
     stepRunId: other.id,
@@ -195,7 +195,7 @@ test("technical attempts do not create review rounds or new step rows", () => {
       runId: "run-1",
       stepId: "implementation",
       round: 1,
-      role: "backend-engineer",
+      role: "software-engineer",
     }).id,
     step.id,
   );

@@ -18,7 +18,7 @@ const step = {
   stepId: "implement-backend",
   round: 1,
   attempt: 1,
-  role: "backend-engineer",
+  role: "software-engineer",
   status: "PASSED",
   summary: "done",
 };
@@ -142,7 +142,7 @@ test("config: safe defaults and fixed review policy", () => {
   assert.deepEqual([c.review.maxRounds, c.review.architectAfterFailedRounds], [4, 2]);
   assert.equal(c.agents.maxConcurrent, 3);
   assert.deepEqual(c.agents.routing["code-reviewer"], { model: "opus", effort: "medium" });
-  assert.deepEqual(c.agents.routing["backend-engineer"], { model: "sonnet", effort: "medium" });
+  assert.deepEqual(c.agents.routing["software-engineer"], { model: "sonnet", effort: "medium" });
   fails(
     () => parseConfig({ github: gh, review: { maxRounds: 5 } }),
     "CONFIG_INVALID",
