@@ -863,10 +863,31 @@ test("DevTask-0140: a test file without TC-<bug>-<n> fails REG-001", () => {
   assert.match(checks[0] ?? "", /REG-001[^\n]*TC-8-<n>/);
 });
 
+/**
+ * Fake test runner: exit 2 when the copied TC test file or the shared path is missing (setup broken),
+ * else 0 when the fixed source (src/* containing "work") exists, 1 when the bug is still there.
+ */
+const PROOF_SCRIPT = join(mkdtempSync(join(tmpdir(), "omi-proof-")), "fake-test.cjs");
+writeFileSync(
+  PROOF_SCRIPT,
+  `const fs = require("fs");
+for (const f of process.argv.slice(2)) {
+  if (!fs.existsSync(f) || !fs.readFileSync(f, "utf8").includes("TC-8-")) {
+    console.error("setup broken: test file not copied: " + f);
+    process.exit(2);
+  }
+}
+let shared = "";
+try { shared = fs.readFileSync("shared-dir/keep.txt", "utf8"); } catch {}
+if (shared !== "k") { console.error("setup broken: shared-dir not linked"); process.exit(2); }
+const fixed = fs.existsSync("src") && fs.readdirSync("src").some((n) => fs.readFileSync("src/" + n, "utf8").includes("work"));
+console.log(fixed ? "fixed" : "bug reproduced");
+process.exit(fixed ? 0 : 1);
+`,
+);
 const FAKE_PROOF = {
-  // exit 0 only where the engineer's `src/` exists: the commit before the fix has none.
   regression: {
-    command: `node -e "process.exit(require('fs').existsSync('src')?0:1)" {files}`,
+    command: `node "${PROOF_SCRIPT.replaceAll("\\", "/")}" {files}`,
     share: ["shared-dir"],
   },
 };
@@ -907,6 +928,11 @@ test("DevTask-0140: the test fails before the fix and passes on HEAD: a Regressi
   const logs = readdirSync(s.deps.evidenceDir, { recursive: true }).map(String);
   assert.ok(logs.some((f) => f.endsWith("regression-before.log")));
   assert.ok(logs.some((f) => f.endsWith("regression-after.log")));
+  // The before run really ran the copied test with the linked share (exit 1 = bug, not 2 = setup broken).
+  const before = logs.find((f) => f.endsWith("regression-before.log")) ?? "";
+  assert.match(readFileSync(join(s.deps.evidenceDir, before), "utf8"), /bug reproduced/);
+  const after = logs.find((f) => f.endsWith("regression-after.log")) ?? "";
+  assert.match(readFileSync(join(s.deps.evidenceDir, after), "utf8"), /fixed/);
 });
 
 test("DevTask-0140: a test that passes before the fix is REG-002 (does not reproduce the bug)", () => {

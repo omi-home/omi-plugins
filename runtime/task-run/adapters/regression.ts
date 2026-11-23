@@ -2,6 +2,7 @@
 // (a temporary detached worktree) and on HEAD. Reuses the checks' supervisor, timeout, redaction and
 // log files. The temporary worktree is always removed, links first and without following them.
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
@@ -62,9 +63,12 @@ export function runRegressionProof(o: RegressionRunInput): { before: ProofRun; a
   mkdirSync(o.logDir, { recursive: true });
   mkdirSync(o.tmpRoot, { recursive: true });
   const env = o.env ?? commandEnv(process.env);
-  const tmp = join(o.tmpRoot, "regression-prefix");
+  // A unique path per attempt: a worktree left by a killed attempt never blocks this one; prune
+  // drops the registrations whose directory is gone.
+  const tmp = join(o.tmpRoot, `regression-prefix-${randomUUID().slice(0, 8)}`);
   const links: string[] = [];
   let before: ProofRun;
+  gitIn(o.worktree, ["worktree", "prune"]);
   gitIn(o.worktree, ["worktree", "add", "--detach", tmp, o.preFix]);
   try {
     for (const f of o.copy) {

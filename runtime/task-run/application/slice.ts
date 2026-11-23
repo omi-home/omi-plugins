@@ -854,10 +854,9 @@ function regressionGate(
     };
   }
   const run = fillCommand(rc.command, files);
-  let proof: ProofReport;
+  let r: ReturnType<typeof regression.runProof>;
   try {
-    const logDir = join(d.evidenceDir, `regression-r${ctx.round}-${ctx.validationFixes + 1}`);
-    const r = regression.runProof({
+    r = regression.runProof({
       worktree: t.worktree,
       preFix,
       run,
@@ -866,25 +865,20 @@ function regressionGate(
       timeoutSec:
         rc.timeoutSeconds ?? d.config.checks.test?.timeoutSec ?? DEFAULT_CHECK_TIMEOUT_SEC,
       tmpRoot: join(d.evidenceDir, "tmp"),
-      logDir,
+      logDir: join(d.evidenceDir, `regression-r${ctx.round}-${ctx.validationFixes + 1}`),
       env: d.commandEnv,
     });
-    for (const x of [r.before, r.after]) {
-      if (x.logPath) store.addArtifact(d.db, { runId: t.run.id, kind: "log", path: x.logPath });
-    }
-    proof = { preFix, source, command: run, files, ...r };
   } catch (e) {
-    return {
-      findings: [
-        high(
-          "REG-003",
-          `The regression proof could not run: ${(e as Error).message}`,
-          "The temporary worktree of the commit before the fix is created and the test command runs.",
-        ),
-      ],
-      notes: [],
-    };
+    // Not the engineer's fault (git, disk, host): a technical error, never a finding.
+    throw new OmiError(
+      "INTERNAL",
+      cut(`regression proof could not run: ${(e as Error).message}`, 500),
+    );
   }
+  for (const x of [r.before, r.after]) {
+    if (x.logPath) store.addArtifact(d.db, { runId: t.run.id, kind: "log", path: x.logPath });
+  }
+  const proof: ProofReport = { preFix, source, command: run, files, ...r };
   return {
     findings: proofFindings(proof).map((f) => high(f.id, f.observed, f.expected)),
     notes: [],

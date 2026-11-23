@@ -85,17 +85,36 @@ const verdict = (r: ProofRun, expectFail: boolean) =>
       ? "pass (expected)"
       : `${r.outcome} (unexpected)`;
 
-/** Markdown of the "Regression proof" report section; `tail` is already redacted. */
+/** The section must fit `StepComment.regressionProof` (8000 characters). */
+export const PROOF_MAX_CHARS = 7500;
+const COMMAND_MAX = 500;
+const FILES_MAX = 1200;
+const TAIL_MAX = 1500;
+
+const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+
+/** Markdown of the "Regression proof" report section, always within PROOF_MAX_CHARS; `tail` is already redacted. */
 export function renderProof(p: ProofReport): string {
   const row = (r: ProofRun, label: string, expectFail: boolean) =>
     `| ${label} \`${r.commit.slice(0, 8)}\` | ${r.exit ?? "—"} | ${verdict(r, expectFail)} |`;
   const tail = (r: ProofRun, label: string) =>
-    r.tail ? `\n${label} output (tail):\n\`\`\`\n${r.tail}\n\`\`\`` : "";
-  return [
+    r.tail
+      ? `\n${label} output (tail):\n\`\`\`\n${r.tail.length > TAIL_MAX ? `…${r.tail.slice(-(TAIL_MAX - 1))}` : r.tail}\n\`\`\``
+      : "";
+  const shown: string[] = [];
+  let used = 0;
+  for (const f of p.files) {
+    const item = `\`${f}\``;
+    if (used + item.length > FILES_MAX) break;
+    shown.push(item);
+    used += item.length + 2;
+  }
+  const more = p.files.length - shown.length;
+  const out = [
     "### Regression proof",
-    `- Commit before the fix: \`${p.preFix}\` (${p.source})`,
-    `- Command: \`${p.command}\``,
-    `- Test files: ${p.files.map((f) => `\`${f}\``).join(", ")}`,
+    `- Commit before the fix: \`${p.preFix}\` (${clip(p.source, 100)})`,
+    `- Command: \`${clip(p.command, COMMAND_MAX)}\``,
+    `- Test files: ${shown.join(", ")}${more > 0 ? ` … and ${more} more` : ""}`,
     "",
     "| commit | exit | result |",
     "|---|---|---|",
@@ -104,4 +123,5 @@ export function renderProof(p: ProofReport): string {
     tail(p.before, "Before fix"),
     tail(p.after, "HEAD"),
   ].join("\n");
+  return clip(out, PROOF_MAX_CHARS);
 }

@@ -119,3 +119,18 @@ test("report: the checks comment renders a Regression proof section", () => {
   assert.match(out, /### Regression proof/);
   assert.match(out, /not ok 1/);
 });
+
+test("CR-003: the rendered proof always fits the StepComment limit, however many files", () => {
+  const files = Array.from(
+    { length: 400 },
+    (_, i) => `tests/deep/dir/${"x".repeat(60)}-${i}.test.ts`,
+  );
+  const big = "y".repeat(5000);
+  const md = renderProof({
+    ...proof(run("a".repeat(40), "fail", 1, big), run("b".repeat(40), "fail", 1, big)),
+    command: `node --test ${"z".repeat(3000)}`,
+    files,
+  });
+  assert.ok(md.length <= 8000, `length ${md.length}`);
+  assert.match(md, /and \d+ more/);
+});
