@@ -13,7 +13,7 @@ import { git } from "../adapters/worktree.ts";
 import type { SlicePorts } from "../application/ports.ts";
 
 export const taskRunPorts: Omit<SlicePorts, "reports"> = {
-  store: repository,
+  store: repository, // incl. `upsertReport`
   git,
   roleFiles: { stepSkills, writeRoleFiles },
   checks: { runChecks },

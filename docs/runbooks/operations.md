@@ -79,9 +79,20 @@ Context của agent (`issueContext` trong packet): Issue của task, chuỗi Iss
 
 Finding hoãn sang task khác: comment `<!-- omi:carried-findings=<ID> -->` trên Issue đích; `omi issue findings <n>` liệt kê khi bắt đầu. Tổng quan: `omi status`. Cuối phiên: `omi handoff post --body-file <f>`; đầu phiên: `omi handoff show` (skill `omi-resume`).
 
+### QATask chỉ đọc (DevTask-0134 #385)
+
+QATask (legacy: type `test-task`) chạy QA Engineer **chỉ đọc**: không commit, không PR, không Code Review, không tạo Issue. Quyền của agent là đọc + git đọc + lệnh check của repo; worktree sau step phải sạch, nếu không run dừng `CONTRACT_INVALID`. Loại QATask: label `qa.designLabel` trong `omi.config.yaml` (mặc định `qa:test-design`) → **Test design**; còn lại → **Verify** (Retest khi Issue cha là Bug).
+
+| Loại | `omi task run <n>` làm gì | Kết quả |
+|---|---|---|
+| Test design | QA đọc Story cha, trả `{acCoverage, cases[{id, ac, steps, expected, auto, regression}]}`; id phải là `TC-<số Issue cha>-<n>`, không trùng, field lạ bị từ chối | CLI ghi bảng `ID \| AC \| Steps \| Expected \| Auto (Y/N) \| Regression (Y/N)` vào section `omi:section=qa` của body (chạy lại thì thay section, không thêm bản trùng); PASSED → đóng Issue + `task finalize` (đường noCode) |
+| Verify / Retest | `git fetch` + checkout `origin/develop`, chạy checks của repo, QA nhận kết quả check cùng bảng TC (runtime đọc sub-issue của Story, lấy mọi QATask gắn label `qa.designLabel`, mặc định `qa:test-design`, parse bảng TC và đính vào packet của QA; không cần `## Sources`; không thấy bảng → `POLICY_VIOLATION` "run the Test design QATask first") hoặc `Steps to reproduce` của Bug cha; QA trả kết quả theo ID `pass\|fail\|blocked`, defect, case manual `Regression = Y` | Comment `Run #k · <commit> · …` (k tăng dần; cùng commit thì cập nhật comment đó). Case `Auto = Y` không có test mang mã TC trong output → `blocked`. PASSED → đóng Issue + `task finalize` (Story/Bug cha → Done khi mọi task con Done). FAILED → run Blocked, comment kèm đề xuất body Bug (§11, `Found in: QATask #n · TC-…`) |
+
+FAILED: Coordinator tạo Bug + DevTask fix và cập nhật Doc "Regression Suite" bằng `omi`; sau khi fix merge: `omi task unblock <n> --reason …` rồi `omi task run <n>` lại cùng QATask → `Run #k+1`. Nhánh `github.model: v2` (issue type QATask) đi theo `planWorkflow` v2 của DevTask-0132 #383.
+
 ### Năm role agent (DevTask-0131 #382, ADR-0005 D4)
 
-Role thực thi: `software-engineer`, `qa-engineer`, `ui-ux-designer`, `code-reviewer`, `security-reviewer`; `business-analyst` chỉ do `omi task analyze` chọn; `solution-architect` do `omi task analyze` chọn và chạy ở bước leo thang review của `omi task run` (sau 2 round FAILED; quyết định PO 2026-11-23, #382 CR-002). Một kế hoạch delivery không bao giờ chứa BA hay Architect. Áp cho cả `github.model: legacy` lẫn `v2`. Ánh xạ legacy: `role:frontend|backend|database|devops` (vẫn được chấp nhận, chỉ một nhãn) và type `dev-task`/`devops-task`/`documentation-task` → `software-engineer`; type `test-task` → `qa-engineer`. `agents.routing.<role>` và `--skills <role>=…` dùng tên role mới (`omi skill list`).
+Role thực thi: `software-engineer`, `qa-engineer`, `ui-ux-designer`, `code-reviewer`, `security-reviewer`; `business-analyst` chỉ do `omi task analyze` chọn; `solution-architect` do `omi task analyze` chọn và chạy ở bước leo thang review của `omi task run` (sau 2 round FAILED; quyết định PO 2026-11-23, #382 CR-002). Một kế hoạch delivery không bao giờ chứa BA hay Architect. Áp cho cả `github.model: legacy` lẫn `v2`. Ánh xạ legacy: `role:frontend|backend|database|devops` (vẫn được chấp nhận, chỉ một nhãn) và type `dev-task`/`devops-task`/`documentation-task` → `software-engineer`; type `test-task` → QATask chỉ đọc của `qa-engineer` (mục trên). `agents.routing.<role>` và `--skills <role>=…` dùng tên role mới (`omi skill list`).
 
 Quyền tool: engineer chạy được `git mv` và `npm run check|arch|test|format` (có hoặc không đối số) ngoài các lệnh `checks` của repo; reviewer không có lệnh đọc shell (`grep`, `cat`, `head`, `tail`, `wc` đã gỡ, DevTask-0138 #395, Bug-0012 #391): reviewer đọc bằng tool Read/Grep/Glob của harness (giới hạn trong task workspace) và git chỉ đọc `git show|diff|log|status`. Vẫn cấm `git add|commit|push` và mọi `gh`.
 

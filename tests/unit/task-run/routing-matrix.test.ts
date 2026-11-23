@@ -9,12 +9,14 @@ import { planWorkflow, type WorkflowPlan } from "../../../runtime/task-run/domai
 const agentsOf = (p: WorkflowPlan): Role[] =>
   p.kind === "analysis"
     ? p.analysts
-    : [
-        p.engineer,
-        "code-reviewer",
-        ...(p.security ? (["security-reviewer"] as Role[]) : []),
-        ...(p.manualQa ? (["qa-engineer"] as Role[]) : []),
-      ];
+    : p.kind === "qa"
+      ? ["qa-engineer"] // one read-only agent: no review, no PR (DevTask-0134 #385)
+      : [
+          p.engineer,
+          "code-reviewer",
+          ...(p.security ? (["security-reviewer"] as Role[]) : []),
+          ...(p.manualQa ? (["qa-engineer"] as Role[]) : []),
+        ];
 
 const MATRIX: [string, IssueType, string[], IssueType | null, string, Role[]][] = [
   [
@@ -66,7 +68,7 @@ const MATRIX: [string, IssueType, string[], IssueType | null, string, Role[]][] 
     "Feature Implementation",
     ["software-engineer", "code-reviewer"],
   ],
-  ["test suite", "test-task", [], null, "Feature Implementation", ["qa-engineer", "code-reviewer"]],
+  ["QA verify", "test-task", [], null, "QA Verify", ["qa-engineer"]],
   [
     "UI feature",
     "feature",
@@ -120,8 +122,8 @@ test("no analysis in delivery; every role reachable; far fewer calls than the fu
     assert.ok(!a.includes("business-analyst") && !a.includes("solution-architect"), p.workflow);
   }
   assert.deepEqual(new Set(plans.flatMap(agentsOf)), new Set(Role.options));
-  // Cost comparison: 29 agent calls across 13 use cases vs 91 if all 7 ran every time.
+  // Cost comparison: 28 agent calls across 13 use cases vs 91 if all 7 ran every time.
   const calls = plans.reduce((n, p) => n + agentsOf(p).length, 0);
-  assert.equal(calls, 29);
+  assert.equal(calls, 28);
   assert.ok(calls * 3 < MATRIX.length * Role.options.length);
 });

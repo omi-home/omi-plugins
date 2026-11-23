@@ -43,11 +43,19 @@ Commands:
                          one), title <IssueType>-<NNNN>-, sections of templates/github-v2 forms
   task start <n>         Validate Issue #n, create or reuse its run and worktree, mark it In Progress
   task status <n>        Show the local run, worktree and transitions of Issue #n
-  task run <n>           Start Issue #n and drive its planned Software Engineer (QA Engineer for a test
-                         task; role:* labels still accepted) → checks → Code Reviewer (→ Security
-                         Reviewer when risk:high/security or asked) (→ Architect on escalation)
+  task run <n>           Start Issue #n and drive its planned Software Engineer (role:* labels still
+                         accepted) → checks → Code Reviewer (→ Security Reviewer when
+                         risk:high/security or asked) (→ Architect on escalation)
                          → release validation (→ QA Engineer for bugs, ui, qa:manual) until In Review
                          or it needs a person (Waiting PO, Blocked). Runs agents: spends tokens.
+                         A QATask (test task) is read-only: one QA Engineer step on the newest develop,
+                         no commit, no PR, no review. Label qa.designLabel (default qa:test-design):
+                         Test design, writes the TC-<story>-<n> table into the Issue (section qa).
+                         Otherwise Verify / Bug Retest: runs the checks, posts or updates the comment
+                         \`Run #k · <commit> · pass/fail by TC id\`. PASSED closes the Issue and runs
+                         \`task finalize\` (no PR); FAILED stops Blocked with proposed Bug bodies
+                         (\`Found in: QATask #n · TC-…\`) for the Coordinator; after the fix merged,
+                         \`task unblock\` and \`task run\` again gives Run #k+1.
   task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
                          write their sections into the Issue body, then Waiting PO. No worktree. Only
                          this command plans the BA; the Architect runs here and on task run's review

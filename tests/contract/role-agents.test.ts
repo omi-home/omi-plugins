@@ -54,7 +54,10 @@ test("code review leaves security to the Security Reviewer (no duplicated lens)"
   const cr = read("agent-pack/skill-library/semantic-code-review/SKILL.md");
   assert.match(cr, /Security is the Security Reviewer's job/);
   assert.match(read("agent-pack/agents-md/code-reviewer.md"), /security-review:/);
-  assert.match(read("agent-pack/agents-md/qa-engineer.md"), /never called just to run/);
+  assert.match(
+    read("agent-pack/agents-md/qa-engineer.md"),
+    /You are read-only: you never change a file, commit, push, open a PR or create an Issue/,
+  );
 });
 
 test("DevTask-0131 #382: seven roles, the six merged ones are gone from agents and agents-md", () => {

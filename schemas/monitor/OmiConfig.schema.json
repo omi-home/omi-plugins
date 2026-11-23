@@ -362,6 +362,18 @@
       },
       "additionalProperties": false
     },
+    "qa": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "designLabel": {
+          "default": "qa:test-design",
+          "type": "string",
+          "pattern": "^[\\w:. -]{1,50}$"
+        }
+      },
+      "additionalProperties": false
+    },
     "setup": {
       "type": "object",
       "properties": {

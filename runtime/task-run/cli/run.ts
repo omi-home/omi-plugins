@@ -4,6 +4,7 @@
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { type StatusChange, setStatus } from "../../github/adapters/project.ts";
+import { closeIssueAs } from "../../github/adapters/project-write.ts";
 import { type EngineOutcome, isV2, lifecycleSync } from "../../github/cli/lifecycle.ts";
 import { writeSection } from "../../handoff/adapters/context.ts";
 import { loadProfiles, profileSecretResolver } from "../../profile/adapters/profile-config.ts";
@@ -17,7 +18,13 @@ import { openState, statePath } from "../../shared/sqlite/db.ts";
 import { fetchTicket, type Ticket } from "../../ticket/adapters/ticket.ts";
 import { acquireLease, getRun, releaseLease } from "../adapters/repository.ts";
 import { parseSkillChoice } from "../adapters/role-files.ts";
-import { lastStepError, runSlice, type SliceDeps } from "../application/slice.ts";
+import {
+  lastStepError,
+  type QaOutcome,
+  runQa,
+  runSlice,
+  type SliceDeps,
+} from "../application/slice.ts";
 import { PROJECT_STATUS } from "../domain/fsm.ts";
 import { planWorkflow, type WorkflowPlan } from "../domain/plan.ts";
 import type { RunRow } from "../domain/run.ts";
@@ -35,6 +42,8 @@ export interface RunResult {
   engine?: EngineOutcome;
   /** github.model v2, `task analyze`: the `omi move <n> "In progress"` made before the agents ran. */
   move?: EngineOutcome;
+  /** A read-only QATask run: the verdict; on PASSED the Issue is closed and `task finalize` follows. */
+  qa?: QaOutcome;
   /** Why the last agent attempt failed technically, when the run ended BLOCKED (#121). */
   error?: { code: string; message: string; file: string };
 }
@@ -67,8 +76,14 @@ export function taskRun(deps: AgentRunDeps, issue: number): RunResult {
   );
   const skills = parseSkillChoice(PLUGIN_ROOT, deps.pick?.skills, deps.pick?.reason);
   // Plan first: a bad role label or a non-delivery type fails before any worktree exists.
-  const plan = planFor(config, fetchTicket(config, issue, gh), gh);
-  if (plan.kind !== "delivery") {
+  const ticket = fetchTicket(config, issue, gh);
+  const plan = planFor(config, ticket, gh);
+  const repoName = `${config.github.owner}/${config.github.repo}`.toLowerCase();
+  const parent =
+    ticket.parent && ticket.parent.repository.nameWithOwner.toLowerCase() === repoName
+      ? ticket.parent.number
+      : undefined;
+  if (plan.kind !== "delivery" && plan.kind !== "qa") {
     throw new OmiError("POLICY_VIOLATION", `${plan.workflow}: use \`omi task analyze ${issue}\``);
   }
   harnessGate(deps, selection);
@@ -81,39 +96,45 @@ export function taskRun(deps: AgentRunDeps, issue: number): RunResult {
     acquireLease(db, { key: lease, holder: session, ttlMs: RUN_LEASE_MS });
     const evidenceDir = join(dirname(file), "evidence", start.run.id);
     try {
-      const ctx = runSlice(
-        {
-          db,
-          config,
-          gh,
-          pluginRoot: PLUGIN_ROOT,
-          evidenceDir,
-          ports: { ...taskRunPorts, reports: deps.reports },
-          harness: harnessOf(selection),
-          runAgent: deps.runAgent,
-          hostEnv: deps.hostEnv,
-          commandEnv: commandEnvFor(workspace, deps.hostEnv ?? process.env),
-          selection,
-          skills,
-          writeSection: (section, md) => writeSection(config, issue, section, md, gh),
-        },
-        {
-          run: start.run,
-          worktree: start.workspace.path,
-          taskRoot: dirname(start.workspace.path),
-          baseSha: start.workspace.baseSha,
-          plan,
-        },
-      );
+      const sliceDeps: SliceDeps = {
+        db,
+        config,
+        gh,
+        pluginRoot: PLUGIN_ROOT,
+        evidenceDir,
+        ports: { ...taskRunPorts, reports: deps.reports },
+        harness: harnessOf(selection),
+        runAgent: deps.runAgent,
+        hostEnv: deps.hostEnv,
+        commandEnv: commandEnvFor(workspace, deps.hostEnv ?? process.env),
+        selection,
+        skills,
+        writeSection: (section, md) => writeSection(config, issue, section, md, gh),
+        closeIssue: () => closeIssueAs(config, issue, "completed", gh),
+      };
+      const target = {
+        run: start.run,
+        worktree: start.workspace.path,
+        taskRoot: dirname(start.workspace.path),
+        baseSha: start.workspace.baseSha,
+      };
+      // A QATask is read-only: no commit, no PR; PASSED closes the Issue and finalize cleans up.
+      const done =
+        plan.kind === "qa"
+          ? runQa(sliceDeps, { ...target, plan, parent })
+          : { ctx: runSlice(sliceDeps, { ...target, plan }) };
+      const ctx = done.ctx;
+      const closed = done.qa?.verdict === "PASSED";
       // v2: `omi sync` after the agent's result (In review / Done are `auto` rules); legacy: mirror.
       const v2 = isV2(config);
       const engine = v2 ? lifecycleSync({ cwd: deps.cwd, gh, state: deps.state }) : undefined;
-      const status = v2 ? null : setStatus(config, issue, PROJECT_STATUS[ctx.state], gh);
+      const status = v2 || closed ? null : setStatus(config, issue, PROJECT_STATUS[ctx.state], gh);
       return {
         run: getRun(db, start.run.id) as RunRow,
         state: ctx.state,
         round: ctx.round,
         status,
+        ...(done.qa ? { qa: done.qa } : {}),
         ...(engine ? { engine } : {}),
         ...blockedBy(ctx.state, evidenceDir),
       };
@@ -154,5 +175,10 @@ export function planFor(config: OmiConfig, ticket: Ticket, gh: GhRunner): Workfl
     parent && parent.repository.nameWithOwner.toLowerCase() === repoName.toLowerCase()
       ? (typeOf(fetchTicket(config, parent.number, gh)) ?? null)
       : null;
-  return planWorkflow({ type, labels: ticket.labels.nodes.map((l) => l.name), parentType });
+  return planWorkflow({
+    type,
+    labels: ticket.labels.nodes.map((l) => l.name),
+    parentType,
+    qaDesignLabel: config.qa.designLabel,
+  });
 }
