@@ -225,7 +225,14 @@ export function fetchProjectIssues(config: OmiConfig, run: GhRunner = spawnGh): 
         prs,
       });
     }
-    after = project.items.pageInfo.hasNextPage ? project.items.pageInfo.endCursor : null;
+    const info = project.items.pageInfo;
+    if (info.hasNextPage && !info.endCursor) {
+      throw new OmiError(
+        "CONTRACT_INVALID",
+        "project items: GitHub reported another page without a cursor; the model would be incomplete",
+      );
+    }
+    after = info.hasNextPage ? info.endCursor : null;
   } while (after);
   return { issues, foreign };
 }

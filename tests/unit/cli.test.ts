@@ -88,6 +88,15 @@ Commands:
   validate               v2 only, read-only: Issues whose Status is not valid for their type, open/closed
                          state that disagrees with the Status, \`auto\` rules waiting to be applied
                          (\`omi sync\`). Exit 1 with any finding; --output json for the report
+  sync [--dry-run]       v2 only: reconcile the Project with the state machine and the last snapshot
+                         (state.sqlite). Accepts valid PO status changes (Rework: the PO's latest comment
+                         goes in the report), reverts invalid ones with a warning comment, keeps open/closed
+                         in line with Status (a PR-closed Issue becomes Done), applies the \`auto\` rules to
+                         a fixpoint (leaves to root), closes a GitHub Milestone when all its Epics are Done,
+                         writes the snapshot. JSON report: transitions_applied, po_decisions, reverted,
+                         queue, inbox. --dry-run: same report, no GitHub write, no snapshot. First run
+                         without snapshot: the current state is the baseline, nothing is reverted.
+                         Re-running changes nothing
   issue create           Create an Issue: --type <OMI type> --title <text> --body-file <path>
                          [--parent <n|owner/repo#n>]. Numbered <IssueType>-<NNNN>- per type, linked
                          as a sub-issue (hierarchy matrix checked first), added to the Project.

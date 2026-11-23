@@ -166,6 +166,17 @@ test("fetch reads type, state reason, parent, sub-issues, blockers, labels, mile
   });
 });
 
+test("fetch: another page announced without a cursor is CONTRACT_INVALID, never a silent stop", () => {
+  const broken = {
+    repositoryOwner: {
+      projectV2: {
+        items: { pageInfo: { hasNextPage: true, endCursor: null }, nodes: [item(issue(1))] },
+      },
+    },
+  };
+  assert.throws(() => fetchProjectIssues(config, fake({ "": broken })), code("CONTRACT_INVALID"));
+});
+
 test("fetch ignores non-Issue items, lists foreign-repo Issues, dedupes", () => {
   const run = fake({
     "": page(

@@ -41,7 +41,7 @@ export function stateDeps(cwd: string): StateDeps {
 const lines = (l: string[]) => l.map((s) => `${s}\n`).join("");
 
 /** The state commands exist only under `github.model: v2`; under `legacy` nothing is read or written. */
-function requireV2(config: OmiConfig, command: string): void {
+export function requireV2(config: OmiConfig, command: string): void {
   if (workflowModel(config) !== "v2") {
     throw new OmiError(
       "CONFIG_INVALID",

@@ -41,7 +41,7 @@ export function coordinatorTargets(
   return ProjectStatusV2.options.filter((s) => seen.has(s));
 }
 
-const stateChangeOf = (
+export const stateChangeOf = (
   it: WorkItem,
   status: ProjectStatusV2,
   w: Workflow,
