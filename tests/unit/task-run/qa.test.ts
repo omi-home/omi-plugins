@@ -11,6 +11,7 @@ import {
   proposeBugs,
   renderRun,
   renderTestDesign,
+  renderTestTable,
   verifyPassed,
 } from "../../../runtime/task-run/domain/qa.ts";
 
@@ -91,6 +92,16 @@ test("TC-385-04: Test design renders the §11 columns and escapes pipes", () => 
   assert.match(md, /\| ID \| AC \| Steps \| Expected \| Auto \(Y\/N\) \| Regression \(Y\/N\) \|/);
   assert.match(md, /\| TC-42-01 \| AC1 \| do \\\| it \| ok \| Y \| N \|/);
   assert.match(md, /\| TC-42-02 \| AC2 \| x \| y \| N \| Y \|/);
+});
+
+test("TC-385-18: renderTestTable prints the header and one row per case; renderTestDesign embeds it", () => {
+  const r = parseTestDesign(design, 42);
+  const table = renderTestTable(r.cases);
+  const lines = table.split("\n");
+  assert.equal(lines[0], "| ID | AC | Steps | Expected | Auto (Y/N) | Regression (Y/N) |");
+  assert.equal(lines.length, 2 + r.cases.length);
+  assert.ok(lines.includes("| TC-42-02 | AC2 | x | y | N | Y |"));
+  assert.ok(renderTestDesign(r).includes(`\n\n${table}\n`));
 });
 
 test("TC-385-05: Verify result: strict, pass only without failures, defects or failed checks", () => {

@@ -44,7 +44,7 @@ function fakeGitHub() {
         parent,
       });
       const issue = {
-        ...node(9, "QA", "test-task", node(8, `## Story\n${TABLE}`, "fr", null)),
+        ...node(9, "QA", "test-task", node(8, "## Story\nAC1, AC2", "fr", null)),
         comments: { nodes: [] },
       };
       return ok({ data: { repository: { issue } } });
@@ -261,6 +261,15 @@ test("TC-385-12: an Auto = Y case without a test carrying its TC id is blocked, 
   assert.equal(r.qa?.verdict, "FAILED");
   const run = s.gh.comments.find((c) => c.body.startsWith("<!-- omi:qa-run=1"));
   assert.match(run?.body ?? "", /- TC-8-01: blocked — no automated test carries this id/);
+});
+
+test("TC-385-19: Verify: the agent receives the sibling Test design table without Sources", () => {
+  const s = setup([{ qa: verify("pass", "pass") }], VERIFY);
+  runQa(s.deps, s.target);
+  const stdin = s.launches[0]?.stdin ?? "";
+  assert.match(stdin, /TC table \(from the Test design QATask under #8/);
+  assert.ok(stdin.includes("| TC-8-01 | AC1 | a | b | Y | N |"));
+  assert.ok(stdin.includes("| TC-8-02 | AC2 | c | d | N | Y |"));
 });
 
 test("TC-385-14: a Verify without a Test design table is refused, never PASSED", () => {

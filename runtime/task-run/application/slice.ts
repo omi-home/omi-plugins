@@ -63,6 +63,7 @@ import {
   reconcile,
   renderRun,
   renderTestDesign,
+  renderTestTable,
   verifyPassed,
 } from "../domain/qa.ts";
 import type { RunRow, SkillChoice } from "../domain/run.ts";
@@ -1290,7 +1291,16 @@ export function runQa(
     next: "QA Verify.",
   });
   const checksPassed = gate.findings.length === 0;
-  const r = agentStep(d, t, spec, kctx, [], gate.results);
+  const vspec: StepSpec = table.length
+    ? {
+        ...spec,
+        notes: [
+          ...(spec.notes ?? []),
+          `TC table (from the Test design QATask under #${story}; report every ID):\n${renderTestTable(table)}`,
+        ],
+      }
+    : spec;
+  const r = agentStep(d, t, vspec, kctx, [], gate.results);
   if (!r) return { ctx: runContext(d.db, t.run.id) };
   const left = dirty();
   if (left) return stop("CONTRACT_INVALID", `QA Engineer left the worktree dirty:\n${left}`);

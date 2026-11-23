@@ -50,17 +50,19 @@ const yn = (b: boolean) => (b ? "Y" : "N");
 
 /** §11 body of a Test design QATask: `AC coverage` and the table `ID | AC | Steps | Expected | Auto | Regression`. */
 export function renderTestDesign(r: TestDesignResult): string {
-  const rows = r.cases.map(
+  return [`**AC coverage:** ${cell(r.acCoverage)}`, "", renderTestTable(r.cases), ""].join("\n");
+}
+
+/** The §11 table: header and one row per case. */
+export function renderTestTable(cases: TestCase[]): string {
+  const rows = cases.map(
     (c) =>
       `| ${c.id} | ${cell(c.ac)} | ${cell(c.steps)} | ${cell(c.expected)} | ${yn(c.auto)} | ${yn(c.regression)} |`,
   );
   return [
-    `**AC coverage:** ${cell(r.acCoverage)}`,
-    "",
     "| ID | AC | Steps | Expected | Auto (Y/N) | Regression (Y/N) |",
     "|---|---|---|---|---|---|",
     ...rows,
-    "",
   ].join("\n");
 }
 
