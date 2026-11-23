@@ -256,6 +256,17 @@ test("packetPrompt: states the text length limits taken from the schema (#318)",
   );
 });
 
+test("packetPrompt: notes are rendered after the packet; none leaves the output unchanged (#407)", () => {
+  const { dir, base } = repo();
+  const packet = buildTaskPacket(input(dir, base));
+  const plain = packetPrompt(packet);
+  assert.equal(packetPrompt(packet, []), plain);
+  assert.ok(!plain.includes("`notes`"));
+  const withNotes = packetPrompt(packet, ["A person unblocked the run: use X"]);
+  assert.match(withNotes, /- `notes` are what a person or the runtime reported/);
+  assert.match(withNotes, /\n {2}- A person unblocked the run: use X\n/);
+});
+
 test("acceptStepResult: changedFiles come from git, not from the agent's claim (#272)", () => {
   const { dir, base } = repo();
   const p = buildTaskPacket(input(dir, base));

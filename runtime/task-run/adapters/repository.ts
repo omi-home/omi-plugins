@@ -251,7 +251,7 @@ export function saveAgentSession(
   });
 }
 
-/** Remembers why a person unblocked the run; the next resumed step reads it once. */
+/** Remembers why a person unblocked the run; the next agent step reads it once, whatever its session. */
 export function saveUnblockReason(db: Db, runId: string, reason: string): void {
   tx(db, "save unblock reason", () => {
     db.prepare("UPDATE workflow_run SET unblock_reason = ? WHERE id = ?").run(reason, runId);

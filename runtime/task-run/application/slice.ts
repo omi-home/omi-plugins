@@ -54,6 +54,7 @@ import type { AnalysisPlan, DeliveryPlan, WorkflowPlan } from "../domain/plan.ts
 import type { RunRow, SkillChoice } from "../domain/run.ts";
 import { sumUsage } from "../domain/usage.ts";
 import type { RoleFilesPort, SlicePorts } from "./ports.ts";
+import { resumeNotLoaded } from "./session.ts";
 
 export interface SliceDeps {
   db: Db;
@@ -467,9 +468,9 @@ function agentStep(
       let obs: AgentObservation;
       // The unblock reason belongs to the step rerun right after `task unblock`, whoever runs it (#407).
       const unblocked = d.ports.store.takeUnblockReason(db, t.run.id);
+      const unblockNotes = unblocked ? [`A person unblocked the run: ${cut(unblocked, 1000)}`] : [];
       if (resumes) {
-        const notes: string[] = [];
-        if (unblocked) notes.push(`A person unblocked the run: ${cut(unblocked, 1000)}`);
+        const notes: string[] = [...unblockNotes];
         const issueChanged = saved?.contextHash !== null && saved?.contextHash !== contextHash;
         if (issueChanged) notes.push("The Issue or its parents changed since your last run.");
         try {
@@ -486,14 +487,7 @@ function agentStep(
             "resume",
           );
           // Only a session that could not be loaded starts over; a real agent error is a normal failed attempt.
-          if (
-            obs.isError &&
-            (!obs.usage ||
-              obs.usage.numTurns === 0 ||
-              /no conversation found|session|not logged in|authentication|invalid api key|oauth/i.test(
-                obs.result,
-              ))
-          ) {
+          if (resumeNotLoaded(obs)) {
             throw new OmiError("INTERNAL", "resumed run ended in an error");
           }
         } catch (e) {
@@ -506,10 +500,10 @@ function agentStep(
           resumes = false;
           sessionId = randomUUID();
           sessionTokens = 0;
-          obs = runOnce(packetPrompt({ ...packet, priorAttemptCut: true }), "new");
+          obs = runOnce(packetPrompt({ ...packet, priorAttemptCut: true }, unblockNotes), "new");
         }
       } else {
-        obs = runOnce(packetPrompt(packet), "new");
+        obs = runOnce(packetPrompt(packet, unblockNotes), "new");
       }
       if (obs.isError) throw new OmiError("INTERNAL", `${spec.role} run ended in an error`);
       // Token usage is what the host observed, never what the agent claims.

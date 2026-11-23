@@ -1651,8 +1651,67 @@ test("the unblock reason is spent by the step rerun after the unblock, not kept 
   const eng = s.agents.launches.filter((l) => isRole(l, "software-engineer"));
   assert.equal(eng.length, 2);
   assert.ok(!(eng[0] as AgentLaunch).args.includes("--resume"), "over the limit: new session");
+  assert.match(
+    (eng[0] as AgentLaunch).stdin,
+    /A person unblocked the run: PO: use the greet\.ts module/,
+  );
   assert.ok((eng[1] as AgentLaunch).args.includes("--resume"));
   assert.ok(!(eng[1] as AgentLaunch).stdin.includes("A person unblocked the run"));
+});
+
+test("the unblock reason survives a failed resume and reaches the fallback full packet (#407)", () => {
+  const s = setup();
+  repo.saveAgentSession(s.db, {
+    runId: "run",
+    role: "software-engineer",
+    sessionId: randomUUID(),
+    tokens: 5,
+  });
+  repo.saveUnblockReason(s.db, "run", "PO: use the greet.ts module");
+  const real = s.deps.runAgent;
+  const seen: AgentLaunch[] = [];
+  const runAgent = (l: AgentLaunch) => {
+    seen.push(l);
+    return l.args.includes("--resume")
+      ? JSON.stringify({
+          type: "result",
+          is_error: true,
+          result: "No conversation found with session ID x",
+        })
+      : real(l);
+  };
+  assert.equal(runSlice({ ...s.deps, runAgent }, s.target).state, "PR_PENDING");
+  const eng = seen.filter((l) => isRole(l, "software-engineer"));
+  const fresh = eng[1] as AgentLaunch;
+  assert.ok(!fresh.args.includes("--resume"));
+  assert.match(fresh.stdin, /"issueContext"/);
+  assert.match(fresh.stdin, /A person unblocked the run: PO: use the greet\.ts module/);
+  assert.equal(repo.takeUnblockReason(s.db, "run"), undefined);
+});
+
+test("an agent error whose text mentions session and oauth is not a lost session (#407)", () => {
+  const s = setup();
+  repo.saveAgentSession(s.db, {
+    runId: "run",
+    role: "software-engineer",
+    sessionId: randomUUID(),
+    tokens: 5,
+  });
+  const real = s.deps.runAgent;
+  const seen: AgentLaunch[] = [];
+  const runAgent = (l: AgentLaunch) => {
+    seen.push(l);
+    if (!l.args.includes("--resume")) return real(l);
+    return JSON.stringify({
+      type: "result",
+      is_error: true,
+      result: "fixing the session token refresh failed (oauth)",
+      num_turns: 30,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+  };
+  runSlice({ ...s.deps, runAgent }, s.target);
+  assert.equal(seen.filter((l) => isRole(l, "software-engineer")).length, 1);
 });
 
 test("a resumed run that ends in an ordinary agent error is not restarted in a fresh session (#407)", () => {
