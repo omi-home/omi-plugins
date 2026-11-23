@@ -16,6 +16,8 @@ export interface FetchedBlocker {
 /** One Project Issue as the fetch read it; names are raw GitHub strings, validated here. */
 export interface FetchedIssue {
   number: number;
+  /** Full Issue title (read by `omi queue` / `omi inbox`; not part of the item model). */
+  title?: string;
   /** Native issue type name; null when the Issue has none. */
   type: string | null;
   /** Project Status option name; null when the item has no Status value. */
