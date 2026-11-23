@@ -1,6 +1,7 @@
 // `omi pr create | validate | merge <n>`: the authorized PR path of a task (spec §8 gate 5).
 import { existsSync } from "node:fs";
 import { type StatusChange, setStatus } from "../../github/adapters/project.ts";
+import { type EngineOutcome, isV2, lifecycleSync } from "../../github/cli/lifecycle.ts";
 import { type OmiConfig, repo } from "../../shared/config.ts";
 import type { Check, IssueRef } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
@@ -35,6 +36,8 @@ export interface PrResult {
   created: boolean;
   checks: Check[];
   status: StatusChange | null;
+  /** github.model v2: the `omi sync` that replaced the direct Status write. */
+  engine?: EngineOutcome;
 }
 
 /**
@@ -135,6 +138,11 @@ export function prCreate(
   if (bad) {
     throw new OmiError("POLICY_VIOLATION", `${pr.url}: ${bad.name}: ${bad.detail}`, { checks });
   }
+  // v2: `omi sync` (In review is an `auto` rule once the PR is open); legacy sets the Status.
+  if (!release && isV2(config)) {
+    const engine = lifecycleSync({ cwd: deps.cwd, gh, state: deps.state });
+    return { pr, created: !existing, checks, status: null, engine };
+  }
   const status = release ? null : setStatus(config, issue, "In Review", gh);
   return { pr, created: !existing, checks, status };
 }
@@ -209,6 +217,8 @@ export function prValidate(deps: TaskDeps, issue: number): MergeCheckResult {
 export interface MergeResult {
   checks: Check[];
   receipt: MergeReceipt;
+  /** github.model v2: the `omi sync` run after the merge. */
+  engine?: EngineOutcome;
 }
 
 /**
@@ -228,7 +238,8 @@ export function prMerge(deps: TaskDeps, issue: number): MergeResult {
     } finally {
       db.close();
     }
-    setStatus(t.config, issue, "Waiting PO", gh);
+    // v2 has no Waiting PO status: the run is escalated and the refusal below tells the Coordinator.
+    if (!isV2(t.config)) setStatus(t.config, issue, "Waiting PO", gh);
   }
   const bad = failed[0];
   if (bad || !facts.pr) {
@@ -248,6 +259,10 @@ export function prMerge(deps: TaskDeps, issue: number): MergeResult {
   const receipt = receiptOf(after.pr);
   if (!receipt || receipt.headSha !== facts.pr.headRefOid) {
     throw new OmiError("GITHUB_UNAVAILABLE", "merge sent but no matching merge receipt yet: retry");
+  }
+  // v2: `omi sync` after the merge (the PR's closing link closes the Issue; Done and roll-up are `auto`).
+  if (isV2(t.config)) {
+    return { checks, receipt, engine: lifecycleSync({ cwd: deps.cwd, gh, state: deps.state }) };
   }
   return { checks, receipt };
 }

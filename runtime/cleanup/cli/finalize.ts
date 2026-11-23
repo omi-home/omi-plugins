@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { markFinished, type StatusChange, setStatus } from "../../github/adapters/project.ts";
+import { type EngineOutcome, isV2, lifecycleSync } from "../../github/cli/lifecycle.ts";
 import { type MergeReceipt, prFacts, receiptOf } from "../../release/adapters/merge.ts";
 import { closingIssues, markedPrimaries } from "../../release/adapters/pr.ts";
 import { type OmiConfig, repo } from "../../shared/config.ts";
@@ -45,6 +46,8 @@ export interface FinalizeResult {
   status: StatusChange[];
   /** Why the nearest parent did not roll up (DevTask-0029 #60), if it did not. */
   held?: string;
+  /** github.model v2: the `omi sync` that replaced the direct Status writes. */
+  engine?: EngineOutcome;
 }
 
 /**
@@ -142,6 +145,17 @@ export function taskFinalize(
       const runId = run.id;
       if (run.state === "COMPLETED") {
         // Cleanup and its report are done; only the Project projection may be behind.
+        if (isV2(config)) {
+          const engine = deps.dryRun ? undefined : lifecycleSync({ ...deps, gh });
+          return {
+            run,
+            receipt: null,
+            cleanup: null,
+            report: null,
+            status: [],
+            ...(engine ? { engine } : {}),
+          };
+        }
         const fin = deps.dryRun ? { changes: [] } : markFinished(config, issue, gh);
         return {
           run,
@@ -224,11 +238,20 @@ export function taskFinalize(
 
       if (cleanup.state === "CLEANUP_FAILED") {
         run = advanceRun(db, runId, { type: "CLEANUP_ERROR" }).run;
-        const blocked = setStatus(config, issue, PROJECT_STATUS.CLEANUP_FAILED, gh);
+        // v2 has no Cleanup failed status (Blocked needs a blocker): the run state and the cleanup
+        // comment carry it, and the Project Status is left to the engine.
+        const blocked = isV2(config)
+          ? null
+          : setStatus(config, issue, PROJECT_STATUS.CLEANUP_FAILED, gh);
         return { run, receipt: receipt ?? null, cleanup, report, status: blocked ? [blocked] : [] };
       }
       run = advanceRun(db, runId, { type: "CLEANUP_SUCCEEDED" }).run;
       // COMPLETED is recorded first; a failure below is repaired by rerunning finalize.
+      if (isV2(config)) {
+        // v2: `omi sync` closes/Done the Issue and rolls the parents up (`auto` rules).
+        const engine = lifecycleSync({ ...deps, gh });
+        return { run, receipt: receipt ?? null, cleanup, report, status: [], engine };
+      }
       const fin = markFinished(config, issue, gh);
       return {
         run,

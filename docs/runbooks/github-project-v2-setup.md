@@ -90,3 +90,27 @@ Sửa một bước thủ công xong thì chạy lại `plan`; lệch tới đâ
 | `GITHUB_AUTH` no write access to Project | Cấp quyền ghi Project cho tài khoản, hoặc `gh auth refresh -s project` |
 | `CONFIG_INVALID` Project not found | `projectNumber` trong config sai hoặc Project đã bị xoá; kiểm `omi.config.yaml` |
 | `plan` vẫn báo workflow sau khi tắt | Tải lại trang Workflows để chắc đã lưu, chạy lại `plan` |
+
+## 7. Vòng đời task theo v2 (ChangeRequest-0013 §9.6)
+
+Khi `github.model: v2`, `omi` qua state machine (`workflow.yaml`) là bên ghi duy nhất vào Status. Các lệnh vòng đời không đặt Status trực tiếp nữa:
+
+| Thời điểm | Lệnh lifecycle | Engine |
+|---|---|---|
+| Trước khi giao việc cho agent | `task start`, `task run`, `task analyze` | `omi move <n> "In progress"` (cha lên theo luật `auto`) |
+| Sau khi agent trả kết quả | `task run`, `task analyze` | `omi sync` |
+| Sau khi gỡ block | `task unblock` | `omi sync` (Blocked ra theo `blockers_done`) |
+| Sau khi mở PR / sau merge | `pr create`, `pr merge` | `omi sync` (In review do luật `auto`) |
+| Hoàn tất | `task finalize`, `release tag` | `omi sync` (Done, đóng Issue, roll-up cha, đóng GitHub Milestone) |
+
+Kết quả của engine nằm trong trường `engine` (`command`, `data`) của JSON đầu ra; `status` luôn rỗng ở v2. `github.model: legacy` giữ nguyên hành vi cũ (ghi Status trực tiếp).
+
+Trạng thái riêng của legacy bị bỏ có chủ đích ở v2:
+
+| Legacy | v2 |
+|---|---|
+| `Analysis` | `In progress` (analyze dùng `omi move`) |
+| `Waiting PO` (hết round review, PR `risk:high`, analyze xong) | không ghi Status; run vẫn chuyển WAITING_PO, Coordinator đưa lên `Awaiting PO` bằng `omi move` |
+| `Cleanup failed` / `Blocked` do agent | không ghi Status; run giữ CLEANUP_FAILED/BLOCKED và report trên Issue; Coordinator dùng `omi move <n> Blocked --on <m>` khi có blocker |
+
+Lưu ý: `task start/run`, `pr create/merge` vẫn bị gate từ chối ở v2 cho tới khi agent pack 5 role (Feature-0040) hoàn tất; nhánh v2 của chúng đã có và dùng engine.

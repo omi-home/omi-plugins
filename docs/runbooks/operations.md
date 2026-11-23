@@ -71,6 +71,8 @@ Policy mặc định của plugin: `config/github/*.yaml` (hierarchy, field/view
 | Merge | `omi pr validate <n>`, `omi pr merge <n>` | Giữ In Review; `risk:high` → Waiting PO, không merge, PO merge tay |
 | Hoàn tất | `omi task finalize <n>` từ checkout chính sau `git pull` | Done + roll-up cha |
 
+Với `github.model: v2` các bước trên không ghi Status trực tiếp: `omi move <n> "In progress"` trước khi giao việc cho agent (`task start`, `task analyze`), và `omi sync` sau khi agent trả kết quả (`task run`, `task analyze`), sau `task unblock`, `pr create`, `pr merge`, `task finalize`, `release tag` (In review, Done, roll-up cha và đóng Issue do luật `auto`). Xem `github-project-v2-setup.md` mục 7.
+
 Finding hoãn sang task khác: comment `<!-- omi:carried-findings=<ID> -->` trên Issue đích; `omi issue findings <n>` liệt kê khi bắt đầu. Tổng quan: `omi status`. Cuối phiên: `omi handoff post --body-file <f>`; đầu phiên: `omi handoff show` (skill `omi-resume`).
 
 ## 6. Escalation và khôi phục

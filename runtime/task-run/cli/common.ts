@@ -1,5 +1,6 @@
 // Shared by the `omi task` / `omi ticket` subcommands of this module: the deps every one takes,
 // lease lengths, the Issue type reads and the env of the repo's check/setup commands.
+import type { LifecycleDeps } from "../../github/cli/lifecycle.ts";
 import {
   keyEnvName,
   loadProfiles,
@@ -45,6 +46,8 @@ export interface TaskDeps {
   session?: string;
   /** Host env (tests); default `process.env`. */
   hostEnv?: NodeJS.ProcessEnv;
+  /** github.model v2: state-engine dependencies (tests); default: the workspace of `cwd`. */
+  state?: LifecycleDeps["state"];
 }
 
 /** Commands that render and post reports take the reporting adapter from the composition root. */

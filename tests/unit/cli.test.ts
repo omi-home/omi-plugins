@@ -68,6 +68,10 @@ Commands:
                          Issue, tip, conflicts, CI, reviews, merge method, protection, risk
   pr merge <n>           Merge Issue #n's task PR when every gate passes (configured method, pinned
                          to the validated head); risk:high goes to Waiting PO and is not merged
+                         github.model v2, task start/run/analyze/unblock/finalize, pr create/merge and
+                         release tag never write Status directly: \`omi move <n> "In progress"\` before
+                         work is handed to an agent, \`omi sync\` after (In review, Done, parent roll-up
+                         are \`auto\` rules); legacy keeps its direct Status writes
   release check <n>      Read-only gate for Release Issue #n: plugin.json and package.json agree on a
                          semver, CHANGELOG.md has "## [<version>]", tag <plugin>--v<version> is free and
                          newer on origin, develop is ahead of main, the Milestone's other work is closed
