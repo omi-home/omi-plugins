@@ -17,6 +17,7 @@ import type { GhRunner } from "../../shared/github/client.ts";
 import type { Db } from "../../shared/sqlite/db.ts";
 import type { RunFindings } from "../domain/findings.ts";
 import type { Policy, WorkflowEvent } from "../domain/fsm.ts";
+import type { ProofRun } from "../domain/regression.ts";
 import type { GateResult, RunRow, SkillChoice, StepRow } from "../domain/run.ts";
 
 export interface AgentSessionRow {
@@ -114,6 +115,21 @@ export interface ChecksPort {
   }): { passed: boolean; results: GateResult[] };
 }
 
+/** Runs a test command on the commit before the fix and on HEAD (DevTask-0140 #404). */
+export interface RegressionPort {
+  runProof(o: {
+    worktree: string;
+    preFix: string;
+    run: string;
+    copy: string[];
+    share: string[];
+    timeoutSec: number;
+    tmpRoot: string;
+    logDir: string;
+    env?: NodeJS.ProcessEnv;
+  }): { before: ProofRun; after: ProofRun };
+}
+
 export interface CommitInfo {
   /** Issue type label (`dev-task`, `bug`, …). */
   type: string;
@@ -152,6 +168,7 @@ export interface SlicePorts {
   git: GitPort;
   roleFiles: RoleFilesPort;
   checks: ChecksPort;
+  regression: RegressionPort;
   commit: CommitPort;
   reports: ReportPort;
   issueContext: IssueContextPort;

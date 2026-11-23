@@ -109,6 +109,10 @@ Commands:
                          risk:high/security or asked) (→ Architect on escalation)
                          → release validation (→ QA Engineer for bugs, ui, qa:manual) until In Review
                          or it needs a person (Waiting PO, Blocked). Runs agents: spends tokens.
+                         A Bug's DevTask: checks also prove the regression test (TC-<bug>-<n>) fails on
+                         the commit before the fix and passes on HEAD (config regression.command; the
+                         commit is <!-- omi:pre-fix-commit=<sha> --> in the Issue body, else the
+                         merge-base with origin/<base>); findings REG-001..003.
                          A QATask (test task) is read-only: one QA Engineer step on the newest develop,
                          no commit, no PR, no review. Label qa.designLabel (default qa:test-design):
                          Test design, writes the TC-<story>-<n> table into the Issue (section qa).

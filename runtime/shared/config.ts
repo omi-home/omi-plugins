@@ -117,6 +117,29 @@ export const OmiConfig = z.strictObject({
   setup: GateCommand.optional(),
   /** Unset checks are skipped; a repo with none configured has no deterministic gate. */
   checks: GateChecks.prefault({}),
+  /**
+   * Regression proof of a Bug's DevTask (DevTask-0140 #404): the runtime runs the task's `TC-<bug>-<n>`
+   * test files on the commit before the fix (must fail) and on HEAD (must pass). Unset = skipped.
+   */
+  regression: z
+    .strictObject({
+      /** Runs some test files; `{files}` is replaced by the quoted file list. */
+      command: z
+        .string()
+        .trim()
+        .min(1)
+        .max(500)
+        .refine((c) => c.includes("{files}"), "expected the {files} placeholder")
+        .optional(),
+      /** Repo-relative paths (e.g. `node_modules`) linked from the task worktree into the temporary one. */
+      share: z
+        .array(relPath.regex(/^[\w./-]+$/, "expected only letters, digits, '_', '.', '/' and '-'"))
+        .max(20)
+        .default([]),
+      /** Per run; default: the timeout of the checks (600 s). */
+      timeoutSeconds: z.int().min(1).max(3600).optional(),
+    })
+    .optional(),
   /** Architecture contract of the target repo (Feature-0043 #321); checked by the gate and doctor. */
   architecture: z
     .strictObject({

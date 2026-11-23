@@ -16,7 +16,7 @@
 
 ### Summary
 {{summary}}
-
+{{regressionProof}}
 ### Logs (retained artifacts)
 {{evidence}}
 

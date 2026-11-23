@@ -7,4 +7,12 @@
 #   lint: { run: npm run lint }
 #   build: { run: npm run typecheck }
 #   test: { run: npm test }
+# Regression proof of a Bug's DevTask: the runtime runs the test files named TC-<bug>-<n> on the commit
+# before the fix (must fail) and on HEAD (must pass). `{files}` = the quoted file list; `share` = paths
+# linked into the temporary worktree. Pin the pre-fix commit with `<!-- omi:pre-fix-commit=<sha> -->`
+# in the Issue body when the fix is already on the base branch.
+# regression:
+#   command: node --test --test-reporter=tap {files}
+#   share: [node_modules]
+#   timeoutSeconds: 600   # default: the checks' timeout
 # Every setting and its default: runtime/shared/config.ts of the OMI plugin.

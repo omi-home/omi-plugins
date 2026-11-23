@@ -67,6 +67,14 @@ import {
   renderTestTable,
   verifyPassed,
 } from "../domain/qa.ts";
+import {
+  fillCommand,
+  type ProofReport,
+  preFixMarker,
+  proofFindings,
+  renderProof,
+  tcFiles,
+} from "../domain/regression.ts";
 import type { RunRow, SkillChoice } from "../domain/run.ts";
 import { sumUsage } from "../domain/usage.ts";
 import type { RoleFilesPort, SlicePorts } from "./ports.ts";
@@ -747,6 +755,143 @@ function agentStep(
   }
 }
 
+const SKIPPED_PROOF = "skipped: regression.command chưa cấu hình";
+const DEFAULT_CHECK_TIMEOUT_SEC = 600;
+
+/**
+ * Bug Resolution gate (DevTask-0140 #404): REG-001 the fix changes a test file carrying a
+ * `TC-<bug>-<n>` code; REG-003 the commit before the fix cannot be found; REG-002 the proof itself
+ * (the test fails before the fix, passes on HEAD). Without `regression.command` the proof is skipped.
+ */
+function regressionGate(
+  d: SliceDeps,
+  t: SliceTarget,
+  ctx: WorkflowContext,
+  bug: number | undefined,
+): { findings: Finding[]; notes: string[]; proof?: string } {
+  const { git, regression, store } = d.ports;
+  const high = (id: string, observed: string, expected: string): Finding => ({
+    id,
+    severity: "high",
+    observed: cut(observed, 1000),
+    expected,
+  });
+  const names = (args: string[]) => git(args, t.worktree).split("\0").filter(Boolean);
+  const changed = [
+    ...names(["diff", "-z", "--name-only", "--diff-filter=ACMR", t.baseSha]),
+    ...names(["ls-files", "-z", "--others", "--exclude-standard"]),
+  ].filter(isTest);
+  const read = (f: string) => {
+    try {
+      return readFileSync(join(t.worktree, f), "utf8");
+    } catch {
+      return "";
+    }
+  };
+  // Without a parent number the code cannot be named: any changed test file satisfies the gate.
+  const files = bug === undefined ? changed : tcFiles(changed, read, bug);
+  if (!files.length) {
+    return {
+      findings: [
+        high(
+          "REG-001", // finding ids are PREFIX-NNN
+          bug === undefined
+            ? "The bug fix changes no test file."
+            : `The bug fix changes no test file carrying a regression test code TC-${bug}-<n>.`,
+          bug === undefined
+            ? "Add a regression test that fails without the fix and passes with it."
+            : `Add a regression test whose name carries TC-${bug}-<n> (e.g. test("TC-${bug}-01: …")) that fails without the fix and passes with it.`,
+        ),
+      ],
+      notes: [],
+    };
+  }
+  const rc = d.config.regression;
+  if (bug === undefined || !rc?.command) {
+    return { findings: [], notes: [], proof: `### Regression proof\n${SKIPPED_PROOF}` };
+  }
+  const base = d.config.git.baseBranch;
+  let preFix: string;
+  let source: string;
+  try {
+    const issue = parseContract(
+      z.looseObject({ body: z.string().nullable() }),
+      api(d.gh, [`repos/${t.run.repository}/issues/${t.run.issue}`], "get issue"),
+      "get issue",
+    );
+    const marker = preFixMarker(issue.body ?? "");
+    if (marker) {
+      preFix = git(["rev-parse", "--verify", `${marker}^{commit}`], t.worktree);
+      try {
+        git(["merge-base", "--is-ancestor", preFix, `origin/${base}`], t.worktree);
+      } catch {
+        return {
+          findings: [
+            high(
+              "REG-003",
+              `The omi:pre-fix-commit ${marker} is not a commit of origin/${base}.`,
+              `The marker names a commit that is in origin/${base}.`,
+            ),
+          ],
+          notes: [],
+        };
+      }
+      source = "marker omi:pre-fix-commit";
+    } else {
+      preFix = git(["merge-base", "HEAD", `origin/${base}`], t.worktree);
+      source = `merge-base HEAD origin/${base}`;
+    }
+  } catch (e) {
+    return {
+      findings: [
+        high(
+          "REG-003",
+          `The commit before the fix cannot be determined: ${(e as Error).message}`,
+          `A valid <!-- omi:pre-fix-commit=<sha> --> marker, or origin/${base} reachable for the merge-base.`,
+        ),
+      ],
+      notes: [],
+    };
+  }
+  const run = fillCommand(rc.command, files);
+  let proof: ProofReport;
+  try {
+    const logDir = join(d.evidenceDir, `regression-r${ctx.round}-${ctx.validationFixes + 1}`);
+    const r = regression.runProof({
+      worktree: t.worktree,
+      preFix,
+      run,
+      copy: changed,
+      share: rc.share,
+      timeoutSec:
+        rc.timeoutSeconds ?? d.config.checks.test?.timeoutSec ?? DEFAULT_CHECK_TIMEOUT_SEC,
+      tmpRoot: join(d.evidenceDir, "tmp"),
+      logDir,
+      env: d.commandEnv,
+    });
+    for (const x of [r.before, r.after]) {
+      if (x.logPath) store.addArtifact(d.db, { runId: t.run.id, kind: "log", path: x.logPath });
+    }
+    proof = { preFix, source, command: run, files, ...r };
+  } catch (e) {
+    return {
+      findings: [
+        high(
+          "REG-003",
+          `The regression proof could not run: ${(e as Error).message}`,
+          "The temporary worktree of the commit before the fix is created and the test command runs.",
+        ),
+      ],
+      notes: [],
+    };
+  }
+  return {
+    findings: proofFindings(proof).map((f) => high(f.id, f.observed, f.expected)),
+    notes: [],
+    proof: renderProof(proof),
+  };
+}
+
 /** Deterministic checks as an omi-cli step with its own report; failures become findings. */
 function checksStep(
   d: SliceDeps,
@@ -754,7 +899,14 @@ function checksStep(
   ctx: WorkflowContext,
   /** Gate findings decided by the runtime itself (e.g. a missing regression test). */
   extra: Finding[] = [],
-  base: { stepId: string; title: string; next: string; notes?: string[] } = {
+  base: {
+    stepId: string;
+    title: string;
+    next: string;
+    notes?: string[];
+    /** "Regression proof" section (markdown) of the report. */
+    proof?: string;
+  } = {
     stepId: "checks",
     title: "Deterministic Checks",
     next: "Code review.",
@@ -814,6 +966,7 @@ function checksStep(
         2000,
       ),
       findings,
+      ...(base.proof ? { regressionProof: base.proof } : {}),
       durationMs: results.reduce((sum, r) => sum + r.durationMs, 0),
       nextAction: ok ? base.next : "The engineer fixes the failed checks.",
       executionId: `${t.run.id}.${stepId}.r${ctx.round}.${n}`,
@@ -952,7 +1105,6 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
         needDev = true;
         break;
       case "RUNNING": {
-        let devFiles: string[] | null = null;
         if (needDev) {
           const spec = ctx.validationFixes
             ? { ...DEV, stepId: `implement-fix${ctx.validationFixes}` }
@@ -963,27 +1115,20 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
             advance({ type: "BLOCK" }); // engineer could not finish: a person decides
             return ctx;
           }
-          devFiles = dev.changedFiles;
         }
         // Bug Resolution: reproduction + regression (spec §10 catalogue) is a deterministic gate.
-        const regression: Finding[] =
-          plan.regressionTest && devFiles && !devFiles.some(isTest)
-            ? [
-                {
-                  id: "REG-001", // finding ids are PREFIX-NNN
-                  severity: "high",
-                  observed: "The bug fix changes no test file.",
-                  expected: "Add a regression test that fails without the fix and passes with it.",
-                },
-              ]
-            : [];
+        // DevTask-0140 #404: the test carries `TC-<bug>-<n>` and the runtime proves fail-before / pass-after.
+        const regression = plan.regressionTest
+          ? regressionGate(d, t, ctx, t.parent)
+          : { findings: [], notes: [], proof: undefined };
         // Test design gate (#408): every `Auto = Y` case of the Story's TC table has a test.
         const tc = t.parent ? tcGate(d, t, t.parent) : { findings: [], notes: [] };
-        const gate = checksStep(d, t, ctx, [...regression, ...tc.findings], {
+        const gate = checksStep(d, t, ctx, [...regression.findings, ...tc.findings], {
           stepId: "checks",
           title: "Deterministic Checks",
           next: "Code review.",
-          notes: tc.notes,
+          notes: [...regression.notes, ...tc.notes],
+          proof: regression.proof,
         });
         checks = gate.results;
         checkedHead = gate.findings.length ? null : git(["rev-parse", "HEAD"], t.worktree);

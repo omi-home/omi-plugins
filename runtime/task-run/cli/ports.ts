@@ -7,6 +7,7 @@ import type { Harness } from "../../harness/domain/harness.ts";
 import type { Selection } from "../../profile/domain/selection.ts";
 import { runChecks } from "../adapters/checks.ts";
 import { commitWork } from "../adapters/commit.ts";
+import { runRegressionProof } from "../adapters/regression.ts";
 import * as repository from "../adapters/repository.ts";
 import { stepSkills, writeRoleFiles } from "../adapters/role-files.ts";
 import { git } from "../adapters/worktree.ts";
@@ -17,6 +18,7 @@ export const taskRunPorts: Omit<SlicePorts, "reports"> = {
   git,
   roleFiles: { stepSkills, writeRoleFiles },
   checks: { runChecks },
+  regression: { runProof: runRegressionProof },
   commit: commitWork,
   issueContext: { fetchIssueContext },
 };
