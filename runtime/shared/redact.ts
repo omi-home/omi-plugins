@@ -4,7 +4,14 @@ const RULES: [RegExp, string][] = [
   [/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, "[REDACTED:github-token]"],
   [/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, "[REDACTED:github-token]"],
   [/\bsk-ant-[A-Za-z0-9_-]{10,}/g, "[REDACTED:anthropic-key]"],
-  [/\b(Bearer|token|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 [REDACTED]"],
+  // Header context (`Authorization: Bearer x`): any 8+ char credential value.
+  [/\b(Authorization\s*:\s*)(Bearer|Basic|token)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1$2 [REDACTED]"],
+  // Elsewhere only values that look like a secret: 20+ chars with a letter and a digit
+  // (file names, issue IDs and prose such as "token management" are left alone).
+  [
+    /\b(Bearer|token|Basic)\s+(?=[A-Za-z0-9._~+/=-]*\d)(?=[A-Za-z0-9._~+/=-]*[A-Za-z])[A-Za-z0-9._~+/=-]{20,}/gi,
+    "$1 [REDACTED]",
+  ],
   [/(\w+:\/\/)[^\s/:@]+:[^\s/@]+@/g, "$1[REDACTED]@"],
   [
     /\b(password|passwd|secret|token|api[_-]?key)(["']?\s*[:=]\s*["']?)[^\s"',;&]+/gi,

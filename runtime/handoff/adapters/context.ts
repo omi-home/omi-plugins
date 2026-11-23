@@ -13,6 +13,7 @@ import {
 import { OmiError } from "../../shared/errors/errors.ts";
 import { type GhRunner, graphql, markerAuthor, spawnGh } from "../../shared/github/client.ts";
 import { redact } from "../../shared/redact.ts";
+import { cutAt } from "../../shared/text.ts";
 
 /** Parent levels fetched above the executable Issue (Task → Feature → Milestone → Epic …). */
 const DEPTH = 5;
@@ -71,7 +72,7 @@ const Response = z.strictObject({
 const typeOf = (n: Node): IssueType | null => labelType(n.labels.nodes) ?? null;
 
 const SEPARATOR = /^\|(\s*:?-+:?\s*\|)+\s*$/;
-const cut = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+const cut = (s: string, max: number) => (s.length > max ? `${cutAt(s, max - 1)}…` : s);
 
 /** Rows of the `source | finding | action` tables in `omi:carried-findings` comments. */
 export function parseCarriedFindings(comments: string[]): CarriedFinding[] {
@@ -127,7 +128,7 @@ export function fetchIssueContext(
       issue: { repository: n.repository.nameWithOwner, number: n.number },
       type: typeOf(n),
       title: cut(redact(n.title), 300),
-      body: body.slice(0, keep),
+      body: cutAt(body, keep),
       truncated: keep < body.length,
     });
   }

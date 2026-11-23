@@ -510,6 +510,34 @@ test("a fake changed-file claim no longer blocks the run: the runtime lists git'
   assert.match(report, /claimed but not changed since baseSha: src\/never\.txt/);
 });
 
+test("agent summary over 2000 chars: cut with evidence file, StepComment warning and Warning: line (#380)", () => {
+  const s = setup();
+  const real = s.deps.runAgent;
+  const secret = `ghp_${"Q".repeat(36)}`;
+  // 1925 + 41 chars of secret, then padding: the cut (~1961) falls inside the secret.
+  const long = `${"word ".repeat(385)}${secret}${" tail".repeat(20)}`;
+  const runAgent = (l: AgentLaunch) =>
+    real(l)
+      .split("\n")
+      .map((line) => {
+        if (!line.includes('"type":"result"')) return line;
+        const ev = JSON.parse(line) as { result: string };
+        const r = JSON.parse(ev.result) as { summary: string };
+        r.summary = long;
+        ev.result = JSON.stringify(r);
+        return JSON.stringify(ev);
+      })
+      .join("\n");
+  const ctx = runSlice({ ...s.deps, runAgent }, s.target);
+  assert.equal(ctx.state, "PR_PENDING");
+  const out = readFileSync(join(s.deps.evidenceDir, "implement-r1-a1.output.txt"), "utf8");
+  assert.match(out, /word word/);
+  assert.doesNotMatch(out, /QQQQ/);
+  const report = s.gh.comments[0]?.body ?? "";
+  assert.match(report, /Warning: .*summary: \d+ chars, cut to 2000/);
+  assert.doesNotMatch(report, /QQQQ/);
+});
+
 test("unparseable agent output: redacted raw output kept beside the error, path in details (#269)", () => {
   const s = setup();
   const secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";

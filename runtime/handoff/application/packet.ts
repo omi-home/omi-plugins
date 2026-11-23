@@ -17,6 +17,8 @@ import {
   VERDICT_ROLES,
 } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
+import { redact } from "../../shared/redact.ts";
+import { cutAt } from "../../shared/text.ts";
 
 /** Raw agent output above this is rejected before parsing. */
 export const MAX_RESULT_CHARS = 64 * 1024;
@@ -219,8 +221,17 @@ function cutOverlong(input: unknown): { fixed: unknown; warnings: string[] } | u
     const value = holder?.[key];
     if (!holder || typeof value !== "string") return undefined;
     const trimmed = value.trim();
-    holder[key] = trimmed.slice(0, max - TRUNCATION_SUFFIX.length).trimEnd() + TRUNCATION_SUFFIX;
-    warnings.push(`${path.join(".")}: ${trimmed.length} chars, cut to ${max}`);
+    // Redact first: a secret cut in half would no longer match its pattern.
+    const safe = redact(trimmed);
+    const wasCut = safe.length > max;
+    holder[key] = wasCut
+      ? cutAt(safe, max - TRUNCATION_SUFFIX.length).trimEnd() + TRUNCATION_SUFFIX
+      : safe;
+    warnings.push(
+      wasCut
+        ? `${path.join(".")}: ${trimmed.length} chars, cut to ${max}`
+        : `${path.join(".")}: ${trimmed.length} chars, shortened to ${safe.length} by redaction`,
+    );
   }
   return { fixed, warnings };
 }
@@ -321,9 +332,10 @@ export function acceptStepResultWithWarnings(
   }
   const note = ` [runtime: claimed but not changed since baseSha: ${unchanged.join(", ")}]`;
   const room = 2000 - note.length;
+  const safe = redact(r.summary); // redact before cutting: a half-cut secret no longer matches
   const summary =
     room > 0
-      ? r.summary.slice(0, room) + note
-      : `${r.summary.slice(0, 1900)} [runtime: ${unchanged.length} claimed file(s) not changed]`;
-  return { result: { ...r, changedFiles, summary: summary.slice(0, 2000) }, warnings };
+      ? cutAt(safe, room) + note
+      : `${cutAt(safe, 1900)} [runtime: ${unchanged.length} claimed file(s) not changed]`;
+  return { result: { ...r, changedFiles, summary: cutAt(summary, 2000) }, warnings };
 }
