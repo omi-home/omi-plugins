@@ -100,7 +100,7 @@ test("migration 9: a database from the previous release opens, keeps its data an
     assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, MIGRATIONS.length);
     db.close();
   }
-  assert.equal(MIGRATIONS.length, 9);
+  assert.equal(MIGRATIONS.length, 10);
 });
 
 test("crypto: random IV, round trip, tamper, AAD and key are all enforced", () => {

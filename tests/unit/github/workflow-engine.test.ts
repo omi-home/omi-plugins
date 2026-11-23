@@ -37,6 +37,7 @@ const mk = (
   parent: null,
   children: [],
   blockedBy: [],
+  externalBlockers: [],
   labels: [],
   linkedPrs: [],
   milestone: null,
@@ -138,6 +139,27 @@ test("linked_pr", () => {
   );
   assert.equal(ev({ linked_pr: "changes_requested" }, 1, dev([pr("open", "none")])), false);
   assert.equal(ev({ linked_pr: "changes_requested" }, 1, dev([])), false);
+});
+
+test("linked_pr modes exclude each other with two open PRs (#368 CR-002)", () => {
+  const prs: WorkItem["linkedPrs"] = [
+    { number: 7, state: "open", verdict: "none" },
+    { number: 8, state: "open", verdict: "changes_requested" },
+  ];
+  const items = [mk(1, "DevTask", "In review", { linkedPrs: prs })];
+  assert.equal(ev({ linked_pr: "open_ready" }, 1, items), false);
+  assert.equal(ev({ linked_pr: "changes_requested" }, 1, items), true);
+  // Both transitions of the default workflow cannot hold together: the fixpoint terminates.
+  const r = computeFixpoint([mk(1, "DevTask", "In progress", { linkedPrs: prs })]);
+  assert.equal(r.applied.length <= 1, true);
+});
+
+test("blockers_done: external blockers hold until done (#368 CR-003)", () => {
+  const ext = (done: boolean) => [
+    mk(1, "DevTask", "Blocked", { externalBlockers: [{ ref: "o/other#5", done }] }),
+  ];
+  assert.equal(ev({ blockers_done: true }, 1, ext(false)), false);
+  assert.equal(ev({ blockers_done: true }, 1, ext(true)), true);
 });
 
 test("issue_closed_by_pr", () => {
@@ -397,8 +419,15 @@ test("parseProjectModel validates and applies defaults", () => {
   assert.deepEqual(m[0]?.children, []);
   assert.equal(m[0]?.parent, null);
   assert.throws(() =>
-    parseProjectModel([{ number: 1, type: "Epic", status: "Draft", state: "open", parent: 9 }]),
+    parseProjectModel([
+      { number: 1, type: "Epic", status: "Draft", state: "open", blockedBy: [9] },
+    ]),
   );
+  // A parent or child outside the Project does not invalidate the model (#368 CR-003).
+  const out = parseProjectModel([
+    { number: 1, type: "Epic", status: "Draft", state: "open", parent: 9, children: [8] },
+  ]);
+  assert.equal(out[0]?.parent, 9);
   assert.throws(() =>
     parseProjectModel([
       { number: 1, type: "Epic", status: "Draft", state: "open" },
