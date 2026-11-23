@@ -73,16 +73,19 @@ export const Role = z.enum([
   "business-analyst",
   "solution-architect",
   "ui-ux-designer",
-  "frontend-engineer",
-  "backend-engineer",
-  "database-engineer",
+  "software-engineer",
   "code-reviewer",
   "security-reviewer",
-  "manual-qa-engineer",
-  "automation-qa-engineer",
-  "devops-engineer",
+  "qa-engineer",
 ]);
 export type Role = z.infer<typeof Role>;
+
+/**
+ * Roles that never appear in a delivery plan (ADR-0005 D3): `omi task analyze` plans the BA (and the
+ * SA); the SA also runs as the escalation step of `omi task run` after 2 FAILED review rounds
+ * (PO 2026-11-23, #382 CR-002), never as a planned step.
+ */
+export const NON_DELIVERY_ROLES: readonly Role[] = ["business-analyst", "solution-architect"];
 
 /** Roles whose agent cannot edit (agents/*.md disallow Edit/Write): no files, no commit. */
 export const READ_ONLY_ROLES: readonly Role[] = [
@@ -91,7 +94,6 @@ export const READ_ONLY_ROLES: readonly Role[] = [
   "solution-architect",
   "code-reviewer",
   "security-reviewer",
-  "manual-qa-engineer",
 ];
 
 /** Issue body sections (`<!-- omi:section=… -->`) only their owner role may propose. */
@@ -99,7 +101,7 @@ export const ROLE_SECTION: Partial<Record<Role, string>> = {
   "business-analyst": "analysis",
   "ui-ux-designer": "design",
   "solution-architect": "architecture",
-  "manual-qa-engineer": "qa",
+  "qa-engineer": "qa",
 };
 
 /** Finding id prefix per role: one owner per kind of finding, no duplicated review lenses. */
@@ -109,24 +111,29 @@ export const FINDING_PREFIX: Partial<Record<Role, string>> = {
   "solution-architect": "ARC",
   "code-reviewer": "CR",
   "security-reviewer": "SEC",
-  "manual-qa-engineer": "QA",
-  "automation-qa-engineer": "AQA",
+  "qa-engineer": "QA",
 };
 
 /** Roles whose PASSED means "no medium+ finding left". */
-export const VERDICT_ROLES: readonly Role[] = [
-  "code-reviewer",
-  "security-reviewer",
-  "manual-qa-engineer",
-];
+export const VERDICT_ROLES: readonly Role[] = ["code-reviewer", "security-reviewer", "qa-engineer"];
 
-/** What a PASSED result must carry: the role's own section, or changed files. */
-export const PASSED_REQUIRES: Partial<Record<Role, "section" | "files">> = {
+/**
+ * What a PASSED result must carry: the role's own section, or changed files. `by-step`: the QA
+ * Engineer authors tests (files; never called just to run them) and gives the acceptance verdict
+ * (its `qa` section in the acceptance step).
+ */
+export const PASSED_REQUIRES: Partial<Record<Role, "section" | "files" | "by-step">> = {
   "business-analyst": "section",
   "ui-ux-designer": "section",
-  "manual-qa-engineer": "section",
-  "automation-qa-engineer": "files", // authors tests; never called just to run them
+  "qa-engineer": "by-step",
 };
+
+/** Step id of the acceptance QA step (also with a rework suffix, `qa-qa1`). */
+export const isAcceptanceQaStep = (stepId: string) => /^qa(-qa\d+)?$/.test(stepId);
+
+/** Read-only by role, or the QA Engineer in the acceptance step (edits:false): no files, no commit. */
+export const isReadOnlyStep = (role: Role, stepId: string) =>
+  READ_ONLY_ROLES.includes(role) || (role === "qa-engineer" && isAcceptanceQaStep(stepId));
 
 /** Who executed a step: a specialist, the main session, or the deterministic CLI. */
 export const Executor = z.union([Role, z.enum(["coordinator", "omi-cli"])]);

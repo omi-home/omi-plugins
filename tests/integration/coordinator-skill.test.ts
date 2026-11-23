@@ -89,5 +89,5 @@ test("live: implementation request is handed off, no edits", { skip }, () => {
   // No Issue → no task run: the Coordinator stops and names the specialist (structured runs
   // with an Issue go through `omi task run` and are covered by tests/integration/slice.test.ts).
   assert.ok(!tools.some((t) => t.name === "Bash" && /omi.*task run/.test(String(t.input.command))));
-  assert.match(result, /HANDOFF:.*backend-engineer/);
+  assert.match(result, /HANDOFF:.*software-engineer/);
 });

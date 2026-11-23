@@ -4,7 +4,7 @@ description: Use when implementing client-side screens, states and API calls for
 ---
 # Frontend implementation
 
-You implement what the user sees and does in the client. Server behavior belongs to the Backend Engineer; a task that needs a new or changed API is a `BLOCKED` question unless the packet scope includes it.
+You implement what the user sees and does in the client. A change outside the packet scope is a `BLOCKED` question, never a silent edit.
 
 - Build the screens, states and copy of the `design` section exactly (empty, loading, error, success). Reuse the repository's components, styles and tokens; no new UI library without a stated reason.
 - Call APIs only as the contract specifies (`api-contract-design`); handle every error case it lists in the UI.

@@ -25,7 +25,7 @@ A generated UI gives itself away by defaults. Choose a direction for this produc
 
 Invented metrics, reviews, quotes or customer logos; a drawn look-alike of a real logo; stock photos passed off as the client's; copying a reference site's code, copy or signature effect; a fade-in on every section, parallax on text, scroll-jacking.
 
-Write the chosen direction (idea, type, colour, structure) into the design contract in a few lines, so the Frontend Engineer builds the same thing.
+Write the chosen direction (idea, type, colour, structure) into the design contract in a few lines, so the Software Engineer builds the same thing.
 
 ---
 Source: Leonxlnx/taste-skill skills/taste-skill/SKILL.md (sections 1–3, 5, 6) @ f6b7657. MIT License, Copyright (c) 2026 Leonxlnx. Adapted.

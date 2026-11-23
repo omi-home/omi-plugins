@@ -145,7 +145,7 @@ test("buildAgentLaunch: the token reaches the child env only, never argv; redact
   const root = dir();
   const launch = buildAgentLaunch({
     pluginRoot: root,
-    role: "backend-engineer",
+    role: "software-engineer",
     taskRoot: root,
     worktree: join(root, "repo"),
     prompt: "do it",
@@ -173,7 +173,7 @@ test("buildAgentLaunch: the token reaches the child env only, never argv; redact
   });
   const g = buildAgentLaunch({
     pluginRoot: root,
-    role: "backend-engineer",
+    role: "software-engineer",
     taskRoot: root,
     worktree: join(root, "repo"),
     prompt: "do it",

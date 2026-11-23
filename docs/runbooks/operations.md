@@ -36,7 +36,7 @@ checks:
 | `review.maxValidationFixes` / `maxQaReworks` | `2` / `2` | Số lần sửa sau check/QA fail |
 | `review.maxRounds` | `4` (cố định) | 2 round → Architect → 2 round → Waiting PO |
 | `agents.maxConcurrent` | `3` | Dự phòng: runtime hiện chạy agent tuần tự, chưa đọc khoá này |
-| `agents.routing.<role>` | sonnet/medium; opus cho Architect, Code/Security Reviewer | `{ model, effort }`. Không có `--profile`: truyền cho `claude` qua `--model`/`--effort` (frontmatter agent chỉ là default, trùng schema); có profile thì profile quyết định |
+| `agents.routing.<role>` | sonnet/medium; opus cho Architect, Code/Security Reviewer | `{ model, effort }`. Nâng cấp từ 11 role: đổi khoá `frontend/backend/database/devops-engineer` → `software-engineer`, `manual/automation-qa-engineer` → `qa-engineer` (khoá cũ báo `CONFIG_INVALID` kèm tên khoá cần đổi). Không có `--profile`: truyền cho `claude` qua `--model`/`--effort` (frontmatter agent chỉ là default, trùng schema); có profile thì profile quyết định |
 | `setup` | không có | `{ run, timeoutSec }` (như một check), ví dụ `{ run: npm ci }`. `omi task start` chạy trong clone mới trước agent và check; dùng lại clone thì chạy lại chỉ khi lockfile (`package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`) hoặc lệnh đổi. Lỗi/quá hạn: `SETUP_FAILED`, log đã redact ở `evidence/<run>/setup/setup.log`, không chạy agent. `omi github project init` tự ghi `setup: { run: npm ci }` khi repo có `package-lock.json`; `omi doctor` báo mục `setup` |
 | `checks.<format\|lint\|build\|test\|scan>` | không có | `{ run, timeoutSec }` (timeout mặc định 600 s); tên khác bị từ chối. Không khai báo = không có gate xác định |
 | `cleanup.deleteRemoteBranch` | `false` | Dự phòng: cleanup hiện không xoá branch remote dù đặt `true` |
@@ -76,6 +76,12 @@ Với `github.model: v2` các bước trên không ghi Status trực tiếp: `om
 Context của agent (`issueContext` trong packet): Issue của task, chuỗi Issue cha, rồi các Issue khai trong section `## Sources` của body task (tùy chọn; mỗi dòng `#n` hoặc `owner/repo#n`, tối đa 4 Issue, mỗi Issue ≤ 6 000 ký tự, tổng ≤ 16 000, đã redact; Issue không đọc được thì bị bỏ qua). Dùng khi spec nằm ngoài chuỗi cha (vd. ChangeRequest ở nhánh khác của cây) thay vì chép tay. `omi ticket validate` cảnh báo (`references`, không chặn) khi body dẫn `#n` ngoài chuỗi cha và không có trong `Sources`. Body Issue vượt 12 000 ký tự: packet giữ Objective/Scope/Acceptance/Definition of Done, rồi các section `<!-- omi:section=… -->` (analysis, architecture, design…), rồi phần còn lại, theo thứ tự trong body; phần bị bỏ hoặc cắt nằm trong `omitted` của entry (tên section + số ký tự). Agent cần phần đó thì trả `BLOCKED` xin thêm, không tự đoán.
 
 Finding hoãn sang task khác: comment `<!-- omi:carried-findings=<ID> -->` trên Issue đích; `omi issue findings <n>` liệt kê khi bắt đầu. Tổng quan: `omi status`. Cuối phiên: `omi handoff post --body-file <f>`; đầu phiên: `omi handoff show` (skill `omi-resume`).
+
+### Năm role agent (DevTask-0131 #382, ADR-0005 D4)
+
+Role thực thi: `software-engineer`, `qa-engineer`, `ui-ux-designer`, `code-reviewer`, `security-reviewer`; `business-analyst` chỉ do `omi task analyze` chọn; `solution-architect` do `omi task analyze` chọn và chạy ở bước leo thang review của `omi task run` (sau 2 round FAILED; quyết định PO 2026-11-23, #382 CR-002). Một kế hoạch delivery không bao giờ chứa BA hay Architect. Áp cho cả `github.model: legacy` lẫn `v2`. Ánh xạ legacy: `role:frontend|backend|database|devops` (vẫn được chấp nhận, chỉ một nhãn) và type `dev-task`/`devops-task`/`documentation-task` → `software-engineer`; type `test-task` → `qa-engineer`. `agents.routing.<role>` và `--skills <role>=…` dùng tên role mới (`omi skill list`).
+
+Quyền tool: engineer chạy được `git mv` và `npm run check|arch|test|format` (có hoặc không đối số) ngoài các lệnh `checks` của repo; reviewer đọc được bằng `git show|diff|log|status`, `grep`, `cat`, `head`, `tail`, `wc`, kể cả khi nối bằng pipe. Vẫn cấm `git add|commit|push` và mọi `gh`.
 
 ## 6. Escalation và khôi phục
 

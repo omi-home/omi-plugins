@@ -19,10 +19,10 @@ test("simple bug: child DevTask runs Bug Resolution with one engineer, no BA/Arc
   assert.deepEqual(p, {
     kind: "delivery",
     workflow: "Bug Resolution",
-    engineer: "backend-engineer",
+    engineer: "software-engineer",
     security: false,
     regressionTest: true,
-    manualQa: true, // PO #56: Manual QA confirms the bug is gone
+    manualQa: true, // PO #56: the QA Engineer confirms the bug is gone
   });
   assert.equal(
     codeOf(() => planWorkflow({ type: "bug", labels: [] })),
@@ -31,15 +31,20 @@ test("simple bug: child DevTask runs Bug Resolution with one engineer, no BA/Arc
 });
 
 test("engineer from role:* (default backend), type-bound roles, one role label only", () => {
-  const eng = (type: "dev-task" | "devops-task" | "test-task", labels: string[] = []) => {
+  const eng = (
+    type: "dev-task" | "devops-task" | "test-task" | "documentation-task",
+    labels: string[] = [],
+  ) => {
     const p = planWorkflow({ type, labels });
     return p.kind === "delivery" ? p.engineer : null;
   };
-  assert.equal(eng("dev-task"), "backend-engineer");
-  assert.equal(eng("dev-task", ["role:frontend"]), "frontend-engineer");
-  assert.equal(eng("dev-task", ["role:database"]), "database-engineer");
-  assert.equal(eng("devops-task"), "devops-engineer");
-  assert.equal(eng("test-task"), "automation-qa-engineer");
+  assert.equal(eng("dev-task"), "software-engineer");
+  for (const l of ["role:frontend", "role:backend", "role:database", "role:devops"]) {
+    assert.equal(eng("dev-task", [l]), "software-engineer", l); // PO 2026-11-23: legacy mapping
+  }
+  assert.equal(eng("devops-task"), "software-engineer");
+  assert.equal(eng("documentation-task"), "software-engineer");
+  assert.equal(eng("test-task"), "qa-engineer");
   assert.equal(
     codeOf(() => planWorkflow({ type: "dev-task", labels: ["role:frontend", "role:backend"] })),
     "TICKET_INVALID",

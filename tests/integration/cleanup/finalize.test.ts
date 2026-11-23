@@ -559,7 +559,7 @@ test("attempt left open by a crash: closed as CRASH_RECOVERED and retryable; a l
   const s = merged();
   s.f.merged = false;
   const db = db5(s.repo);
-  const step = startStep(db, { runId: "run5", stepId: "dev", round: 1, role: "backend-engineer" });
+  const step = startStep(db, { runId: "run5", stepId: "dev", round: 1, role: "software-engineer" });
   beginAttempt(db, step.id);
   acquireLease(db, { key: "task:o/repo#5", holder: "live-session", ttlMs: 60_000 });
   db.close();
@@ -597,9 +597,9 @@ test("scan: dead PID is crashed with a hint, NULL pid is unknown, a mixed run ke
   const s = merged();
   s.f.merged = false;
   const db = db5(s.repo);
-  const a = startStep(db, { runId: "run5", stepId: "dev", round: 1, role: "backend-engineer" });
+  const a = startStep(db, { runId: "run5", stepId: "dev", round: 1, role: "software-engineer" });
   beginAttempt(db, a.id);
-  const b = startStep(db, { runId: "run5", stepId: "old", round: 1, role: "backend-engineer" });
+  const b = startStep(db, { runId: "run5", stepId: "old", round: 1, role: "software-engineer" });
   beginAttempt(db, b.id);
   acquireLease(db, { key: "task:o/repo#5", holder: "dead-session", ttlMs: 60_000 });
   db.close();
@@ -617,7 +617,7 @@ test("crashed-only run with an unexpired lease is not leased; apply --safe recov
   const s = merged();
   s.f.merged = false;
   const db = db5(s.repo);
-  const step = startStep(db, { runId: "run5", stepId: "dev", round: 1, role: "backend-engineer" });
+  const step = startStep(db, { runId: "run5", stepId: "dev", round: 1, role: "software-engineer" });
   beginAttempt(db, step.id);
   acquireLease(db, { key: "task:o/repo#5", holder: "dead-session", ttlMs: 60_000 });
   db.close();

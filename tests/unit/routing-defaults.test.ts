@@ -5,6 +5,19 @@ import { test } from "node:test";
 import { parseConfig } from "../../runtime/shared/config.ts";
 import { Role } from "../../runtime/shared/contracts.ts";
 
+test("a removed role key in agents.routing names its replacement (CR-003)", () => {
+  assert.throws(
+    () =>
+      parseConfig({
+        github: { owner: "o", repo: "r", projectNumber: 1 },
+        agents: { routing: { "backend-engineer": { model: "sonnet", effort: "low" } } },
+      }),
+    (e: Error) =>
+      (e as { code?: string }).code === "CONFIG_INVALID" &&
+      /backend-engineer → software-engineer/.test(e.message),
+  );
+});
+
 test("agent-pack/agents/<role>.md model/effort equal the agents.routing defaults", () => {
   const c = parseConfig({ github: { owner: "o", repo: "r", projectNumber: 1 } });
   for (const role of Role.options) {

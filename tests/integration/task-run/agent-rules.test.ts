@@ -24,7 +24,7 @@ const agentsMd = (role: Role) => {
     pluginRoot,
     role,
     category: "implementation",
-    edits: false,
+    edits: !READ_ONLY_ROLES.includes(role),
     repo: "app",
   });
   return readFileSync(join(taskRoot, "AGENTS.md"), "utf8");
@@ -65,8 +65,7 @@ test("role parts name their section headings, finding prefix and verdict", () =>
   assert.match(part("solution-architect"), /`architecture`[\s\S]*`ARC-001`/);
   assert.match(part("code-reviewer"), /`CR-001`[\s\S]*security-review:/);
   assert.match(part("security-reviewer"), /`SEC-001`[\s\S]*`critical`/);
-  assert.match(part("manual-qa-engineer"), /`qa`[\s\S]*`QA-001`/);
-  assert.match(part("automation-qa-engineer"), /`AQA-001`/);
+  assert.match(part("qa-engineer"), /`qa`[\s\S]*`QA-001`/);
   for (const name of ["core", "editing", "read-only", ...Role.options]) {
     assert.doesNotMatch(part(name), /Pack-ID|rule pack/, name);
   }
@@ -78,8 +77,8 @@ test("architecture contract rules are loaded into the role AGENTS.md (ARC-001, n
     agentsMd("solution-architect"),
     /Architecture contract:[\s\S]*omi-architecture\.yaml/,
   );
-  assert.match(agentsMd("backend-engineer"), /`architecture`[\s\S]*plugin-paths\.ts/);
-  assert.match(agentsMd("frontend-engineer"), /place every new file by it/);
+  assert.match(agentsMd("software-engineer"), /`architecture`[\s\S]*plugin-paths\.ts/);
+  assert.match(agentsMd("software-engineer"), /place every new file by it/);
   assert.doesNotMatch(agentsMd("business-analyst"), /place every new file by it/);
 });
 
@@ -190,7 +189,7 @@ test("/context of an agent run: the role AGENTS.md loads; path-scoped repo rules
     join(taskRoot, "app", ".claude", "rules", "api.md"),
     '---\npaths:\n  - "src/api/**"\n---\nAPI-RULE-CANARY\n',
   );
-  const role = "backend-engineer";
+  const role = "software-engineer";
   writeRoleFiles({
     taskRoot,
     pluginRoot,

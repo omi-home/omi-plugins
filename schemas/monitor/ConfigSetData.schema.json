@@ -245,67 +245,7 @@
                   ],
                   "additionalProperties": false
                 },
-                "frontend-engineer": {
-                  "default": {
-                    "model": "sonnet",
-                    "effort": "medium"
-                  },
-                  "type": "object",
-                  "properties": {
-                    "model": {
-                      "type": "string",
-                      "enum": [
-                        "sonnet",
-                        "opus",
-                        "haiku"
-                      ]
-                    },
-                    "effort": {
-                      "type": "string",
-                      "enum": [
-                        "low",
-                        "medium",
-                        "high"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "model",
-                    "effort"
-                  ],
-                  "additionalProperties": false
-                },
-                "backend-engineer": {
-                  "default": {
-                    "model": "sonnet",
-                    "effort": "medium"
-                  },
-                  "type": "object",
-                  "properties": {
-                    "model": {
-                      "type": "string",
-                      "enum": [
-                        "sonnet",
-                        "opus",
-                        "haiku"
-                      ]
-                    },
-                    "effort": {
-                      "type": "string",
-                      "enum": [
-                        "low",
-                        "medium",
-                        "high"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "model",
-                    "effort"
-                  ],
-                  "additionalProperties": false
-                },
-                "database-engineer": {
+                "software-engineer": {
                   "default": {
                     "model": "sonnet",
                     "effort": "medium"
@@ -395,67 +335,7 @@
                   ],
                   "additionalProperties": false
                 },
-                "manual-qa-engineer": {
-                  "default": {
-                    "model": "sonnet",
-                    "effort": "medium"
-                  },
-                  "type": "object",
-                  "properties": {
-                    "model": {
-                      "type": "string",
-                      "enum": [
-                        "sonnet",
-                        "opus",
-                        "haiku"
-                      ]
-                    },
-                    "effort": {
-                      "type": "string",
-                      "enum": [
-                        "low",
-                        "medium",
-                        "high"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "model",
-                    "effort"
-                  ],
-                  "additionalProperties": false
-                },
-                "automation-qa-engineer": {
-                  "default": {
-                    "model": "sonnet",
-                    "effort": "medium"
-                  },
-                  "type": "object",
-                  "properties": {
-                    "model": {
-                      "type": "string",
-                      "enum": [
-                        "sonnet",
-                        "opus",
-                        "haiku"
-                      ]
-                    },
-                    "effort": {
-                      "type": "string",
-                      "enum": [
-                        "low",
-                        "medium",
-                        "high"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "model",
-                    "effort"
-                  ],
-                  "additionalProperties": false
-                },
-                "devops-engineer": {
+                "qa-engineer": {
                   "default": {
                     "model": "sonnet",
                     "effort": "medium"
@@ -490,14 +370,10 @@
                 "business-analyst",
                 "solution-architect",
                 "ui-ux-designer",
-                "frontend-engineer",
-                "backend-engineer",
-                "database-engineer",
+                "software-engineer",
                 "code-reviewer",
                 "security-reviewer",
-                "manual-qa-engineer",
-                "automation-qa-engineer",
-                "devops-engineer"
+                "qa-engineer"
               ],
               "additionalProperties": false
             }

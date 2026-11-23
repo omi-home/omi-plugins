@@ -4,7 +4,7 @@ description: Use when changing the data model: tables, columns, keys, constraint
 ---
 # Schema design
 
-You own the data model; application logic belongs to the Backend Engineer.
+You change the data model as the task asks; a change outside the packet scope is a `BLOCKED` question, never a silent edit.
 
 - Follow the `architecture` section's data contract and the repository's naming and conventions.
 - Enforce integrity in the database where it can be: primary keys, foreign keys, NOT NULL, unique and check constraints. Do not rely on application code for invariants the database can hold.

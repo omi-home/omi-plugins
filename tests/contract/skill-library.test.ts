@@ -2,6 +2,7 @@
 // each role agent declares its default and allowed skills; adapted skills name their source.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { Role } from "../../runtime/shared/contracts.ts";
@@ -61,9 +62,22 @@ test("adapted skills cite repo, path and commit listed in THIRD_PARTY_NOTICES", 
   }
 });
 
+test("no skill-library or agent file names a removed role (DevTask-0131 #382)", () => {
+  const removed = /(frontend|backend|database|devops)[ -]engineer|(manual|automation)[ -]qa/i;
+  const files: string[] = [];
+  for (const dir of ["skill-library", "agents", "agents-md"]) {
+    const base = join(pluginRoot, "agent-pack", dir);
+    for (const e of readdirSync(base, { recursive: true, withFileTypes: true })) {
+      if (e.isFile()) files.push(join(e.parentPath, e.name));
+    }
+  }
+  assert.ok(files.length > 40);
+  for (const f of files) assert.doesNotMatch(readFileSync(f, "utf8"), removed, f);
+});
+
 test("every role declares default and allowed skills that exist; each skill has a role", () => {
   const used = new Set<string>();
-  assert.equal(roles.length, 11);
+  assert.equal(roles.length, 7);
   for (const role of roles) {
     const s = roleSkills(pluginRoot, role as Role);
     assert.ok(s.default.length >= 1 && s.default.length <= 3, `${role}: default ≤ 3`);

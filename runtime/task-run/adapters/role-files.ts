@@ -9,6 +9,7 @@ import { AGENT_PACK } from "../../harness/domain/harness.ts";
 import { READ_ONLY_ROLES, type ReportCategory, Role } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { PLUGIN_ROOT } from "../../shared/plugin-paths.ts";
+import { EDITOR_NPM_SCRIPTS, READ_COMMANDS, REVIEWER_ROLES } from "../domain/permissions.ts";
 import type { SkillChoice } from "../domain/run.ts";
 
 /** Skill the Coordinator always adds on rework for roles that change files (Spike-0011 §4). */
@@ -109,15 +110,16 @@ export function writeRoleFiles(o: {
   // Must name exactly what prepareAgent grants: an instruction outside allowedTools blocks the step (#252).
   const checks = o.checks ?? [];
   const checkLine = checks.length
-    ? ` The repository's check commands are ${checks.map((c) => `\`cd ${o.repo} && ${c}\``).join(", ")}; each may take extra arguments (e.g. one test file). Run each check as its own command: no \`;\`, no pipes, no chaining. Once a \`cd ${o.repo} && …\` has run, the shell stays inside the repository, so run the bare check (e.g. \`${checks[0]}\`) and never \`cd ${o.repo}\` again. No other command is permitted, including the repository's own aggregate scripts.`
+    ? ` The repository's check commands are ${checks.map((c) => `\`cd ${o.repo} && ${c}\``).join(", ")}; each may take extra arguments (e.g. one test file). Run each check as its own command: no \`;\`, no pipes, no chaining. Once a \`cd ${o.repo} && …\` has run, the shell stays inside the repository, so run the bare check (e.g. \`${checks[0]}\`) and never \`cd ${o.repo}\` again. No other command is permitted.`
     : "";
-  const repoLine = `The product repository is \`${o.repo}/\`. Your shell starts in this workspace: run git as \`git -C ${o.repo} <command>\` (never \`cd\` before git: it is refused). ${checks.length ? `Once a check's \`cd ${o.repo} && …\` has run, the shell stays inside the repository: run read-only git bare there (\`git status\`, \`git diff\`, \`git log\`, \`git show\`), not \`git -C ${o.repo}\`.` : ""}${checkLine} Paths in your result are relative to the repository (\`src/x.ts\`, not \`${o.repo}/src/x.ts\`).`;
-  const sections = [
-    part("core"),
-    part(READ_ONLY_ROLES.includes(o.role) ? "read-only" : "editing"),
-    repoLine,
-    part(o.role),
-  ];
+  const editLine = o.edits
+    ? ` You may also run \`git mv\` (as \`git -C ${o.repo} mv\`) and the repository's npm scripts ${EDITOR_NPM_SCRIPTS.map((s) => `\`npm run ${s}\``).join(", ")}, each with or without arguments.`
+    : "";
+  const readLine = REVIEWER_ROLES.includes(o.role)
+    ? ` You may read with ${READ_COMMANDS.map((c) => `\`${c}\``).join(", ")} and read-only git, also in a pipeline (e.g. \`git show <sha> | grep <text>\`).`
+    : "";
+  const repoLine = `The product repository is \`${o.repo}/\`. Your shell starts in this workspace: run git as \`git -C ${o.repo} <command>\` (never \`cd\` before git: it is refused). ${checks.length ? `Once a check's \`cd ${o.repo} && …\` has run, the shell stays inside the repository: run read-only git bare there (\`git status\`, \`git diff\`, \`git log\`, \`git show\`), not \`git -C ${o.repo}\`.` : ""}${checkLine}${editLine}${readLine} Paths in your result are relative to the repository (\`src/x.ts\`, not \`${o.repo}/src/x.ts\`).`;
+  const sections = [part("core"), part(o.edits ? "editing" : "read-only"), repoLine, part(o.role)];
   mkdirSync(join(o.taskRoot, ".claude"), { recursive: true });
   writeFileSync(
     join(o.taskRoot, "AGENTS.md"),

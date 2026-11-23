@@ -1,4 +1,4 @@
-// T1.4 canary, skills since #199: the Backend Engineer's skills reach the named agent through the
+// T1.4 canary, skills since #199: the Software Engineer's skills reach the named agent through the
 // task workspace `.claude/skills/` and never the main session.
 // /context check runs whenever `claude` is on PATH (no model call). Live agent runs cost tokens:
 // opt in with OMI_LIVE=1.
@@ -21,7 +21,7 @@ import { prepareAgent } from "../../../runtime/task-run/application/slice.ts";
 const pluginRoot = fileURLToPath(new URL("../../../", import.meta.url)).replace(/[\\/]$/, "");
 /** Every library skill: none may reach the main session; an agent sees only what OMI installed. */
 const LIBRARY = readdirSync(join(pluginRoot, "agent-pack", "skill-library"));
-/** Skill canary (#199): a default skill of the Backend Engineer. */
+/** Skill canary (#199): a default skill of the Software Engineer. */
 const CANARY = "backend-implementation";
 const AGENTS = readdirSync(join(pluginRoot, "agent-pack", "agents")).map((f) =>
   f.replace(/\.md$/, ""),
@@ -30,8 +30,8 @@ const hasClaude = spawnSync("claude", ["--version"]).status === 0;
 const live = hasClaude && process.env.OMI_LIVE === "1";
 const worktree = () => mkdtempSync(join(tmpdir(), "omi-t14-"));
 
-test("the canary is a default skill of the Backend Engineer", () =>
-  assert.ok(roleSkills(pluginRoot, "backend-engineer").default.includes(CANARY)));
+test("the canary is a default skill of the Software Engineer", () =>
+  assert.ok(roleSkills(pluginRoot, "software-engineer").default.includes(CANARY)));
 
 /** `/context` of a fresh session with `--plugin-dir <dir>` (no tokens spent). */
 const context = (dir: string) => {
@@ -90,7 +90,7 @@ test("agent run in a task workspace: exactly the installed skills are listed (#1
   skip: !hasClaude && "claude CLI not on PATH",
 }, () => {
   const taskRoot = worktree();
-  const role = "backend-engineer";
+  const role = "software-engineer";
   const skills = [...roleSkills(pluginRoot, role).default, "minimal-change"];
   writeRoleFiles({
     taskRoot,
@@ -121,14 +121,14 @@ test("agent run in a task workspace: exactly the installed skills are listed (#1
   assert.deepEqual(listed.sort(), skills.sort());
 });
 
-/** Backend Engineer in a fresh task workspace; `roleFiles: false` leaves AGENTS.md out. */
+/** Software Engineer in a fresh task workspace; `roleFiles: false` leaves AGENTS.md out. */
 const runAgent = (roleFiles: boolean) => {
   const taskRoot = worktree();
   const repo = join(taskRoot, "repo");
   mkdirSync(repo);
   const o = {
     pluginRoot,
-    role: "backend-engineer" as const,
+    role: "software-engineer" as const,
     taskRoot,
     worktree: repo,
     prompt: "Which skills are available to you? Reply with their names only.",

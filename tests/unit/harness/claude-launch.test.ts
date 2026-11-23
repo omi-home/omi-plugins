@@ -58,7 +58,7 @@ test("port: the registry picks the adapter by Profile.harness and it declares it
 test("launch: named agent, cwd = task workspace, plugin dir, project settings, prompt via stdin", () => {
   const l = buildAgentLaunch({
     pluginRoot: root,
-    role: "backend-engineer",
+    role: "software-engineer",
     taskRoot: task,
     worktree: repo,
     prompt: "do x",
@@ -68,7 +68,7 @@ test("launch: named agent, cwd = task workspace, plugin dir, project settings, p
   assert.equal(l.stdin, "do x");
   assert.ok(!l.args.includes("do x"));
   const at = (flag: string) => l.args[l.args.indexOf(flag) + 1];
-  assert.equal(at("--agent"), "omi-engineering:backend-engineer");
+  assert.equal(at("--agent"), "omi-engineering:software-engineer");
   assert.equal(at("--plugin-dir"), join(root, "agent-pack"));
   assert.equal(at("--setting-sources"), "project,local");
   assert.ok(!l.args.includes("--add-dir"), "the clone is inside the task workspace");
@@ -77,7 +77,7 @@ test("launch: named agent, cwd = task workspace, plugin dir, project settings, p
   assert.equal(l.configDir, join(task, ".omi-home", "claude"));
   const dev = buildAgentLaunch({
     pluginRoot: root,
-    role: "backend-engineer",
+    role: "software-engineer",
     taskRoot: task,
     worktree: repo,
     prompt: "",
@@ -170,7 +170,7 @@ test("launch: relative paths rejected", () => {
     () =>
       buildAgentLaunch({
         pluginRoot: "plug",
-        role: "backend-engineer",
+        role: "software-engineer",
         taskRoot: "/t",
         worktree: "/wt",
         prompt: "",
@@ -299,7 +299,7 @@ test("profile (#217): model/effort passed; auth env from the profile only, host 
 test("routing (#250): no profile → --model/--effort from agents.routing[role]", () => {
   const base = {
     pluginRoot: root,
-    role: "backend-engineer" as const,
+    role: "software-engineer" as const,
     taskRoot: task,
     worktree: repo,
     prompt: "",

@@ -6,9 +6,10 @@ import { join } from "node:path";
 import { z } from "zod";
 import {
   FINDING_PREFIX,
+  isAcceptanceQaStep,
+  isReadOnlyStep,
   PASSED_REQUIRES,
   parseContract,
-  READ_ONLY_ROLES,
   ROLE_SECTION,
   SCHEMA_VERSION,
   STEP_RESULT_SCHEMA,
@@ -267,7 +268,8 @@ export function acceptStepResultWithWarnings(
   }
 
   const issues: { path: string; message: string }[] = [];
-  if (READ_ONLY_ROLES.includes(r.role)) {
+  const readOnly = isReadOnlyStep(r.role, packet.stepId);
+  if (readOnly) {
     for (const f of r.changedFiles)
       issues.push({ path: f, message: `${r.role} cannot change files` });
     if (r.commitSha) issues.push({ path: "commitSha", message: `${r.role} cannot commit` });
@@ -298,10 +300,10 @@ export function acceptStepResultWithWarnings(
   }
   // The runtime owns `changedFiles`: git's view since baseSha, never the agent's claim (#272).
   // Read-only roles change nothing by definition, whatever the worktree already holds.
-  const changedFiles = READ_ONLY_ROLES.includes(r.role)
-    ? []
-    : [...changedSince(packet.worktree, packet.baseSha)].sort();
-  const needs = r.status === "PASSED" ? PASSED_REQUIRES[r.role] : undefined;
+  const changedFiles = readOnly ? [] : [...changedSince(packet.worktree, packet.baseSha)].sort();
+  const required = r.status === "PASSED" ? PASSED_REQUIRES[r.role] : undefined;
+  const needs =
+    required === "by-step" ? (isAcceptanceQaStep(packet.stepId) ? "section" : "files") : required;
   if (needs === "files" && !changedFiles.length) {
     issues.push({ path: "changedFiles", message: `${r.role} PASSED without changing a file` });
   }
@@ -327,7 +329,7 @@ export function acceptStepResultWithWarnings(
       issues,
     });
   }
-  if (!unchanged.length || READ_ONLY_ROLES.includes(r.role)) {
+  if (!unchanged.length || readOnly) {
     return { result: { ...r, changedFiles }, warnings };
   }
   const note = ` [runtime: claimed but not changed since baseSha: ${unchanged.join(", ")}]`;

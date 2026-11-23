@@ -32,7 +32,7 @@ test("every role gets AGENTS.md, REPORT.md, settings and its default skills; rew
   writeRoleFiles({
     taskRoot,
     pluginRoot,
-    role: "backend-engineer",
+    role: "software-engineer",
     category: "implementation",
     edits: true,
     repo: "app",
@@ -53,6 +53,30 @@ test("every role gets AGENTS.md, REPORT.md, settings and its default skills; rew
       "run read-only git bare there (`git status`, `git diff`, `git log`, `git show`)",
     ),
   );
+  // DevTask-0131 #382: the engineer is told it may `git mv` and run the repo's npm scripts.
+  assert.ok(agents.includes("`git -C app mv`"));
+  assert.ok(agents.includes("`npm run check`, `npm run arch`, `npm run test`, `npm run format`"));
+  assert.ok(!agents.includes("read with `grep`"));
+  writeRoleFiles({
+    taskRoot,
+    pluginRoot,
+    role: "code-reviewer",
+    category: "review",
+    edits: false,
+    repo: "app",
+  });
+  const reviewer = readFileSync(join(taskRoot, "AGENTS.md"), "utf8");
+  assert.ok(reviewer.includes("read with `grep`, `cat`"));
+  assert.ok(reviewer.includes("also in a pipeline"));
+  assert.ok(!reviewer.includes("`git -C app mv`"));
+  writeRoleFiles({
+    taskRoot,
+    pluginRoot,
+    role: "software-engineer",
+    category: "implementation",
+    edits: true,
+    repo: "app",
+  });
   assert.equal(
     readFileSync(join(taskRoot, "REPORT.md"), "utf8"),
     readFileSync(join(pluginRoot, "templates/reports/implementation.md"), "utf8"),
@@ -67,7 +91,7 @@ test("only the chosen skills are installed; a skill no longer chosen is removed 
   const o = {
     taskRoot,
     pluginRoot,
-    role: "backend-engineer" as const,
+    role: "software-engineer" as const,
     category: "implementation" as const,
     edits: true,
     repo: "app",
@@ -83,14 +107,14 @@ test("--skills: in the role's set accepted; outside it, a bad role or no reason 
   const c = parseSkillChoice(
     pluginRoot,
     [
-      "backend-engineer=minimal-change, systematic-debugging",
+      "software-engineer=minimal-change, systematic-debugging",
       "code-reviewer=over-engineering-review",
     ],
     " small risky diff ",
   );
   assert.deepEqual(c, {
     byRole: {
-      "backend-engineer": ["minimal-change", "systematic-debugging"],
+      "software-engineer": ["minimal-change", "systematic-debugging"],
       "code-reviewer": ["over-engineering-review"],
     },
     reason: "small risky diff",
@@ -98,18 +122,18 @@ test("--skills: in the role's set accepted; outside it, a bad role or no reason 
   assert.equal(parseSkillChoice(pluginRoot, undefined, undefined), undefined);
   const refused = (flags: string[], reason = "why") =>
     assert.throws(() => parseSkillChoice(pluginRoot, flags, reason), { code: "USAGE_INVALID" });
-  refused(["backend-engineer=semantic-code-review"]); // a reviewer's skill
-  refused(["backend-engineer=no-such-skill"]);
+  refused(["software-engineer=semantic-code-review"]); // a reviewer's skill
+  refused(["software-engineer=no-such-skill"]);
   refused(["pilot=minimal-change"]);
   refused(["minimal-change"]);
-  refused(["backend-engineer=minimal-change"], " ");
+  refused(["software-engineer=minimal-change"], " ");
 });
 
 test("step skills: defaults + choice; rework adds receiving-review-findings; escalation its skill", () => {
-  const choice = { byRole: { "backend-engineer": ["minimal-change"] }, reason: "x" };
-  const be = { role: "backend-engineer" as const, stepId: "implement" };
+  const choice = { byRole: { "software-engineer": ["minimal-change"] }, reason: "x" };
+  const be = { role: "software-engineer" as const, stepId: "implement" };
   assert.deepEqual(stepSkills(pluginRoot, { ...be, round: 1 }, choice), [
-    ...roleSkills(pluginRoot, "backend-engineer").default,
+    ...roleSkills(pluginRoot, "software-engineer").default,
     "minimal-change",
   ]);
   assert.ok(stepSkills(pluginRoot, { ...be, round: 2 }).includes("receiving-review-findings"));
@@ -124,6 +148,16 @@ test("skill list: every role's sets and a description for every library skill", 
   const r = skillList(Role.options, pluginRoot);
   assert.equal(r.roles.length, Role.options.length);
   assert.equal(r.skills.length, 33);
+  // Every skill a role names exists in the library, and no role names a removed one.
+  const library = new Set(r.skills.map((s) => s.name));
+  for (const role of r.roles) {
+    for (const s of [...role.default, ...role.allowed])
+      assert.ok(library.has(s), `${role.role}: ${s}`);
+  }
+  assert.deepEqual(
+    r.roles.map((x) => x.role),
+    [...Role.options],
+  );
   assert.ok(
     r.skills.every((s) => /^Use (when|before|on) /.test(s.description)),
     "descriptions",

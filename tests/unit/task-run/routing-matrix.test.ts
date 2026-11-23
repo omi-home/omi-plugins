@@ -13,7 +13,7 @@ const agentsOf = (p: WorkflowPlan): Role[] =>
         p.engineer,
         "code-reviewer",
         ...(p.security ? (["security-reviewer"] as Role[]) : []),
-        ...(p.manualQa ? (["manual-qa-engineer"] as Role[]) : []),
+        ...(p.manualQa ? (["qa-engineer"] as Role[]) : []),
       ];
 
 const MATRIX: [string, IssueType, string[], IssueType | null, string, Role[]][] = [
@@ -23,7 +23,7 @@ const MATRIX: [string, IssueType, string[], IssueType | null, string, Role[]][] 
     [],
     "bug",
     "Bug Resolution",
-    ["backend-engineer", "code-reviewer", "manual-qa-engineer"],
+    ["software-engineer", "code-reviewer", "qa-engineer"],
   ],
   [
     "backend task",
@@ -31,7 +31,7 @@ const MATRIX: [string, IssueType, string[], IssueType | null, string, Role[]][] 
     [],
     null,
     "Feature Implementation",
-    ["backend-engineer", "code-reviewer"],
+    ["software-engineer", "code-reviewer"],
   ],
   [
     "UI task",
@@ -39,7 +39,7 @@ const MATRIX: [string, IssueType, string[], IssueType | null, string, Role[]][] 
     ["role:frontend", "ui"],
     null,
     "Feature Implementation",
-    ["frontend-engineer", "code-reviewer", "manual-qa-engineer"],
+    ["software-engineer", "code-reviewer", "qa-engineer"],
   ],
   [
     "schema migration",
@@ -47,7 +47,7 @@ const MATRIX: [string, IssueType, string[], IssueType | null, string, Role[]][] 
     ["role:database"],
     null,
     "Feature Implementation",
-    ["database-engineer", "code-reviewer"],
+    ["software-engineer", "code-reviewer"],
   ],
   [
     "auth change",
@@ -55,25 +55,18 @@ const MATRIX: [string, IssueType, string[], IssueType | null, string, Role[]][] 
     ["security"],
     null,
     "Feature Implementation",
-    ["backend-engineer", "code-reviewer", "security-reviewer"],
+    ["software-engineer", "code-reviewer", "security-reviewer"],
   ],
-  ["refactor", "dev-task", ["refactor"], null, "Refactor", ["backend-engineer", "code-reviewer"]],
+  ["refactor", "dev-task", ["refactor"], null, "Refactor", ["software-engineer", "code-reviewer"]],
   [
     "pipeline change",
     "devops-task",
     [],
     null,
     "Feature Implementation",
-    ["devops-engineer", "code-reviewer"],
+    ["software-engineer", "code-reviewer"],
   ],
-  [
-    "test suite",
-    "test-task",
-    [],
-    null,
-    "Feature Implementation",
-    ["automation-qa-engineer", "code-reviewer"],
-  ],
+  ["test suite", "test-task", [], null, "Feature Implementation", ["qa-engineer", "code-reviewer"]],
   [
     "UI feature",
     "feature",
@@ -127,8 +120,8 @@ test("no analysis in delivery; every role reachable; far fewer calls than the fu
     assert.ok(!a.includes("business-analyst") && !a.includes("solution-architect"), p.workflow);
   }
   assert.deepEqual(new Set(plans.flatMap(agentsOf)), new Set(Role.options));
-  // Cost comparison: 29 agent calls across 13 use cases vs 143 if all 11 ran every time.
+  // Cost comparison: 29 agent calls across 13 use cases vs 91 if all 7 ran every time.
   const calls = plans.reduce((n, p) => n + agentsOf(p).length, 0);
   assert.equal(calls, 29);
-  assert.ok(calls * 4 < MATRIX.length * Role.options.length);
+  assert.ok(calls * 3 < MATRIX.length * Role.options.length);
 });

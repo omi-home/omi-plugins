@@ -1,6 +1,6 @@
 ---
 name: ui-design-contract
-description: Use when writing the screen-by-screen design contract the Frontend Engineer builds from.
+description: Use when writing the screen-by-screen design contract the Software Engineer builds from.
 ---
 # UI design contract
 

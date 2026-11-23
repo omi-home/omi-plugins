@@ -1,6 +1,6 @@
 // Delivery workflow (spec §10–§12): the planned engineer → deterministic checks → Code Reviewer
 // (→ Security Reviewer when required), with the Solution Architect once after two failed review
-// rounds, then QA: release validation (→ Manual QA when planned) up to PR_PENDING; and the
+// rounds, then QA: release validation (→ QA Engineer when planned) up to PR_PENDING; and the
 // analysis workflow (analysts write Issue sections, the PO decides). Every step: task packet → named
 // agent process (ADR-0001 D1) → verified result → persisted with its report → report posted
 // before the next step. The FSM decides every move; agents only recommend.
@@ -34,6 +34,7 @@ import { redact, redactDeep } from "../../shared/redact.ts";
 import type { Db } from "../../shared/sqlite/db.ts";
 import { cutAt } from "../../shared/text.ts";
 import { policyFrom, type WorkflowEvent } from "../domain/fsm.ts";
+import { EDITOR_NPM_SCRIPTS, READ_COMMANDS, REVIEWER_ROLES } from "../domain/permissions.ts";
 import type { AnalysisPlan, DeliveryPlan, WorkflowPlan } from "../domain/plan.ts";
 import type { RunRow, SkillChoice } from "../domain/run.ts";
 import type { RoleFilesPort, SlicePorts } from "./ports.ts";
@@ -60,7 +61,7 @@ export interface SliceDeps {
   /** Skills the Coordinator chose per role (#199); every step also gets its role's defaults. */
   skills?: SkillChoice;
   now?: () => Date;
-  /** Writes a `<!-- omi:section=… -->` of the Issue body (the Manual QA test cases). */
+  /** Writes a `<!-- omi:section=… -->` of the Issue body (the QA Engineer test cases). */
   writeSection?: (section: string, markdown: string) => void;
 }
 
@@ -93,7 +94,7 @@ export interface SliceTarget {
   baseSha: string;
   /** Task workspace (ADR-0002 D2): the agent's cwd; role files are written there. */
   taskRoot: string;
-  /** Defaults to the original slice: Backend Engineer, Feature Implementation. */
+  /** Defaults to the original slice: Software Engineer, Feature Implementation. */
   plan?: WorkflowPlan;
 }
 
@@ -103,13 +104,13 @@ interface StepSpec {
   category: ReportCategory;
   title: string;
   edits: boolean;
-  /** May run the repo's configured check commands without editing (Manual QA, PO #124). */
+  /** May run the repo's configured check commands without editing (QA Engineer, PO #124). */
   runsChecks?: boolean;
 }
 
 const DEV_BASE: StepSpec = {
   stepId: "implement",
-  role: "backend-engineer",
+  role: "software-engineer",
   category: "implementation",
   title: "Implementation",
   edits: true,
@@ -137,7 +138,7 @@ const SECURITY: StepSpec = {
 };
 const QA: StepSpec = {
   stepId: "qa",
-  role: "manual-qa-engineer",
+  role: "qa-engineer",
   category: "qa",
   title: "Acceptance QA",
   edits: false,
@@ -146,7 +147,7 @@ const QA: StepSpec = {
 const DEFAULT_PLAN: DeliveryPlan = {
   kind: "delivery",
   workflow: "Feature Implementation",
-  engineer: "backend-engineer",
+  engineer: "software-engineer",
   security: false,
   regressionTest: false,
   manualQa: false,
@@ -197,7 +198,7 @@ export function prepareAgent(o: {
   category: ReportCategory;
   /** Implementing roles may edit files in the clone. */
   edits: boolean;
-  /** May run the check commands without editing (Manual QA, PO #124). */
+  /** May run the check commands without editing (QA Engineer, PO #124). */
   runsChecks?: boolean;
   /** The repo's configured check commands. */
   checks: string[];
@@ -231,8 +232,28 @@ export function prepareAgent(o: {
     `Bash(${c} *)`,
   ]);
   const runsChecks = o.edits || o.runsChecks === true;
-  // Git stays read-only for everyone: the runtime commits an implementing step's work (#262).
-  const allowedTools = runsChecks ? [...read, ...checks] : read;
+  // Implementers also rename files (`git mv`) and run the repo's own npm scripts, with or without
+  // arguments (DevTask-0131 #382, carried from #329/#331). The runtime still does the committing.
+  const forms = (cmd: string) => [
+    `Bash(git -C ${repo} ${cmd})`,
+    `Bash(git -C ${repo} ${cmd} *)`,
+    `Bash(git ${cmd})`,
+    `Bash(git ${cmd} *)`,
+  ];
+  const npm = EDITOR_NPM_SCRIPTS.flatMap((s) => [
+    `Bash(cd ${repo} && npm run ${s})`,
+    `Bash(cd ${repo} && npm run ${s} *)`,
+    `Bash(npm run ${s})`,
+    `Bash(npm run ${s} *)`,
+  ]);
+  const editing = o.edits ? [...forms("mv"), ...npm] : [];
+  // Reviewers read code through pipes (`git show … | grep …`): Claude Code matches each part of a
+  // pipeline, so every reader named here is allowed on its own. None of them can write.
+  const reading = REVIEWER_ROLES.includes(o.role)
+    ? READ_COMMANDS.flatMap((c) => [`Bash(${c})`, `Bash(${c} *)`])
+    : [];
+  // Git stays read-only for everyone else: the runtime commits an implementing step's work (#262).
+  const allowedTools = [...read, ...(runsChecks ? checks : []), ...editing, ...reading];
   o.roleFiles.writeRoleFiles({ ...o, repo, checks: runsChecks ? o.checks : [] });
   const request: LaunchRequest = { ...o, allowedTools, acceptEdits: o.edits };
   return o.harness.launch(request);
@@ -679,7 +700,7 @@ function releaseStep(
       next: "Release validation.",
     });
     findings.push(...gate.findings);
-    checks = gate.results; // e.g. after a resume, Manual QA still gets this HEAD's checks (#121)
+    checks = gate.results; // e.g. after a resume, the QA Engineer still gets this HEAD's checks (#121)
   }
   const stepId = `release-validation${qaSuffix(ctx)}`;
   const comment = parseContract(
@@ -839,7 +860,7 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
               d.evidenceDir,
               `${QA.stepId}${qaSuffix(ctx)}-r${ctx.round}${ERROR_SUFFIX}`,
             );
-            const message = `Manual QA left the worktree dirty:
+            const message = `QA Engineer left the worktree dirty:
 ${dirty}`;
             writeFileSync(
               file,

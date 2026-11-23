@@ -6,7 +6,7 @@
 | Ticket | omi-home/omi-plugins#102 |
 | Workflow / Step | Feature Implementation / Step |
 | Round / Attempt | 2 / 1 |
-| Executor | backend-engineer |
+| Executor | software-engineer |
 | Model | requested opus · actual claude-opus-5-5 (observed) |
 | Effort | requested medium · actual unknown (not observable) |
 | Skills | — |

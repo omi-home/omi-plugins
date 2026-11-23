@@ -1,5 +1,5 @@
 // Workflow composition (spec §10 workflow catalogue, DevTask-0026 #55): the CLI picks a small set
-// of reusable stages from the Issue type and labels, never all eleven agents. Pure: no I/O.
+// of reusable stages from the Issue type and labels, never every agent. A delivery plan never picks the Business Analyst or Solution Architect: only the analysis plan of `omi task analyze` does. Pure: no I/O.
 import type { IssueType, Role } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 
@@ -19,7 +19,7 @@ export interface DeliveryPlan {
   security: boolean;
   /** Bug fix: the engineer's change must include a regression test. */
   regressionTest: boolean;
-  /** Manual QA agent checks the acceptance criteria after release validation (PO, #56). */
+  /** QA Engineer agent checks the acceptance criteria after release validation (PO, #56). */
   manualQa: boolean;
 }
 
@@ -33,15 +33,15 @@ export interface AnalysisPlan {
 export type WorkflowPlan = DeliveryPlan | AnalysisPlan;
 
 const ROLE_LABEL: Record<string, Role> = {
-  "role:frontend": "frontend-engineer",
-  "role:backend": "backend-engineer",
-  "role:database": "database-engineer",
-  "role:devops": "devops-engineer",
+  "role:frontend": "software-engineer",
+  "role:backend": "software-engineer",
+  "role:database": "software-engineer",
+  "role:devops": "software-engineer",
 };
 
 /** Labels that make the Security Reviewer mandatory (PO 2026-11-18). */
 export const SECURITY_LABELS = ["risk:high", "security"];
-/** Labels that add the Manual QA agent; Bug Resolution always has it (PO 2026-11-18, #56). */
+/** Labels that add the QA Engineer agent; Bug Resolution always has it (PO 2026-11-18, #56). */
 export const MANUAL_QA_LABELS = ["ui", "qa:manual"];
 
 export function planWorkflow(i: PlanInput): WorkflowPlan {
@@ -80,12 +80,8 @@ export function planWorkflow(i: PlanInput): WorkflowPlan {
       if (roles.length > 1) {
         throw new OmiError("TICKET_INVALID", `one role:* label expected, found ${roles.length}`);
       }
-      const engineer: Role =
-        i.type === "devops-task"
-          ? "devops-engineer"
-          : i.type === "test-task"
-            ? "automation-qa-engineer"
-            : (roles[0] ?? "backend-engineer");
+      // PO 2026-11-23: role:* labels stay accepted; every executable type maps to one of two roles.
+      const engineer: Role = i.type === "test-task" ? "qa-engineer" : "software-engineer";
       const bug = i.parentType === "bug";
       return {
         kind: "delivery",
