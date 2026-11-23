@@ -35,6 +35,7 @@ function launch(o: {
   plain?: boolean;
   model?: string;
   token?: string;
+  allowedTools?: string[];
 }): AgentLaunch {
   const repo = join(o.taskRoot, "repo");
   mkdirSync(repo, { recursive: true });
@@ -45,6 +46,7 @@ function launch(o: {
     worktree: repo,
     prompt: o.prompt,
     session: o.session,
+    ...(o.allowedTools ? { allowedTools: o.allowedTools } : {}),
     ...(o.model ? { route: { model: o.model, effort: "low" } } : {}),
   });
   const drop = (args: string[], flag: string) => {
@@ -138,4 +140,23 @@ test("live (d): --agent, --allowedTools and --model passed again on resume take 
   assert.ok(l.args.includes("--agent") && l.args.includes("--model"));
   const r = observeRun(spawnAgent(l));
   assert.match(r.actualModel, /^claude-haiku-/, "(d) --model on resume is observed");
+});
+
+test("live (d2): --allowedTools and --agent still bind after --resume (a tool outside the list is refused)", {
+  skip,
+}, () => {
+  const taskRoot = mkdtempSync(join(tmpdir(), "omi-probe-"));
+  const id = randomUUID();
+  const probe = "Run the shell command `curl --version` with the Bash tool, then reply DONE.";
+  const allowedTools = ["Bash(git status)"];
+  spawnAgent(launch({ taskRoot, session: { mode: "new", id }, prompt: "Reply OK.", allowedTools }));
+  const l = launch({ taskRoot, session: { mode: "resume", id }, prompt: probe, allowedTools });
+  const i = l.args.indexOf("--allowedTools");
+  assert.ok(i >= 0 && l.args.includes("--agent"), "both flags are passed on resume");
+  assert.ok(!l.args[i + 1]?.includes("curl"), "curl is outside the allow-list");
+  const r = observeRun(spawnAgent(l));
+  assert.ok(
+    r.permissionDenials.some((d) => d.includes("curl")),
+    `(d) a tool outside --allowedTools is still refused after --resume: ${r.permissionDenials.join("|")}`,
+  );
 });

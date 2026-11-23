@@ -62,7 +62,7 @@ interface Script {
   /** This analyst stops with an open question. */
   analysisBlocks?: string;
   /** QA Engineer verdicts, one per QA run (default PASSED); INVALID cites an absolute path. */
-  qa?: (Verdict | "INVALID")[];
+  qa?: (Verdict | "INVALID" | "NOSECTION")[];
   /** QA Engineer leaves a stray file in the worktree (#124). */
   qaDirties?: boolean;
   /** Engineer leaves an uncommitted file after its first step (release validation). */
@@ -176,13 +176,13 @@ function stubAgents(script: Script) {
     } else if (role === "qa-engineer" && /^qa(-|$)/.test(packet.stepId)) {
       const q = script.qa?.shift() ?? "PASSED";
       if (script.qaDirties) writeFileSync(join(packet.worktree, "qa-scratch.txt"), "x");
-      const v = q === "INVALID" ? "PASSED" : q;
+      const v = q === "INVALID" || q === "NOSECTION" ? "PASSED" : q;
       result = {
         ...base,
         status: v,
         ...(q === "INVALID" ? { evidencePaths: ["/abs/.git/omi/evidence/test.log"] } : {}),
         summary: `qa ${packet.stepId}`,
-        ...(v === "PASSED"
+        ...(v === "PASSED" && q !== "NOSECTION"
           ? { sectionUpdates: [{ section: "qa", markdown: "### Test cases" }] }
           : {}),
         findings:
@@ -1634,4 +1634,64 @@ test("the reason of `task unblock` reaches the resumed session once (#407)", () 
   assert.equal(flag(eng, "--resume"), old);
   assert.match(eng.stdin, /A person unblocked the run: PO: use the greet\.ts module/);
   assert.equal(repo.takeUnblockReason(s.db, "run"), undefined, "read once");
+});
+
+test("the unblock reason is spent by the step rerun after the unblock, not kept for a later resume (#407)", () => {
+  const s = setup({ review: (r) => (r === 1 ? "FAILED" : "PASSED") }, undefined, ":memory:", {
+    sessionMaxTokens: 10_000,
+  });
+  repo.saveAgentSession(s.db, {
+    runId: "run",
+    role: "software-engineer",
+    sessionId: randomUUID(),
+    tokens: 20_000,
+  });
+  repo.saveUnblockReason(s.db, "run", "PO: use the greet.ts module");
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const eng = s.agents.launches.filter((l) => isRole(l, "software-engineer"));
+  assert.equal(eng.length, 2);
+  assert.ok(!(eng[0] as AgentLaunch).args.includes("--resume"), "over the limit: new session");
+  assert.ok((eng[1] as AgentLaunch).args.includes("--resume"));
+  assert.ok(!(eng[1] as AgentLaunch).stdin.includes("A person unblocked the run"));
+});
+
+test("a resumed run that ends in an ordinary agent error is not restarted in a fresh session (#407)", () => {
+  const s = setup();
+  repo.saveAgentSession(s.db, {
+    runId: "run",
+    role: "software-engineer",
+    sessionId: randomUUID(),
+    tokens: 5,
+  });
+  const real = s.deps.runAgent;
+  const seen: AgentLaunch[] = [];
+  let failed = false;
+  const runAgent = (l: AgentLaunch) => {
+    seen.push(l);
+    if (failed || !l.args.includes("--resume")) return real(l);
+    failed = true;
+    return JSON.stringify({
+      type: "result",
+      is_error: true,
+      subtype: "error_max_turns",
+      result: "Reached max turns",
+      num_turns: 30,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+  };
+  runSlice({ ...s.deps, runAgent }, s.target);
+  const eng = seen.filter((l) => isRole(l, "software-engineer"));
+  assert.equal(eng.length, 1, "no second, fresh full-packet run in the same attempt");
+  assert.ok((eng[0] as AgentLaunch).args.includes("--resume"));
+  assert.ok(!(eng[0] as AgentLaunch).stdin.includes('"issueContext"'));
+});
+
+test("QA PASSED without its section is repaired in the session and the step PASSES (#407)", () => {
+  const s = setup({ qa: ["NOSECTION", "PASSED"] }, delivery({ manualQa: true }));
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const qa = s.agents.launches.filter((l) => isRole(l, "qa-engineer"));
+  assert.equal(qa.length, 2);
+  assert.match((qa[1] as AgentLaunch).stdin, /PASSED without its section/);
+  assert.equal(flag(qa[1] as AgentLaunch, "--resume"), flag(qa[0] as AgentLaunch, "--session-id"));
+  assert.match(reportOf(s, "qa"), /session repair \(1 contract repair\)/);
 });

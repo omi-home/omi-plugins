@@ -96,14 +96,15 @@ Mục tiêu: một workflow trên một ticket tốn ít quota nhất. Runtime c
 - **Tự sửa contract**: kết quả `CONTRACT_INVALID` → resume session đó với danh sách issue, tối đa `agents.contractRepairs` lần, rồi mới BLOCKED. Mọi role.
 - **Fallback = session mới + packet đầy đủ**: session vượt `agents.sessionMaxTokens`, hoặc resume lỗi (session mất, token profile khác không dùng được…). Lý do ghi ở dòng Cost của report (`session new — …`).
 - **Report**: dòng Cost thêm `session new|resumed|repair` (`repair` = đã resume để sửa contract, kèm số lần); usage/cost của một step là tổng các lần chạy của step đó (kể cả lần sửa), mỗi step vẫn tính riêng.
-- **Probe** (`OMI_LIVE=1 npm test -- tests/integration/task-run/session-probe.test.ts`; (c) cần `OMI_PROBE_TOKEN_2`): (a) `--session-id` lưu session dưới `CLAUDE_CONFIG_DIR`; (b) `--resume` nhớ nội dung lần đầu; (c) resume với `CLAUDE_CODE_OAUTH_TOKEN` của profile khác; (d) `--model` truyền lại khi resume có hiệu lực. Kết quả chạy trên Claude Code 2.1.325: **chưa ghi** — bước implement chạy không có quyền gọi live; người chạy probe ghi kết quả (a)–(d) vào bảng này. Nhánh nào không đạt không cần đổi code: runtime coi lỗi resume là fallback session mới.
+- **Probe** (`OMI_LIVE=1 npm test -- tests/integration/task-run/session-probe.test.ts`; (c) cần `OMI_PROBE_TOKEN_2`): (a) `--session-id` lưu session dưới `CLAUDE_CONFIG_DIR`; (b) `--resume` nhớ nội dung lần đầu; (c) resume với `CLAUDE_CODE_OAUTH_TOKEN` của profile khác; (d) `--model` truyền lại khi resume có hiệu lực. Kết quả chạy live trên Claude Code 2.1.325 (Coordinator, 2026-11-23, hai token profile khác nhau). Nhánh nào không đạt không cần đổi code: runtime coi lỗi resume là fallback session mới.
 
 | Probe | Kết quả |
 |---|---|
-| (a) `--session-id` lưu dưới `CLAUDE_CONFIG_DIR` | chưa chạy |
-| (b) `--resume` nhớ lần đầu | chưa chạy |
-| (c) resume với token profile khác | chưa chạy |
-| (d) `--agent`/`--allowedTools`/`--model` khi resume | chưa chạy |
+| (a) `--session-id` lưu dưới `CLAUDE_CONFIG_DIR` | ok |
+| (b) `--resume` nhớ lần đầu | ok |
+| (c) resume với token profile khác | ok (`isError=false remembers=true`) |
+| (d) `--agent`/`--allowedTools`/`--model` khi resume | ok |
+| (d2) tool ngoài `--allowedTools` vẫn bị từ chối sau `--resume` | ok |
 
 ## 6. Escalation và khôi phục
 

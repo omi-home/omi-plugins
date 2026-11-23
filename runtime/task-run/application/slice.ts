@@ -465,9 +465,10 @@ function agentStep(
         return o;
       };
       let obs: AgentObservation;
+      // The unblock reason belongs to the step rerun right after `task unblock`, whoever runs it (#407).
+      const unblocked = d.ports.store.takeUnblockReason(db, t.run.id);
       if (resumes) {
         const notes: string[] = [];
-        const unblocked = d.ports.store.takeUnblockReason(db, t.run.id);
         if (unblocked) notes.push(`A person unblocked the run: ${cut(unblocked, 1000)}`);
         const issueChanged = saved?.contextHash !== null && saved?.contextHash !== contextHash;
         if (issueChanged) notes.push("The Issue or its parents changed since your last run.");
@@ -484,7 +485,17 @@ function agentStep(
             }),
             "resume",
           );
-          if (obs.isError) throw new OmiError("INTERNAL", "resumed run ended in an error");
+          // Only a session that could not be loaded starts over; a real agent error is a normal failed attempt.
+          if (
+            obs.isError &&
+            (!obs.usage ||
+              obs.usage.numTurns === 0 ||
+              /no conversation found|session|not logged in|authentication|invalid api key|oauth/i.test(
+                obs.result,
+              ))
+          ) {
+            throw new OmiError("INTERNAL", "resumed run ended in an error");
+          }
         } catch (e) {
           if (e instanceof OmiError && e.code === "QUOTA_EXHAUSTED") throw e;
           // The session is gone or unusable (e.g. another profile's token): start over with the whole packet.
