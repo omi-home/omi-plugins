@@ -229,8 +229,27 @@ test("agent hook: a command that mentions git runs only plain lowercase git segm
     "X='a b' git diff a b",
     "if true; then git log; fi",
     "for i in 1; do git log; done",
+    "{ cd ..; }; git diff x y",
+    "! cd ..; git diff x y",
+    "builtin cd ..; git diff x y",
+    "command cd ..; git diff x y",
+    "popd; git diff x y",
+    ". ./x.sh; git diff x y",
+    "CDPATH=/tmp cd x && git diff a b",
+    "(cd ..); git log",
   ]) {
     assert.equal(call("Bash", { command: c }), GIT_ESCAPE, c);
+  }
+});
+
+test("agent hook: git as a word only; github/.gitignore commands are not git commands", () => {
+  for (const c of [
+    "npm run test -- tests/unit/github/a.test.ts",
+    "cd my-github-app && npm test",
+    "cat .gitignore",
+    "cd runtime && git diff --stat",
+  ]) {
+    assert.equal(call("Bash", { command: c }), null, c);
   }
 });
 

@@ -105,6 +105,12 @@ const GIT_REFUSED_OPTIONS = [
 /** Shell expansion and redirect characters: nothing may rewrite an argument after the hook read it. */
 const GIT_SHELL_CHARS = /[$`{}*?[<>]/;
 
+/** The word `git` (also `git.exe`, `/usr/bin/git`, `\git`, any case), not `github`/`.gitignore`/`digit`. */
+const GIT_WORD = /(?<![\w.-])git(?:\.exe)?(?![\w-])/i;
+/** A word that changes the working directory. */
+const CD_WORD =
+  /(?<![\w.-])(?:cd|chdir|sl|pushd|popd|set-location|push-location|pop-location)(?![\w-])/;
+
 const normPath = (p: string) => p.replaceAll("\\", "/").replace(/\/+$/, "");
 
 /**
@@ -207,21 +213,32 @@ export function agentPreToolUse(
     .map((x) => x.trim())
     .map((seg) => ({ seg, s: seg.replace(/^(?:\w+=[^\s"'`\\]*\s+)+/, "") })); // `s` without `VAR=value` prefixes
   const isGit = (s: string) => /^git(?:\.exe)?(?:\s|$)/.test(s);
-  const mentionsGit = /git/i.test(input.tool_input?.command ?? "");
+  const rawCommand = input.tool_input?.command ?? "";
+  const mentionsGit = GIT_WORD.test(rawCommand);
   // Fail closed: a git word anywhere means every segment holding it must itself be a plain
-  // lowercase `git` command (no wrapper such as timeout/env/command, no `(`, `{`, `!`, no then/do/else).
+  // lowercase `git` command (no wrapper such as timeout/env/command, no then/do/else), no segment
+  // may start with `(`, `{`, `!` or be a lone `}`/`)`, and the only directory change allowed is a
+  // plain leading `cd <dir>` (no wrapper, popd, source/`.`/eval, CDPATH/OLDPWD).
   if (
     mentionsGit &&
-    (/(?:^|[\s;&|(){}!])(?:then|do|else)(?:\s|$)/i.test(input.tool_input?.command ?? "") ||
-      segments.some(({ s }) => /git/i.test(s) && !isGit(s)))
+    (/(?:^|[\s;&|(){}!])(?:then|do|else)(?:\s|$)/i.test(rawCommand) ||
+      /CDPATH|OLDPWD/i.test(rawCommand) ||
+      segments.some(({ seg, s }) => {
+        if (/^[({!]/.test(seg) || seg === "}" || seg === ")") return true;
+        if (GIT_WORD.test(s) && !isGit(s)) return true;
+        if (isGit(s)) return false;
+        if (/^(?:builtin|command|eval|exec|source|\.)(?:\s|$)/i.test(s)) return true;
+        const cds = seg.match(new RegExp(CD_WORD.source, "gi")) ?? [];
+        if (cds.length === 0) return false;
+        return !(cds.length === 1 && seg === s && isCd(seg));
+      }))
   ) {
     const gh = segments.some(({ s }) => /^gh(?:\.exe)?(?:\s|$)/.test(s));
     if (!gh) return GIT_ESCAPE_REASON;
   }
-  const runsGit = segments.some(({ s }) => isGit(s));
   const bash = tool === "Bash";
   for (const { seg, s } of segments) {
-    if (runsGit && isCd(s) && cdEscapes(seg, s, bash)) return GIT_ESCAPE_REASON;
+    if (mentionsGit && isCd(s) && cdEscapes(seg, s, bash)) return GIT_ESCAPE_REASON;
     if (/^gh(?:\.exe)?(?:\s|$)/.test(s)) {
       return "OMI: agents do not call GitHub (gh). Report the result; the OMI CLI posts it.";
     }
