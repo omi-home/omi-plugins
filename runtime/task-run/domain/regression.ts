@@ -24,7 +24,21 @@ export function tcFiles(
   return changedTests.filter((f) => hasTcCode(contentOf(f), bug));
 }
 
-/** Quotes one path for the platform shell (double quotes work in sh and cmd.exe). */
+/** Characters a test file path may have to reach a shell command line (no expansion possible). */
+export const SAFE_PATH = /^[\w./@+-]+$/;
+
+/** Paths (backslashes read as `/`) that fail SAFE_PATH or contain a `..` segment. */
+export function unsafePaths(files: string[]): string[] {
+  return files.filter((f) => {
+    const p = f.replaceAll("\\", "/");
+    return !SAFE_PATH.test(p) || p.split("/").includes("..");
+  });
+}
+
+/**
+ * Quotes one path for the platform shell (double quotes work in sh and cmd.exe). Only called with
+ * paths that passed SAFE_PATH: inside double quotes `$()`, backticks, `$VAR` and `%VAR%` still expand.
+ */
 export const quoteFile = (f: string): string => `"${f.replaceAll("\\", "/").replaceAll('"', "")}"`;
 
 /** `{files}` of the configured command replaced by the quoted files, each on its own. */

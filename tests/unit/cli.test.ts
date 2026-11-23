@@ -225,8 +225,8 @@ Commands:
                          Edit omi.config.yaml from JSON {"changes":[{"path":"git.baseBranch","value":"dev"},
                          {"path":"setup","unset":true}]} (stdin, or --body-file). Validated as a whole,
                          comments kept, written atomically; unknown fields or wrong types: CONFIG_INVALID
-                         and the file stays; stale --if-match: CONFIG_CONFLICT; changing checks or setup
-                         (shell commands) needs --confirm-commands: POLICY_VIOLATION
+                         and the file stays; stale --if-match: CONFIG_CONFLICT; changing checks, setup or
+                         regression (shell commands) needs --confirm-commands: POLICY_VIOLATION
   skill list [--role <role>]
                          Read-only: each role's default and allowed skills (agent-pack) and what each
                          skill is for; the input for \`task run --skills\`

@@ -74,6 +74,7 @@ import {
   proofFindings,
   renderProof,
   tcFiles,
+  unsafePaths,
 } from "../domain/regression.ts";
 import type { RunRow, SkillChoice } from "../domain/run.ts";
 import { sumUsage } from "../domain/usage.ts";
@@ -809,6 +810,20 @@ function regressionGate(
   const rc = d.config.regression;
   if (bug === undefined || !rc?.command) {
     return { findings: [], notes: [], proof: `### Regression proof\n${SKIPPED_PROOF}` };
+  }
+  // File names reach a shell command line: only plain characters, before anything runs.
+  const unsafe = unsafePaths(files);
+  if (unsafe.length) {
+    return {
+      findings: [
+        high(
+          "REG-001",
+          `Regression test file names contain characters that are not allowed in a shell command: ${unsafe.join(", ")}`,
+          "Name TC-<bug>-<n> test files using only letters, digits and . / _ @ + -",
+        ),
+      ],
+      notes: [],
+    };
   }
   const base = d.config.git.baseBranch;
   let preFix: string;

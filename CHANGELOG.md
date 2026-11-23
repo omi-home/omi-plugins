@@ -7,7 +7,7 @@ Mọi thay đổi đáng kể của plugin `omi-coordinator` (trước 0.2.0: `o
 ### Added
 
 - `omi qa plan <n> [--dev <m>]…`: creates (re-run safe, marker `<!-- omi:qa-plan=<n>;kind=… -->`) the QATask "Test design" + "Verify" of a Story (FR/NFR/CR; Verify `Blocked by` its DevTasks) or the DevTask "Fix" + QATask "Retest" of a Bug; gate `TCG-001` fails a DevTask's checks while an `Auto = Y` case of its Story's TC table has no test naming `TC-<story>-<n>`; a Story/Bug parent rolls up on its children, not its unticked Scope boxes; Coordinator skills and runbook updated — DevTask-0143 #408.
-- `omi config get|set`: validated, comment-preserving, atomic edits of `omi.config.yaml` (`--if-match`, `--confirm-commands` for `checks`/`setup`; errors `CONFIG_INVALID`, `CONFIG_CONFLICT`, `POLICY_VIOLATION`) — DevTask-0095 #284.
+- `omi config get|set`: validated, comment-preserving, atomic edits of `omi.config.yaml` (`--if-match`, `--confirm-commands` for `checks`/`setup`/`regression`; errors `CONFIG_INVALID`, `CONFIG_CONFLICT`, `POLICY_VIOLATION`) — DevTask-0095 #284.
 - `--output json` envelope carries `protocolVersion` (`MONITOR_PROTOCOL_VERSION`, bump rules in `runtime/monitor/protocol.ts`); JSON Schemas for omi-monitor in `schemas/monitor/` (a test fails on drift; regenerate with `npm run schemas:monitor`).
 
 - Architecture check in the gate: new `GateCheck` `architecture` (order format, lint, architecture, build, test, scan), runs `omi arch check` when the worktree has a contract and `checks.architecture` is not configured, `skipped` without a contract; `omi doctor` check `architecture` (`CONTRACT_INVALID`, `ARCH_VIOLATION`, warn for missing contract or remaining `legacy`); `OmiConfig.architecture.contract` (default `omi-architecture.yaml`) — DevTask-0106 #327.

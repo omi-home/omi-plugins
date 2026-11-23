@@ -11,7 +11,7 @@ import { OmiError } from "../../shared/errors/errors.ts";
 import { CONFIG_FILE } from "../../shared/workspace.ts";
 
 /** Top-level keys whose values are shell commands OMI runs: changing them needs `--confirm-commands`. */
-const COMMAND_KEYS = new Set(["checks", "setup"]);
+const COMMAND_KEYS = new Set(["checks", "setup", "regression"]);
 
 export const etagOf = (text: string) => createHash("sha256").update(text).digest("hex");
 
@@ -115,7 +115,7 @@ export function configSet(workspace: string, o: ConfigSetOptions) {
   if (!o.confirmCommands && [...touched].some((k) => COMMAND_KEYS.has(k))) {
     throw new OmiError(
       "POLICY_VIOLATION",
-      "checks and setup are shell commands OMI runs: pass --confirm-commands to change them",
+      "checks, setup and regression are shell commands OMI runs: pass --confirm-commands to change them",
     );
   }
 

@@ -11,6 +11,7 @@ import {
   proofFindings,
   renderProof,
   tcFiles,
+  unsafePaths,
 } from "../../../runtime/task-run/domain/regression.ts";
 
 const BASE = { github: { owner: "o", repo: "r", projectNumber: 1 } };
@@ -118,6 +119,13 @@ test("report: the checks comment renders a Regression proof section", () => {
   });
   assert.match(out, /### Regression proof/);
   assert.match(out, /not ok 1/);
+});
+
+test("ARC-003: only plain paths reach the shell command line", () => {
+  assert.deepEqual(unsafePaths(["a/b.test.ts", "tests/x_y-1.test.ts", "tests\\w.test.ts"]), []);
+  const bad = ["a$b.test.ts", "a`x`.test.ts", "a%P%.test.ts", "a b.test.ts", "a;b.ts", "a&b.ts"];
+  bad.push("a|b.ts", "../x.test.ts", "tests/../x.test.ts", "$(id).test.ts", 'a"b.ts');
+  assert.deepEqual(unsafePaths(bad), bad);
 });
 
 test("CR-003: the rendered proof always fits the StepComment limit, however many files", () => {

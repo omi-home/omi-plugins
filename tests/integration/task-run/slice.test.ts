@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -77,6 +78,8 @@ interface Script {
   denies?: string[];
   /** Content of `tests/greet.test.ts` the engineer writes in each step (by step id). */
   testFile?: Record<string, string>;
+  /** File name under tests/ for `testFile` (default greet.test.ts). */
+  testName?: string;
 }
 
 const git = (cwd: string, ...a: string[]) =>
@@ -215,8 +218,9 @@ function stubAgents(script: Script) {
       const testFile = script.testFile?.[packet.stepId];
       if (testFile !== undefined) {
         mkdirSync(join(wt, "tests"), { recursive: true });
-        writeFileSync(join(wt, "tests", "greet.test.ts"), testFile);
-        files.push("tests/greet.test.ts");
+        const name = script.testName ?? "greet.test.ts";
+        writeFileSync(join(wt, "tests", name), testFile);
+        files.push(`tests/${name}`);
       }
       const breaking = script.breakChecksInRound === packet.round && packet.stepId === "implement";
       if (breaking) writeFileSync(join(wt, "broken"), "");
@@ -933,6 +937,20 @@ test("DevTask-0140: the test fails before the fix and passes on HEAD: a Regressi
   assert.match(readFileSync(join(s.deps.evidenceDir, before), "utf8"), /bug reproduced/);
   const after = logs.find((f) => f.endsWith("regression-after.log")) ?? "";
   assert.match(readFileSync(join(s.deps.evidenceDir, after), "utf8"), /fixed/);
+});
+
+test("ARC-004: a TC file name with shell syntax is REG-001 and the regression command never runs", () => {
+  const s = proofSetup(
+    { testFile: { implement: "test('TC-8-01: greets', () => {})\n" }, testName: "a$b.test.ts" },
+    { command: `node -e "require('fs').writeFileSync('ran.marker','x')" {files}` },
+  );
+  runSlice(s.deps, { ...s.target, parent: 8 });
+  assert.match(
+    s.checks()[0] ?? "",
+    /REG-001[^\n]*not allowed in a shell command[^\n]*a\$b\.test\.ts/,
+  );
+  assert.equal(existsSync(join(s.target.worktree, "ran.marker")), false);
+  assert.equal(git(s.target.worktree, "worktree", "list").split("\n").length, 1);
 });
 
 test("DevTask-0140: a test that passes before the fix is REG-002 (does not reproduce the bug)", () => {
