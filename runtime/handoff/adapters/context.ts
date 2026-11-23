@@ -27,8 +27,8 @@ export const SOURCES_TOTAL_CHARS = 16_000;
 /** Budget of the trusted Issue comments (taken out of TOTAL_CHARS before the parent chain). */
 export const COMMENTS_TOTAL_CHARS = 10_000;
 export const PER_COMMENT_CHARS = 4_000;
-/** Comments the agent does not need: step/cleanup reports, handoffs, carried findings. */
-const OMI_NOISE = /^\s*<!--\s*omi:(?:repo|handoff|carried-findings)=/;
+/** Comments OMI posts itself (step/cleanup reports, handoffs, carried findings, QA run reports…). */
+const OMI_NOISE = /^\s*<!--\s*omi:[\w-]+=/;
 
 const NODE = "number title body repository{nameWithOwner} labels(first:20){nodes{name}}";
 let parents = "";

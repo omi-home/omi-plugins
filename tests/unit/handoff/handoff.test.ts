@@ -22,6 +22,7 @@ import {
   extractJson,
   MAX_RESULT_CHARS,
   packetPrompt,
+  resumePrompt,
   type TaskPacketInput,
   TRUNCATION_SUFFIX,
 } from "../../../runtime/handoff/application/packet.ts";
@@ -673,6 +674,34 @@ test("issueComments: newest first, redacted, per-comment cut, total budget count
     ctx.issueContext.reduce((n, e) => n + e.body.length, 0) +
     c.comments.reduce((n, x) => n + x.body.length, 0);
   assert.ok(total <= TOTAL_CHARS);
+});
+
+test("issueComments: other OMI marker comments (qa-run) are dropped too", () => {
+  const ctx = fetchIssueContext(
+    config,
+    60,
+    withComments([
+      cm(`<!-- omi:qa-run=1 commit=${"a".repeat(40)} -->\nrun report`, T0),
+      cm("person note", T0),
+    ]),
+  );
+  assert.deepEqual(
+    ctx.issueComments.comments.map((c) => c.body),
+    ["person note"],
+  );
+});
+
+test("resumePrompt: a changed trusted comment reaches the resumed session", () => {
+  const { dir, base } = repo();
+  const p = buildTaskPacket(input(dir, base));
+  const comments = {
+    comments: [{ author: "po", createdAt: T0, body: "NEW-EVIDENCE", truncated: false }],
+    omittedCount: 0,
+  };
+  const withIt = resumePrompt(p, { openFindings: [], notes: [], issueComments: comments });
+  assert.match(withIt, /## Issue comments/);
+  assert.match(withIt, /NEW-EVIDENCE/);
+  assert.doesNotMatch(resumePrompt(p, { openFindings: [], notes: [] }), /Issue comments/);
 });
 
 test("TaskPacket: issueComments is strict and rendered in its own prompt section", () => {
