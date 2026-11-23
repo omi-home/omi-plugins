@@ -8,12 +8,18 @@ import { test } from "node:test";
 import { prBody } from "../../../runtime/release/adapters/pr.ts";
 import { newer, releaseCheck, releaseTag } from "../../../runtime/release/cli/release.ts";
 import type { GhRunner } from "../../../runtime/shared/github/client.ts";
+import { engineDeps, fakeGithub, routeGh } from "../../unit/github/lifecycle-fake.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 /** origin with main = init, develop = init + a release of plugin `p` at `version`. */
-function repo(version = "0.2.0", pkg = version, changelog = `## [${version}] - 2026-11-18`) {
+function repo(
+  version = "0.2.0",
+  pkg = version,
+  changelog = `## [${version}] - 2026-11-18`,
+  model = "legacy",
+) {
   const base = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-rel-")));
   git(base, "init", "-q", "--bare", "-b", "main", "origin.git");
   git(base, "clone", "-q", "origin.git", "repo");
@@ -23,7 +29,7 @@ function repo(version = "0.2.0", pkg = version, changelog = `## [${version}] - 2
   mkdirSync(join(root, ".omi-plugins"));
   writeFileSync(
     join(root, ".omi-plugins", "omi.config.yaml"),
-    "github:\n  owner: o\n  repo: repo\n  projectNumber: 2\n",
+    `github:\n  owner: o\n  repo: repo\n  projectNumber: 2\n  model: ${model}\n`,
   );
   git(root, "add", ".");
   git(root, "commit", "-q", "-m", "init");
@@ -195,6 +201,29 @@ test("release tag: tags the merge commit, pushes, closes the Issue; re-run is a 
   const again = releaseTag({ cwd: root, gh: fakeGh({ merged: sha, state: "CLOSED" }).run }, 7);
   assert.equal(again.created, false);
   assert.equal(again.closed, false);
+});
+
+test("release tag legacy: marks the Issue Done itself and never calls the engine", () => {
+  const root = repo();
+  const sha = git(root, "rev-parse", "origin/develop");
+  const r = releaseTag({ cwd: root, gh: fakeGh({ merged: sha }).run }, 7) as { engine?: unknown };
+  assert.equal(r.engine, undefined);
+});
+
+test("release tag v2: omi sync replaces markFinished; no direct Status write", () => {
+  const root = repo("0.2.0", "0.2.0", "## [0.2.0] - 2026-11-18", "v2");
+  const sha = git(root, "rev-parse", "origin/develop");
+  const rel = fakeGh({ merged: sha });
+  const project = fakeGithub([{ number: 7, type: "DevTask", status: "In review" }]);
+  const routed = routeGh(project.run, rel.run, /viewerPermission|blockedBy/);
+  const r = releaseTag({ cwd: root, gh: routed.run, state: engineDeps() }, 7) as {
+    engine?: { command: string };
+    changes: unknown[];
+  };
+  assert.equal(r.engine?.command, "sync");
+  assert.deepEqual(r.changes, []);
+  assert.ok(routed.seen.some((q) => q.includes("items(first:")));
+  assert.ok(rel.calls.some((a) => a[0] === "issue" && a[1] === "close")); // the tag step still closes
 });
 
 test("release tag: refused without a merged release PR or when the tag points elsewhere", () => {

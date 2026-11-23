@@ -1,8 +1,13 @@
 // A stateful fake GitHub for the v2 lifecycle tests (DevTask-0128 #373): every query reads `items`,
 // every mutation changes it and is logged in `mutations`.
 
+import { DatabaseSync } from "node:sqlite";
+import type { StateDeps } from "../../../runtime/github/cli/state.ts";
+import type { OmiConfig } from "../../../runtime/shared/config.ts";
 import { ProjectStatusV2 } from "../../../runtime/shared/contracts.ts";
 import type { GhRunner } from "../../../runtime/shared/github/client.ts";
+import { MIGRATIONS, migrate } from "../../../runtime/shared/sqlite/migrations.ts";
+import { loadDefaultWorkflow } from "../../../runtime/shared/workflow.ts";
 
 export interface Item {
   number: number;
@@ -139,4 +144,34 @@ export function fakeGithub(items: Item[]) {
     return data({});
   };
   return { run, mutations, items, byNumber };
+}
+
+/** State-engine dependencies over an in-memory state database (the engine's own config, not the repo's). */
+export function engineDeps(model: "v2" | "legacy" = "v2"): StateDeps {
+  const db = new DatabaseSync(":memory:");
+  migrate(db, MIGRATIONS);
+  const config = { github: { owner: "o", repo: "r", projectNumber: 2, model } } as OmiConfig;
+  return { config, workflow: loadDefaultWorkflow(), db: () => db };
+}
+
+/** The graphql text of a `gh` call, whichever way it carries it. */
+export function queryOf(args: string[], input?: string): string {
+  if (args.includes("--input")) return (JSON.parse(input ?? "{}") as { query: string }).query;
+  return (args.find((a) => a.startsWith("query=")) ?? "").slice("query=".length);
+}
+
+/**
+ * A runner that sends the calls matching `match` (REST and a command's own PR/ticket queries) to
+ * `other`, and everything else (the Project: items, Status, issue state) to `engine`. It records the
+ * queries so a test can prove which side a command talked to.
+ */
+export function routeGh(engine: GhRunner, other: GhRunner, match: RegExp) {
+  const seen: string[] = [];
+  const run: GhRunner = (args, input) => {
+    const q = args[1] === "graphql" ? queryOf(args, input) : "rest";
+    seen.push(q);
+    const own = q === "rest" || (match.test(q) && !q.includes("items(first:"));
+    return own ? other(args, input) : engine(args, input);
+  };
+  return { run, seen };
 }

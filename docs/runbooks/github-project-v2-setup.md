@@ -103,7 +103,7 @@ Khi `github.model: v2`, `omi` qua state machine (`workflow.yaml`) là bên ghi d
 | Sau khi mở PR / sau merge | `pr create`, `pr merge` | `omi sync` (In review do luật `auto`) |
 | Hoàn tất | `task finalize`, `release tag` | `omi sync` (Done, đóng Issue, roll-up cha, đóng GitHub Milestone) |
 
-Kết quả của engine nằm trong trường `engine` (`command`, `data`) của JSON đầu ra; `status` luôn rỗng ở v2. `github.model: legacy` giữ nguyên hành vi cũ (ghi Status trực tiếp).
+Kết quả của engine nằm trong trường `engine` (`command`, `data`) của JSON đầu ra; `task analyze` báo thêm `move` (lệnh `omi move` chạy trước agent) cạnh `engine` (`omi sync` sau agent); `status` luôn rỗng ở v2. `github.model: legacy` giữ nguyên hành vi cũ (ghi Status trực tiếp).
 
 Trạng thái riêng của legacy bị bỏ có chủ đích ở v2:
 

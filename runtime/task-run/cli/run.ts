@@ -33,6 +33,8 @@ export interface RunResult {
   status: StatusChange | null;
   /** github.model v2: the `omi sync` that replaced the direct Status write. */
   engine?: EngineOutcome;
+  /** github.model v2, `task analyze`: the `omi move <n> "In progress"` made before the agents ran. */
+  move?: EngineOutcome;
   /** Why the last agent attempt failed technically, when the run ended BLOCKED (#121). */
   error?: { code: string; message: string; file: string };
 }

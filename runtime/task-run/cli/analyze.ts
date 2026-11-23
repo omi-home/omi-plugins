@@ -71,8 +71,8 @@ export function taskAnalyze(deps: AgentRunDeps, issue: number): RunResult {
       if (run.state === "CREATED") run = step(db, run, "TICKET_VALID");
       // v2 has no Analysis status: the work is "In progress" (omi move). Legacy keeps Analysis.
       const v2 = isV2(config);
-      if (v2) lifecycleStart({ cwd: deps.cwd, gh, state: deps.state }, issue);
-      else setStatus(config, issue, "Analysis", gh);
+      const move = v2 ? lifecycleStart({ cwd: deps.cwd, gh, state: deps.state }, issue) : undefined;
+      if (!v2) setStatus(config, issue, "Analysis", gh);
       const evidenceOf = (id: string) => join(dirname(file), "evidence", id);
       const ctx = runAnalysis(
         {
@@ -109,6 +109,7 @@ export function taskAnalyze(deps: AgentRunDeps, issue: number): RunResult {
         state: ctx.state,
         round: ctx.round,
         status,
+        ...(move ? { move } : {}),
         ...(engine ? { engine } : {}),
         ...blockedBy(ctx.state, evidenceOf(run.id)),
       };
