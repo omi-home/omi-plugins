@@ -20,8 +20,10 @@ const ofTypes = (list: WorkItem[], types: readonly IssueTypeV2[]) =>
  * - `no_open_child`, `no_open_sibling`: true when there is none (vacuous).
  * - `any_child_in`: false without children. `parent_status_in`: false without a parent.
  * - `blockers_done`: true without blockers (vacuous).
- * - `linked_pr open_ready`: some open, non-draft PR whose latest verdict is not changes_requested.
- * - `linked_pr changes_requested`: some open, non-draft PR whose latest verdict is changes_requested.
+ * - `linked_pr changes_requested`: some open (non-draft) PR has the latest verdict changes_requested.
+ * - `linked_pr open_ready`: there is an open PR and none of them has changes_requested (the two
+ *   modes exclude each other, so In progress <-> In review cannot oscillate).
+ * - `blockers_done` also needs every external blocker done.
  * - `issue_closed_by_pr`: the Issue is closed and the model says a merged PR closed it.
  * "Done" is status Done; "open" is an open Issue not in a closed state.
  */
@@ -50,16 +52,18 @@ export function evaluatePredicate(
     return parent !== undefined && p.parent_status_in.includes(parent.status);
   }
   if ("blockers_done" in p) {
-    return item.blockedBy.every((n) => {
-      const b = idx.byNumber.get(n);
-      return b !== undefined && isDone(b);
-    });
+    return (
+      item.blockedBy.every((n) => {
+        const b = idx.byNumber.get(n);
+        return b !== undefined && isDone(b);
+      }) && item.externalBlockers.every((b) => b.done)
+    );
   }
   if ("linked_pr" in p) {
-    const want = p.linked_pr === "changes_requested";
-    return item.linkedPrs.some(
-      (pr) => pr.state === "open" && (pr.verdict === "changes_requested") === want,
-    );
+    const open = item.linkedPrs.filter((pr) => pr.state === "open");
+    const changes = open.some((pr) => pr.verdict === "changes_requested");
+    // Mutually exclusive: one open PR asking for changes outweighs the others.
+    return p.linked_pr === "changes_requested" ? changes : open.length > 0 && !changes;
   }
   if ("issue_closed_by_pr" in p) {
     return item.state === "closed" && item.closedByMergedPr;

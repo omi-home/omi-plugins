@@ -27,6 +27,14 @@ export const WorkItem = z.strictObject({
   parent: z.number().int().positive().nullable().default(null),
   children: z.array(z.number().int().positive()).default([]),
   blockedBy: z.array(z.number().int().positive()).default([]),
+  /**
+   * Blockers outside the model (another repository, or an Issue not in the Project): fetch reads
+   * whether each is done (closed as completed). They hold the item until done. In-model blockers
+   * use `blockedBy`.
+   */
+  externalBlockers: z
+    .array(z.strictObject({ ref: z.string().min(1), done: z.boolean() }))
+    .default([]),
   labels: z.array(z.string()).default([]),
   linkedPrs: z.array(LinkedPr).default([]),
   /** GitHub Milestone number the Issue belongs to, if any. */
@@ -42,17 +50,17 @@ export const ProjectModel = z.array(WorkItem).superRefine((items, ctx) => {
     }
     numbers.add(it.number);
   });
+  // Only `blockedBy` must resolve inside the model (an outside blocker goes to `externalBlockers`).
+  // A parent or child outside the Project is allowed: ModelIndex skips it, so it takes no part in
+  // roll-up.
   items.forEach((it, i) => {
-    const refs: [string, number[]][] = [
-      ["parent", it.parent === null ? [] : [it.parent]],
-      ["children", it.children],
-      ["blockedBy", it.blockedBy],
-    ];
-    for (const [field, list] of refs) {
-      for (const n of list) {
-        if (!numbers.has(n)) {
-          ctx.addIssue({ code: "custom", path: [i, field], message: `#${n} is not in the model` });
-        }
+    for (const n of it.blockedBy) {
+      if (!numbers.has(n)) {
+        ctx.addIssue({
+          code: "custom",
+          path: [i, "blockedBy"],
+          message: `#${n} is not in the model`,
+        });
       }
     }
   });

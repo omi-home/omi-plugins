@@ -154,6 +154,27 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE profile RENAME TO profile_legacy;
   ALTER TABLE profile_legacy ADD COLUMN migrated_at TEXT;
   `,
+  // 10 — snapshot of the previous `omi sync` per Project (ADR-0005 D5, DevTask-0124 #369): status and
+  // open/closed of each item, to diff external changes. No token or Issue text is stored.
+  `
+  CREATE TABLE project_snapshot (
+    repository  TEXT NOT NULL,
+    project     INTEGER NOT NULL,
+    synced_at   TEXT NOT NULL,
+    PRIMARY KEY (repository, project)
+  );
+  CREATE TABLE project_snapshot_item (
+    repository    TEXT NOT NULL,
+    project       INTEGER NOT NULL,
+    issue         INTEGER NOT NULL,
+    status        TEXT NOT NULL,
+    state         TEXT NOT NULL,
+    close_reason  TEXT,
+    PRIMARY KEY (repository, project, issue),
+    FOREIGN KEY (repository, project) REFERENCES project_snapshot (repository, project)
+      ON DELETE CASCADE
+  );
+  `,
 ];
 
 /** `label` names the database in errors ("state", "profile"). */
