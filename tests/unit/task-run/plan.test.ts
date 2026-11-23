@@ -44,7 +44,7 @@ test("engineer from role:* (default backend), type-bound roles, one role label o
   }
   assert.equal(eng("devops-task"), "software-engineer");
   assert.equal(eng("documentation-task"), "software-engineer");
-  assert.equal(eng("test-task"), "qa-engineer");
+  assert.equal(eng("test-task"), null); // a QATask is a read-only qa plan, not a delivery
   assert.equal(
     codeOf(() => planWorkflow({ type: "dev-task", labels: ["role:frontend", "role:backend"] })),
     "TICKET_INVALID",

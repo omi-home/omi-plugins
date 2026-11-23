@@ -8,6 +8,8 @@ export interface PlanInput {
   labels: string[];
   /** OMI type of the parent Issue, when it has one in this repository. */
   parentType?: IssueType | null;
+  /** Label of a Test design QATask (`qa.designLabel` of the config). */
+  qaDesignLabel?: string;
 }
 
 /** Executable Issue: engineer → checks → Code Review (→ Security) with the 2+2 review loop. */
@@ -30,7 +32,19 @@ export interface AnalysisPlan {
   analysts: Role[];
 }
 
-export type WorkflowPlan = DeliveryPlan | AnalysisPlan;
+/**
+ * QATask (DevTask-0134 #385): one read-only QA Engineer step, no commit, no PR, no review.
+ * `test-design` writes the TC table; `verify` (also a Bug's Retest) reports `Run #k`.
+ */
+export interface QaPlan {
+  kind: "qa";
+  workflow: "QA Test Design" | "QA Verify";
+  mode: "test-design" | "verify";
+  /** Verify of a Bug (Retest): the parent's `Steps to reproduce` replace the TC table. */
+  retest: boolean;
+}
+
+export type WorkflowPlan = DeliveryPlan | AnalysisPlan | QaPlan;
 
 const ROLE_LABEL: Record<string, Role> = {
   "role:frontend": "software-engineer",
@@ -38,6 +52,8 @@ const ROLE_LABEL: Record<string, Role> = {
   "role:database": "software-engineer",
   "role:devops": "software-engineer",
 };
+
+export const DEFAULT_QA_DESIGN_LABEL = "qa:test-design";
 
 /** Labels that make the Security Reviewer mandatory (PO 2026-11-18). */
 export const SECURITY_LABELS = ["risk:high", "security"];
@@ -72,8 +88,13 @@ export function planWorkflow(i: PlanInput): WorkflowPlan {
         workflow: "Requirement Analysis",
         analysts: ["business-analyst", "solution-architect"],
       };
+    case "test-task": {
+      const design = i.labels.includes(i.qaDesignLabel ?? DEFAULT_QA_DESIGN_LABEL);
+      return design
+        ? { kind: "qa", workflow: "QA Test Design", mode: "test-design", retest: false }
+        : { kind: "qa", workflow: "QA Verify", mode: "verify", retest: i.parentType === "bug" };
+    }
     case "dev-task":
-    case "test-task":
     case "devops-task":
     case "documentation-task": {
       const roles = i.labels.flatMap((l) => (ROLE_LABEL[l] ? [ROLE_LABEL[l]] : []));
@@ -81,7 +102,7 @@ export function planWorkflow(i: PlanInput): WorkflowPlan {
         throw new OmiError("TICKET_INVALID", `one role:* label expected, found ${roles.length}`);
       }
       // PO 2026-11-23: role:* labels stay accepted; every executable type maps to one of two roles.
-      const engineer: Role = i.type === "test-task" ? "qa-engineer" : "software-engineer";
+      const engineer: Role = "software-engineer";
       const bug = i.parentType === "bug";
       return {
         kind: "delivery",

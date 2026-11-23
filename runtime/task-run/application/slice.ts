@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
+import { z } from "zod";
 import { archShow } from "../../architecture/application/arch.ts";
 import type { ArchitectureExcerpt } from "../../architecture/domain/contract.ts";
 import {
@@ -38,6 +39,7 @@ import {
 } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import type { GhRunner } from "../../shared/github/client.ts";
+import { api, markerAuthor, RestComment } from "../../shared/github/client.ts";
 import { redact, redactDeep } from "../../shared/redact.ts";
 import type { Db } from "../../shared/sqlite/db.ts";
 import { cutAt } from "../../shared/text.ts";
@@ -50,7 +52,19 @@ import {
 } from "../domain/findings.ts";
 import { policyFrom, type WorkflowEvent } from "../domain/fsm.ts";
 import { EDITOR_NPM_SCRIPTS } from "../domain/permissions.ts";
-import type { AnalysisPlan, DeliveryPlan, WorkflowPlan } from "../domain/plan.ts";
+import type { AnalysisPlan, DeliveryPlan, QaPlan, WorkflowPlan } from "../domain/plan.ts";
+import {
+  jsonOf,
+  nextRun,
+  parseTestDesign,
+  parseTestTable,
+  parseVerify,
+  proposeBugs,
+  reconcile,
+  renderRun,
+  renderTestDesign,
+  verifyPassed,
+} from "../domain/qa.ts";
 import type { RunRow, SkillChoice } from "../domain/run.ts";
 import { sumUsage } from "../domain/usage.ts";
 import type { RoleFilesPort, SlicePorts } from "./ports.ts";
@@ -80,6 +94,8 @@ export interface SliceDeps {
   now?: () => Date;
   /** Writes a `<!-- omi:section=… -->` of the Issue body (the QA Engineer test cases). */
   writeSection?: (section: string, markdown: string) => void;
+  /** Closes the QATask Issue once its read-only run PASSED (DevTask-0134 #385). */
+  closeIssue?: () => void;
 }
 
 /**
@@ -129,6 +145,8 @@ interface StepSpec {
   edits: boolean;
   /** May run the repo's configured check commands without editing (QA Engineer, PO #124). */
   runsChecks?: boolean;
+  /** What the runtime tells the agent about this step (e.g. the QATask mode and result format). */
+  notes?: string[];
 }
 
 const DEV_BASE: StepSpec = {
@@ -468,7 +486,10 @@ function agentStep(
       let obs: AgentObservation;
       // The unblock reason belongs to the step rerun right after `task unblock`, whoever runs it (#407).
       const unblocked = d.ports.store.takeUnblockReason(db, t.run.id);
-      const unblockNotes = unblocked ? [`A person unblocked the run: ${cut(unblocked, 1000)}`] : [];
+      const unblockNotes = [
+        ...(spec.notes ?? []),
+        ...(unblocked ? [`A person unblocked the run: ${cut(unblocked, 1000)}`] : []),
+      ];
       if (resumes) {
         const notes: string[] = [...unblockNotes];
         const issueChanged = saved?.contextHash !== null && saved?.contextHash !== contextHash;
@@ -1113,4 +1134,156 @@ export function runAnalysis(
     ctx = runContext(d.db, t.run.id);
   }
   return advanceRun(d.db, t.run.id, { type: "ANALYSIS_COMPLETED" }).context;
+}
+
+/** What a read-only QATask run decided; the composition root closes and finalizes on PASSED. */
+export interface QaOutcome {
+  mode: QaPlan["mode"];
+  verdict: "PASSED" | "FAILED";
+  /** `Run #k` of a Verify. */
+  run?: number;
+  /** Proposed Bug bodies (§11) of a FAILED Verify. */
+  proposals: string[];
+}
+
+const QA_FORMAT = {
+  "test-design": (story: number) =>
+    `QATask mode: TEST DESIGN (read-only, no commit, no PR). Reply status PASSED with sectionUpdates [{"section":"qa","markdown":"<JSON>"}] where the JSON is {"acCoverage": string, "cases": [{"id":"TC-${story}-01","ac":string,"steps":string,"expected":string,"auto":boolean,"regression":boolean}]}. Case ids are TC-${story}-<n>, unique, each mapped to one Acceptance Criterion of the parent Issue #${story}. No other field.`,
+  verify: (story: number) =>
+    `QATask mode: VERIFY (read-only, no commit, no PR; changedFiles empty, the worktree stays clean). Reply status PASSED with sectionUpdates [{"section":"qa","markdown":"<JSON>"}] where the JSON is {"cases":[{"id":"TC-${story}-01","result":"pass|fail|blocked","note"?:string}],"defects":[{"title","repro","expected","actual","severity":"critical|high|medium|low","tc":["TC-…"]}],"manualRegression":[string]}. Report every case of the TC table (the Test design QATask listed in Sources) or, for a Bug's Retest, the parent's Steps to reproduce as cases. An Auto = Y case takes its result from the test carrying its TC id in checkResults/logs; a manual case you perform yourself; manualRegression lists the manual Regression = Y cases that apply. A defect is a real failure with steps to reproduce; no other field.`,
+} as const;
+
+const trustedComments = (d: SliceDeps, issue: { repository: string; number: number }) => {
+  const pages = api(
+    d.gh,
+    [
+      "--paginate",
+      "--slurp",
+      `repos/${issue.repository}/issues/${issue.number}/comments?per_page=100`,
+    ],
+    "list comments",
+  );
+  const trusted = markerAuthor(d.gh);
+  return parseContract(z.array(z.array(RestComment)), pages, "list comments")
+    .flat()
+    .filter((c) => trusted(c.author_association, c.user?.login));
+};
+
+/**
+ * Read-only QATask run (DevTask-0134 #385): one QA Engineer step on a freshly fetched base HEAD, no
+ * commit, no PR, no review. Test design writes the TC table into the Issue's `qa` section; Verify
+ * runs the repo's checks, reconciles the agent's per-TC results and posts or updates `Run #k`.
+ * PASSED leaves the run for `omi task finalize` (noCode); FAILED holds it BLOCKED for the Coordinator.
+ */
+export function runQa(
+  d: SliceDeps,
+  target: SliceTarget & { plan: QaPlan },
+): { ctx: WorkflowContext; qa?: QaOutcome } {
+  const { plan } = target;
+  const { advanceRun, runContext, upsertReport } = d.ports.store;
+  const { git } = d.ports;
+  const publishPending = d.ports.reports.publish;
+  const policy = policyFrom(d.config);
+  const issue = { repository: target.run.repository, number: target.run.issue };
+  mkdirSync(d.evidenceDir, { recursive: true });
+  publishPending(d.db, target.run.id, { gh: d.gh });
+  let ctx = runContext(d.db, target.run.id);
+  if (ctx.state === "WORKSPACE_READY") {
+    ctx = advanceRun(d.db, target.run.id, { type: "DEV_STARTED" }, policy).context;
+  }
+  if (ctx.state !== "RUNNING") return { ctx };
+  const stop = (code: string, message: string) => {
+    const file = join(d.evidenceDir, `qa-r${ctx.round}${ERROR_SUFFIX}`);
+    writeFileSync(file, JSON.stringify(redactDeep({ code, message }), null, 2));
+    ctx = advanceRun(d.db, target.run.id, { type: "BLOCK" }, policy).context;
+    return { ctx };
+  };
+
+  // Verify runs on the newest base: a rerun after a fix merged sees the fix.
+  const base = d.config.git.baseBranch;
+  git(["fetch", "origin", base], target.worktree);
+  git(["checkout", "--detach", `origin/${base}`], target.worktree);
+  const head = git(["rev-parse", "HEAD"], target.worktree);
+  const t = { ...target, baseSha: head };
+
+  const fetched = d.ports.issueContext.fetchIssueContext(d.config, t.run.issue, d.gh);
+  const story = fetched.issueContext[1]?.issue.number;
+  if (!story) return stop("POLICY_VIOLATION", "a QATask needs a parent Issue (the Story or Bug)");
+  const spec: StepSpec = { ...QA, title: plan.workflow, notes: [QA_FORMAT[plan.mode](story)] };
+  const dirty = () => git(["status", "--porcelain", "--untracked-files=all"], t.worktree);
+  const section = (r: StepResult) => r.sectionUpdates.find((u) => u.section === "qa")?.markdown;
+  const finish = (qa: QaOutcome) => {
+    if (qa.verdict === "PASSED") d.closeIssue?.();
+    return { ctx, qa };
+  };
+  const hold = () => {
+    ctx = advanceRun(d.db, t.run.id, { type: "BLOCK" }, policy).context;
+    return { ctx };
+  };
+
+  if (plan.mode === "test-design") {
+    const r = agentStep(d, t, spec, ctx, []);
+    if (!r) return { ctx: runContext(d.db, t.run.id) };
+    const left = dirty();
+    if (left) return stop("CONTRACT_INVALID", `QA Engineer left the worktree dirty:\n${left}`);
+    const md = section(r);
+    if (r.status !== "PASSED" || !md) return hold();
+    try {
+      d.writeSection?.("qa", renderTestDesign(parseTestDesign(jsonOf(md), story)));
+    } catch (e) {
+      return stop("CONTRACT_INVALID", (e as Error).message);
+    }
+    return finish({ mode: plan.mode, verdict: "PASSED", proposals: [] });
+  }
+
+  // Verify / Retest: Run #k comes from the comments already on the Issue.
+  const k = nextRun(trustedComments(d, issue), head).k;
+  const kctx = { ...ctx, qaReworks: k - 1 }; // distinct step ids per run: `qa`, `qa-qa1`, …
+  const gate = checksStep(d, t, kctx, [], {
+    stepId: "checks",
+    title: "Deterministic Checks",
+    next: "QA Verify.",
+  });
+  const checksPassed = gate.findings.length === 0;
+  const r = agentStep(d, t, spec, kctx, [], gate.results);
+  if (!r) return { ctx: runContext(d.db, t.run.id) };
+  const left = dirty();
+  if (left) return stop("CONTRACT_INVALID", `QA Engineer left the worktree dirty:\n${left}`);
+  const md = section(r);
+  if (r.status !== "PASSED" || !md) return hold();
+  let result: ReturnType<typeof parseVerify>;
+  try {
+    const output = gate.results
+      .map(
+        (c) =>
+          `${c.summary}\n${c.logPath && existsSync(c.logPath) ? readFileSync(c.logPath, "utf8") : ""}`,
+      )
+      .join("\n");
+    const table = fetched.issueContext
+      .slice(1)
+      .flatMap((e) => parseTestTable(e.body))
+      .filter((c) => c.id.startsWith(`TC-${story}-`));
+    result = reconcile(table, parseVerify(jsonOf(md)), output);
+  } catch (e) {
+    return stop("CONTRACT_INVALID", (e as Error).message);
+  }
+  const passed = verifyPassed(result, checksPassed);
+  const proposals = passed ? [] : proposeBugs(result, t.run.issue, head);
+  if (!passed && !proposals.length) {
+    proposals.push(
+      `## Automated suite failed on ${head.slice(0, 8)}\n**Found in:** QATask #${t.run.issue}`,
+    );
+  }
+  const body = renderRun({
+    k,
+    commit: head,
+    result,
+    checksPassed,
+    qaTaskNumber: t.run.issue,
+    proposals,
+  });
+  upsertReport(d.db, { runId: t.run.id, marker: body.split("\n")[0] as string, body });
+  publishPending(d.db, t.run.id, { gh: d.gh });
+  if (!passed) hold();
+  return finish({ mode: plan.mode, verdict: passed ? "PASSED" : "FAILED", run: k, proposals });
 }

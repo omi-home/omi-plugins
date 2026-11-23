@@ -78,6 +78,8 @@ export interface RunStore {
     db: Db,
     o: { runId: string; marker: string; body: string; target?: IssueRef },
   ): void;
+  /** Queues a report whose body may change on replay (the `Run #k` comment of a QATask). */
+  upsertReport(db: Db, o: { runId: string; marker: string; body: string }): void;
 }
 
 /** Git in a worktree: stdout of `git <args>`, trimmed; throws on failure. */

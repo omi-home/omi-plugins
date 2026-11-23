@@ -104,6 +104,15 @@ export const OmiConfig = z.strictObject({
       sessionMaxTokens: z.int().min(10_000).default(3_000_000),
     })
     .prefault({}),
+  /** QATask kinds (DevTask-0134 #385): the label that makes a QATask a Test design; any other is Verify. */
+  qa: z
+    .strictObject({
+      designLabel: z
+        .string()
+        .regex(/^[\w:. -]{1,50}$/)
+        .default("qa:test-design"),
+    })
+    .prefault({}),
   /** Optional dependency install run in a task clone, e.g. `npm ci`, before agent and checks. */
   setup: GateCommand.optional(),
   /** Unset checks are skipped; a repo with none configured has no deterministic gate. */

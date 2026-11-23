@@ -1,0 +1,268 @@
+// DevTask-0134 #385: the read-only QATask run (stubbed QA agent, real git clone, real checks,
+// in-memory GitHub): Test design table, Verify `Run #k`, dirty worktree, no edit rights.
+import "../../support/isolate-profile-db.ts";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { claudeCode } from "../../../runtime/harness/adapters/claude-code/harness.ts";
+import type { AgentLaunch } from "../../../runtime/harness/domain/harness.ts";
+import { stepReports } from "../../../runtime/reporting/adapters/step-reports.ts";
+import { parseConfig } from "../../../runtime/shared/config.ts";
+import type { TaskPacket } from "../../../runtime/shared/contracts.ts";
+import type { GhRunner } from "../../../runtime/shared/github/client.ts";
+import { openState } from "../../../runtime/shared/sqlite/db.ts";
+import * as repo from "../../../runtime/task-run/adapters/repository.ts";
+import { runQa } from "../../../runtime/task-run/application/slice.ts";
+import { taskRunPorts } from "../../../runtime/task-run/cli/ports.ts";
+import type { QaPlan } from "../../../runtime/task-run/domain/plan.ts";
+
+const git = (cwd: string, ...a: string[]) =>
+  execFileSync("git", a, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+
+const TABLE =
+  "| ID | AC | Steps | Expected | Auto (Y/N) | Regression (Y/N) |\n|---|---|---|---|---|---|\n" +
+  "| TC-8-01 | AC1 | a | b | Y | N |\n| TC-8-02 | AC2 | c | d | N | Y |\n";
+
+function fakeGitHub() {
+  const comments: { id: number; body: string; html_url: string; author_association: string }[] = [];
+  const run: GhRunner = (args, input) => {
+    const ok = (v: unknown) => ({ status: 0, stdout: JSON.stringify(v), stderr: "" });
+    if (args.includes("graphql")) {
+      const node = (n: number, body: string, type: string, parent: unknown) => ({
+        number: n,
+        title: `#${n}`,
+        body,
+        repository: { nameWithOwner: "o/r" },
+        labels: { nodes: [{ name: `type:${type}` }] },
+        parent,
+      });
+      const issue = {
+        ...node(9, "QA", "test-task", node(8, `## Story\n${TABLE}`, "fr", null)),
+        comments: { nodes: [] },
+      };
+      return ok({ data: { repository: { issue } } });
+    }
+    const method = args.includes("-X") ? args[args.indexOf("-X") + 1] : "GET";
+    if (method === "GET") return ok([comments]);
+    const { body } = JSON.parse(input as string);
+    if (method === "POST") {
+      const c = {
+        id: comments.length + 1,
+        body,
+        html_url: `https://x/${comments.length + 1}`,
+        author_association: "MEMBER",
+      };
+      comments.push(c);
+      return ok(c);
+    }
+    const url = args.find((a) => a.startsWith("repos/")) as string;
+    const c = comments.find((x) => x.id === Number(/(\d+)$/.exec(url)?.[1]));
+    if (c) c.body = body;
+    return ok(c);
+  };
+  return { comments, run };
+}
+
+interface Reply {
+  status?: "PASSED" | "BLOCKED";
+  qa?: unknown;
+  dirty?: boolean;
+}
+
+function setup(replies: Reply[], plan: QaPlan, checkScript = "console.log('TC-8-01 ok')") {
+  const upstream = mkdtempSync(join(tmpdir(), "omi-qa-up-"));
+  git(upstream, "init", "-q", "-b", "develop");
+  git(upstream, "config", "user.email", "t@example.invalid");
+  git(upstream, "config", "user.name", "t");
+  writeFileSync(join(upstream, "README.md"), "x\n");
+  git(upstream, "add", ".");
+  git(upstream, "commit", "-qm", "base");
+  const dir = mkdtempSync(join(tmpdir(), "omi-qa-wt-"));
+  git(dir, "clone", "-q", upstream, ".");
+  const base = git(dir, "rev-parse", "HEAD");
+  const db = openState(":memory:");
+  const run = repo.createRun(db, {
+    id: "run",
+    issue: { repository: "o/r", number: 9 },
+    workflow: "test-task",
+  });
+  repo.advanceRun(db, "run", { type: "TICKET_VALID" });
+  repo.advanceRun(db, "run", { type: "WORKSPACE_CREATED" });
+  const gh = fakeGitHub();
+  const launches: AgentLaunch[] = [];
+  const packets: TaskPacket[] = [];
+  const written: [string, string][] = [];
+  let closed = 0;
+  const runAgent = (l: AgentLaunch): string => {
+    launches.push(l);
+    const packet: TaskPacket = JSON.parse(l.stdin.split("\n\n")[1] as string);
+    packets.push(packet);
+    const reply = replies.shift() as Reply;
+    if (reply.dirty) writeFileSync(join(packet.worktree, "scratch.txt"), "x");
+    const result = {
+      schemaVersion: 1,
+      workflowRunId: packet.workflowRunId,
+      issue: packet.issue,
+      stepId: packet.stepId,
+      round: packet.round,
+      attempt: packet.attempt,
+      role: packet.role,
+      status: reply.status ?? "PASSED",
+      summary: "qa",
+      ...(reply.status === "BLOCKED" ? { blockerReason: "cannot assess" } : {}),
+      ...(reply.qa
+        ? { sectionUpdates: [{ section: "qa", markdown: JSON.stringify(reply.qa) }] }
+        : {}),
+    };
+    return JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: JSON.stringify(result),
+      usage: { input_tokens: 10, output_tokens: 2 },
+    });
+  };
+  const deps = {
+    db,
+    config: parseConfig({
+      github: { owner: "o", repo: "r", projectNumber: 1 },
+      checks: { test: { run: `node -e "${checkScript}"` } },
+    }),
+    gh: gh.run,
+    pluginRoot: fileURLToPath(new URL("../../../", import.meta.url)),
+    evidenceDir: mkdtempSync(join(tmpdir(), "omi-evidence-")),
+    ports: { ...taskRunPorts, reports: stepReports },
+    harness: claudeCode,
+    runAgent,
+    writeSection: (s: string, md: string) => written.push([s, md]),
+    closeIssue: () => closed++,
+  };
+  const target = {
+    run,
+    worktree: dir,
+    taskRoot: mkdtempSync(join(tmpdir(), "omi-task-")),
+    baseSha: base,
+    plan,
+  };
+  return { db, gh, deps, target, launches, packets, written, closed: () => closed, upstream, dir };
+}
+
+const DESIGN: QaPlan = {
+  kind: "qa",
+  workflow: "QA Test Design",
+  mode: "test-design",
+  retest: false,
+};
+const VERIFY: QaPlan = { kind: "qa", workflow: "QA Verify", mode: "verify", retest: false };
+
+const design = {
+  acCoverage: "AC1-AC2",
+  cases: [
+    { id: "TC-8-01", ac: "AC1", steps: "a", expected: "b", auto: true, regression: false },
+    { id: "TC-8-02", ac: "AC2", steps: "c", expected: "d", auto: false, regression: true },
+  ],
+};
+const verify = (r1: string, r2: string, defects: unknown[] = []) => ({
+  cases: [
+    { id: "TC-8-01", result: r1 },
+    { id: "TC-8-02", result: r2 },
+  ],
+  defects,
+  manualRegression: ["login page"],
+});
+
+test("TC-385-08: Test design writes the §11 table into section qa, closes the Issue, edits nothing", () => {
+  const s = setup([{ qa: design }], DESIGN);
+  const r = runQa(s.deps, s.target);
+  assert.equal(r.qa?.verdict, "PASSED");
+  assert.equal(s.closed(), 1);
+  assert.equal(s.written.length, 1);
+  assert.equal(s.written[0]?.[0], "qa");
+  assert.match(s.written[0]?.[1] ?? "", /\| TC-8-01 \| AC1 \| a \| b \| Y \| N \|/);
+  // read-only launch: no acceptEdits, no git mv / npm scripts, check commands only
+  const launch = s.launches[0] as AgentLaunch;
+  assert.ok(!launch.args.includes("acceptEdits"));
+  const allowed = launch.args.join(" ");
+  assert.ok(!/git (-C \S+ )?mv/.test(allowed) && !/npm run (format|check)/.test(allowed));
+  assert.match(s.packets[0]?.stepId ?? "", /^qa$/);
+  assert.match(launch.stdin, /QATask mode: TEST DESIGN/);
+  assert.equal(git(s.dir, "status", "--porcelain"), "");
+});
+
+test("TC-385-09: Test design refuses ids of another Story and a dirty worktree (CONTRACT_INVALID)", () => {
+  const bad = { ...design, cases: [{ ...design.cases[0], id: "TC-7-01" }] };
+  const s = setup([{ qa: bad }], DESIGN);
+  const r = runQa(s.deps, s.target);
+  assert.equal(r.ctx.state, "BLOCKED");
+  assert.equal(s.closed(), 0);
+  assert.equal(s.written.length, 0);
+  const d = setup([{ qa: design, dirty: true }], DESIGN);
+  assert.equal(runQa(d.deps, d.target).ctx.state, "BLOCKED");
+  assert.equal(d.closed(), 0);
+});
+
+test("TC-385-10: Verify PASSED posts Run #1 for the fetched develop HEAD and closes the Issue", () => {
+  const s = setup([{ qa: verify("pass", "pass") }], VERIFY);
+  const r = runQa(s.deps, s.target);
+  assert.equal(r.qa?.verdict, "PASSED");
+  assert.equal(r.qa?.run, 1);
+  assert.equal(s.closed(), 1);
+  const head = git(s.upstream, "rev-parse", "HEAD");
+  const run = s.gh.comments.find((c) => c.body.startsWith("<!-- omi:qa-run=1"));
+  assert.ok(run);
+  assert.match(run.body, new RegExp(`Run #1\\*\\* · \`${head.slice(0, 8)}\` · PASSED`));
+  assert.match(run.body, /- TC-8-01: pass/);
+  assert.match(s.launches[0]?.stdin ?? "", /QATask mode: VERIFY/);
+});
+
+test("TC-385-11: Verify FAILED stops Blocked with a Bug proposal; the rerun on a new commit is Run #2", () => {
+  const defect = {
+    title: "greeting missing",
+    repro: "open /",
+    expected: "hello",
+    actual: "nothing",
+    severity: "high",
+    tc: ["TC-8-02"],
+  };
+  const s = setup(
+    [{ qa: verify("pass", "fail", [defect]) }, { qa: verify("pass", "pass") }],
+    VERIFY,
+  );
+  const first = runQa(s.deps, s.target);
+  assert.equal(first.qa?.verdict, "FAILED");
+  assert.equal(first.ctx.state, "BLOCKED");
+  assert.equal(s.closed(), 0);
+  assert.match(first.qa?.proposals[0] ?? "", /Found in:\*\* QATask #9 · TC-8-02/);
+  const run1 = s.gh.comments.find((c) => c.body.startsWith("<!-- omi:qa-run=1"));
+  assert.match(run1?.body ?? "", /FAILED/);
+  assert.match(run1?.body ?? "", /Proposed Bugs/);
+
+  // the fix merged: a new commit on develop, the person unblocks, the same QATask runs again
+  writeFileSync(join(s.upstream, "fix.txt"), "fix\n");
+  git(s.upstream, "add", ".");
+  git(s.upstream, "commit", "-qm", "fix");
+  repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+  const second = runQa(s.deps, s.target);
+  assert.equal(second.qa?.verdict, "PASSED");
+  assert.equal(second.qa?.run, 2);
+  assert.equal(s.gh.comments.filter((c) => c.body.startsWith("<!-- omi:qa-run=")).length, 2);
+});
+
+test("TC-385-12: an Auto = Y case without a test carrying its TC id is blocked, never a silent pass", () => {
+  const s = setup([{ qa: verify("pass", "pass") }], VERIFY, "console.log('no ids here')");
+  const r = runQa(s.deps, s.target);
+  assert.equal(r.qa?.verdict, "FAILED");
+  const run = s.gh.comments.find((c) => c.body.startsWith("<!-- omi:qa-run=1"));
+  assert.match(run?.body ?? "", /- TC-8-01: blocked — no automated test carries this id/);
+});
+
+test("TC-385-13: a QA Engineer that cannot assess BLOCKs the run without a Run comment", () => {
+  const s = setup([{ status: "BLOCKED" }], VERIFY);
+  const r = runQa(s.deps, s.target);
+  assert.equal(r.ctx.state, "BLOCKED");
+  assert.equal(r.qa, undefined);
+  assert.equal(s.gh.comments.filter((c) => c.body.startsWith("<!-- omi:qa-run=")).length, 0);
+});
