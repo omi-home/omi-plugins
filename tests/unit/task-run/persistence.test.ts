@@ -60,6 +60,7 @@ test("migrate: fresh database reaches latest version; re-run is a no-op", () => 
     "lease",
     "outbox",
     "profile_legacy",
+    "project_po_decision",
     "project_snapshot",
     "project_snapshot_item",
     "resource_owner",

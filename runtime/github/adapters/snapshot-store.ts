@@ -6,6 +6,7 @@ import {
   type SnapshotItem,
   SnapshotItem as SnapshotItemSchema,
 } from "../domain/project-snapshot.ts";
+import type { PoDecision } from "../domain/sync-plan.ts";
 
 interface Row {
   issue: number;
@@ -50,6 +51,7 @@ export function writeSnapshot(
   project: number,
   items: readonly SnapshotItem[],
   now: Date = new Date(),
+  decisions: readonly PoDecision[] = [],
 ): void {
   const valid = items.map((i) => parseContract(SnapshotItemSchema, i, "snapshot item"));
   tx(db, "write snapshot", () => {
@@ -66,5 +68,35 @@ export function writeSnapshot(
     for (const i of valid) {
       ins.run(repository, project, i.number, i.status, i.state, i.closeReason ?? null);
     }
+    const insDecision = db.prepare(
+      "INSERT OR REPLACE INTO project_po_decision (repository, project, issue, type, from_status, to_status) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    for (const d of decisions) {
+      insDecision.run(repository, project, d.issue, d.type, d.from, d.to);
+    }
   });
+}
+
+/** The PO decisions the last non-dry-run `omi sync` accepted, by issue number (empty when none). */
+export function readPoDecisions(db: Db, repository: string, project: number): PoDecision[] {
+  try {
+    const rows = db
+      .prepare(
+        "SELECT issue, type, from_status, to_status FROM project_po_decision WHERE repository = ? AND project = ? ORDER BY issue",
+      )
+      .all(repository, project) as unknown as {
+      issue: number;
+      type: string;
+      from_status: string;
+      to_status: string;
+    }[];
+    return rows.map((r) => ({
+      issue: Number(r.issue),
+      type: r.type as PoDecision["type"],
+      from: r.from_status as PoDecision["from"],
+      to: r.to_status as PoDecision["to"],
+    }));
+  } catch (e) {
+    throw sqliteError(e, "read PO decisions");
+  }
 }

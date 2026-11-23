@@ -3,9 +3,9 @@
 // read the snapshot and the open runs from state.sqlite, and write nothing (not GitHub, not the state).
 import { spawnGh } from "../../shared/github/client.ts";
 import { redact } from "../../shared/redact.ts";
-import { openRunIssues } from "../adapters/open-runs.ts";
+import type { Db } from "../../shared/sqlite/db.ts";
 import { fetchProjectIssues } from "../adapters/project-fetch.ts";
-import { readSnapshot } from "../adapters/snapshot-store.ts";
+import { readPoDecisions } from "../adapters/snapshot-store.ts";
 import { buildProjectModel } from "../domain/build-model.ts";
 import { poInboxGroups, workQueue } from "../domain/work-queues.ts";
 import type { GithubCliResult } from "./github.ts";
@@ -20,8 +20,13 @@ function fetchModel(deps: StateDeps) {
   return { ...built, titles, foreign };
 }
 
-/** `omi queue`: Ready not yet taken (no open run), Rework, new PO decisions since the last sync. */
-export function projectQueue(deps: StateDeps): GithubCliResult {
+export interface QueueDeps extends StateDeps {
+  /** Issues of `repository` that have an open run (built by the caller from task-run's open runs). */
+  openRunIssues: (repository: string, db: Db) => ReadonlySet<number>;
+}
+
+/** `omi queue`: Ready not yet taken (no open run), Rework, the PO decisions the last sync accepted. */
+export function projectQueue(deps: QueueDeps): GithubCliResult {
   requireV2(deps.config, "queue");
   const { owner, repo, projectNumber } = deps.config.github;
   const key = `${owner}/${repo}`;
@@ -31,8 +36,8 @@ export function projectQueue(deps: StateDeps): GithubCliResult {
     {
       items,
       titles,
-      previous: readSnapshot(db, key, projectNumber),
-      openRunIssues: openRunIssues(db, key),
+      poDecisions: readPoDecisions(db, key, projectNumber),
+      openRunIssues: deps.openRunIssues(key, db),
     },
     deps.workflow,
   );

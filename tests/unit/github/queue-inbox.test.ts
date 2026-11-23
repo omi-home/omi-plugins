@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { writeSnapshot } from "../../../runtime/github/adapters/snapshot-store.ts";
-import { projectInbox, projectQueue } from "../../../runtime/github/cli/queue.ts";
+import { projectInbox, projectQueue as queueWith } from "../../../runtime/github/cli/queue.ts";
 import type { StateDeps } from "../../../runtime/github/cli/state.ts";
+import { projectSync } from "../../../runtime/github/cli/sync.ts";
 import type { OmiConfig } from "../../../runtime/shared/config.ts";
 import { OmiError } from "../../../runtime/shared/errors/errors.ts";
 import type { GhRunner } from "../../../runtime/shared/github/client.ts";
 import { MIGRATIONS, migrate } from "../../../runtime/shared/sqlite/migrations.ts";
 import { loadDefaultWorkflow } from "../../../runtime/shared/workflow.ts";
+import { openRunIssues } from "../../../runtime/task-run/cli/open-run-issues.ts";
 
 interface Item {
   number: number;
@@ -74,16 +76,19 @@ function deps(
   run: GhRunner,
   opts: {
     snapshot?: { number: number; status: string; state: "open" | "closed" }[];
+    decisions?: { issue: number; type: string; from: string; to: string }[];
     runs?: number[];
     model?: "v2" | "legacy";
   } = {},
 ) {
   const db = new DatabaseSync(":memory:");
   migrate(db, MIGRATIONS);
-  if (opts.snapshot) writeSnapshot(db, "o/r", 2, opts.snapshot as never);
+  if (opts.snapshot) {
+    writeSnapshot(db, "o/r", 2, opts.snapshot as never, undefined, (opts.decisions ?? []) as never);
+  }
   for (const n of opts.runs ?? []) {
     db.prepare(
-      "INSERT INTO workflow_run (id, repository, issue, workflow, state, created_at, updated_at) VALUES (?, 'o/r', ?, 'DevTask', 'RUNNING', 't', 't')",
+      "INSERT INTO workflow_run (id, repository, issue, workflow, state, created_at, updated_at) VALUES (?, 'o/r', ?, 'dev-task', 'RUNNING', 't', 't')",
     ).run(`r${n}`, n);
   }
   const d: StateDeps = {
@@ -96,6 +101,9 @@ function deps(
   };
   return { d, db };
 }
+
+// The caller (runtime/cli/main.ts) builds the open-run set from task-run's openRuns; the tests inject the same.
+const projectQueue = (d: StateDeps) => queueWith({ ...d, openRunIssues });
 
 const dump = (db: DatabaseSync) =>
   JSON.stringify([
@@ -167,27 +175,22 @@ test("a finished run does not hold a Ready Issue", () => {
   );
 });
 
-test("queue: a PO decision since the last sync is listed, an invalid change is not", () => {
+test("queue: the PO decisions stored by the last sync are listed, merged with the Rework reason", () => {
   const { d } = deps(
     fake([
       { number: 1, title: "Epic-0001-One", type: "Epic", status: "Ready" },
       { number: 2, title: "UserStory-0002-Back", type: "UserStory", status: "Rework", parent: 1 },
-      {
-        number: 3,
-        title: "UserStory-0003-Bad",
-        type: "UserStory",
-        status: "Done",
-        state: "CLOSED",
-        parent: 1,
-      },
       { number: 4, title: "DevTask-0004-Same", type: "DevTask", status: "In progress", parent: 2 },
     ]).run,
     {
       snapshot: [
-        { number: 1, status: "Awaiting PO", state: "open" },
-        { number: 2, status: "Awaiting PO", state: "open" },
-        { number: 3, status: "Draft", state: "open" },
+        { number: 1, status: "Ready", state: "open" },
+        { number: 2, status: "Rework", state: "open" },
         { number: 4, status: "In progress", state: "open" },
+      ],
+      decisions: [
+        { issue: 1, type: "Epic", from: "Awaiting PO", to: "Ready" },
+        { issue: 2, type: "UserStory", from: "Acceptance", to: "Rework" },
       ],
     },
   );
@@ -200,6 +203,31 @@ test("queue: a PO decision since the last sync is listed, an invalid change is n
     ],
   );
   assert.match(String(q[0]?.reason), /Awaiting PO -> Ready/);
+});
+
+test("queue after sync still sees the decision sync accepted", () => {
+  const { d, db } = deps(
+    fake([{ number: 1, title: "Epic-0001-One", type: "Epic", status: "Ready" }]).run,
+    { snapshot: [{ number: 1, status: "Awaiting PO", state: "open" }] },
+  );
+  const sync = projectSync({ dryRun: true }, d);
+  const decided = (sync.data as { po_decisions: { issue: number }[] }).po_decisions.map(
+    (p) => p.issue,
+  );
+  assert.ok(decided.includes(1), "sync reports the Epic decision");
+  // A dry run stores nothing.
+  assert.deepEqual((projectQueue(d).data as { queue: unknown[] }).queue, []);
+  projectSync({}, d);
+  assert.equal(
+    db.prepare("SELECT count(*) AS n FROM project_po_decision").get()?.n,
+    decided.length,
+  );
+  const q = (projectQueue(d).data as { queue: { issue: number; reasons: string[] }[] }).queue;
+  assert.deepEqual(
+    q.filter((r) => r.reasons.includes("po_decision")).map((r) => r.issue),
+    decided.filter((n) => q.some((r) => r.issue === n)),
+  );
+  assert.ok(q.some((r) => r.issue === 1 && r.reasons.includes("po_decision")));
 });
 
 test("queue without a snapshot reports no PO decision", () => {

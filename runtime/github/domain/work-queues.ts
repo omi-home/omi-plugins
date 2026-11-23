@@ -3,8 +3,7 @@
 import type { IssueTypeV2, ProjectStatusV2 } from "../../shared/contracts.ts";
 import { loadDefaultWorkflow, type Workflow } from "../../shared/workflow.ts";
 import type { WorkItem } from "./project-model.ts";
-import { diffSnapshot, type SnapshotItem, toSnapshot } from "./project-snapshot.ts";
-import { checkExternalChange } from "./workflow-engine.ts";
+import type { PoDecision } from "./sync-plan.ts";
 import { effectiveTransitions } from "./workflow-queries.ts";
 
 export interface QueueEntry {
@@ -66,15 +65,16 @@ const REASON_ORDER: QueueReason[] = ["ready_unassigned", "rework", "po_decision"
 
 /**
  * `omi queue`: the Coordinator's work, read from the fetched model, the snapshot of the last sync and
- * the Issues with an open run in state.sqlite. Reasons: Ready with no open run (unassigned), Rework,
- * and a status the PO changed since the last sync that the workflow allows (a change it does not allow
- * is reverted by `omi sync`, not work). One row per Issue, ordered by issue number. No I/O, no writes.
+ * the decisions the last sync accepted and the Issues with an open run. Reasons: Ready with no open run
+ * (unassigned), Rework, and a PO decision accepted by the last sync (a change the workflow does not
+ * allow is reverted by `omi sync`, not work). One row per Issue, ordered by issue number. No I/O, no writes.
  */
 export function workQueue(
   input: {
     items: readonly WorkItem[];
     titles: ReadonlyMap<number, string>;
-    previous: readonly SnapshotItem[] | null;
+    /** The PO decisions the last non-dry-run `omi sync` accepted (`planSync().poDecisions`). */
+    poDecisions: readonly PoDecision[];
     openRunIssues: ReadonlySet<number>;
   },
   w: Workflow = loadDefaultWorkflow(),
@@ -93,11 +93,9 @@ export function workQueue(
       add(e.issue, "rework", "Rework: the PO sent it back");
     }
   }
-  for (const c of diffSnapshot(input.previous, toSnapshot(input.items))) {
-    if (c.kind !== "status_changed") continue;
-    const it = byNumber.get(c.issue);
-    if (!it || !checkExternalChange(it.type, c.from, c.to, w).valid) continue;
-    add(c.issue, "po_decision", `PO decision: ${c.from} -> ${c.to} since the last sync`);
+  for (const d of input.poDecisions) {
+    if (!byNumber.has(d.issue)) continue;
+    add(d.issue, "po_decision", `PO decision: ${d.from} -> ${d.to} accepted by the last sync`);
   }
   return [...reasons.entries()]
     .sort(([a], [b]) => a - b)
