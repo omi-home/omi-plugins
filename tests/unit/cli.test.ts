@@ -73,6 +73,21 @@ Commands:
                          newer on origin, develop is ahead of main, the Milestone's other work is closed
   release tag <n>        After the PO merged #n's PR (develop → main): tag its merge commit
                          <plugin>--v<version>, push the tag, close #n, Done + roll-up. Re-run: no-op
+  move <n> <status> [--reason <text>] [--on <m|owner/repo#m>]
+                         github.model v2 only (legacy: CONFIG_INVALID, nothing written). Move Issue #n to
+                         <status> if the workflow has a \`by: coordinator\` transition (incl. any status →
+                         Blocked); refuses \`by: po\` ("PO decisions are not faked", INVALID_TRANSITION
+                         PO_DECISION) and unknown transitions, listing the valid targets. Then the \`auto\`
+                         rules cascade to a fixpoint (leaves to root), Statuses are written, Done closes the
+                         Issue as completed (Doc never closes), the snapshot is updated. --reason is
+                         posted as a comment. Blocked needs --on <m>, the blocker that holds it. Re-running
+                         changes nothing
+  close <n> --not-planned
+                         v2 only: close Issue #n as not planned (rejected ADR, Bug not fixed, duplicate)
+                         and update the snapshot. Already closed not planned: no-op
+  validate               v2 only, read-only: Issues whose Status is not valid for their type, open/closed
+                         state that disagrees with the Status, \`auto\` rules waiting to be applied
+                         (\`omi sync\`). Exit 1 with any finding; --output json for the report
   issue create           Create an Issue: --type <OMI type> --title <text> --body-file <path>
                          [--parent <n|owner/repo#n>]. Numbered <IssueType>-<NNNN>- per type, linked
                          as a sub-issue (hierarchy matrix checked first), added to the Project.
