@@ -66,8 +66,11 @@ test("every role gets AGENTS.md, REPORT.md, settings and its default skills; rew
     repo: "app",
   });
   const reviewer = readFileSync(join(taskRoot, "AGENTS.md"), "utf8");
-  assert.ok(reviewer.includes("read with `grep`, `cat`"));
-  assert.ok(reviewer.includes("also in a pipeline"));
+  // DevTask-0138 #395: no shell reader for the reviewer; Read/Grep/Glob and git inside the workspace.
+  assert.ok(!reviewer.includes("read with `grep`"));
+  assert.ok(!reviewer.includes("also in a pipeline"));
+  assert.ok(reviewer.includes("Read, Grep and Glob tools"));
+  assert.ok(reviewer.includes("Git runs only on paths inside this workspace"));
   assert.ok(!reviewer.includes("`git -C app mv`"));
   writeRoleFiles({
     taskRoot,
@@ -83,6 +86,7 @@ test("every role gets AGENTS.md, REPORT.md, settings and its default skills; rew
   );
   assert.deepEqual(JSON.parse(readFileSync(join(taskRoot, ".claude", "settings.json"), "utf8")), {
     permissions: { defaultMode: "acceptEdits" },
+    env: { OMI_REPO: "app" },
   });
 });
 

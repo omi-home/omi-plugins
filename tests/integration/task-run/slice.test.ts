@@ -931,9 +931,14 @@ test("QA Engineer may run the repo's check commands; reviewers may not (PO #124)
     assert.ok(!args("qa-engineer").includes(form), `no ${form} for the read-only QA step`);
     assert.ok(!args("code-reviewer").includes(form), `no ${form} for a reviewer`);
   }
-  for (const c of ["grep", "cat", "head", "tail", "wc"]) {
-    assert.ok(args("code-reviewer").includes(`Bash(${c} *)`), c);
-    assert.ok(!args("software-engineer").includes(`Bash(${c} *)`), c);
+  // DevTask-0138 #395: no shell reader for anyone; reviewers read with Read/Grep/Glob and git.
+  for (const role of ["code-reviewer", "security-reviewer", "software-engineer"]) {
+    for (const c of ["grep", "cat", "head", "tail", "wc"]) {
+      assert.ok(
+        !args(role).some((t) => t === `Bash(${c})` || t.startsWith(`Bash(${c} `)),
+        `${role}: no ${c}`,
+      );
+    }
   }
 });
 

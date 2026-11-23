@@ -9,7 +9,7 @@ import { AGENT_PACK } from "../../harness/domain/harness.ts";
 import { READ_ONLY_ROLES, type ReportCategory, Role } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { PLUGIN_ROOT } from "../../shared/plugin-paths.ts";
-import { EDITOR_NPM_SCRIPTS, READ_COMMANDS, REVIEWER_ROLES } from "../domain/permissions.ts";
+import { EDITOR_NPM_SCRIPTS } from "../domain/permissions.ts";
 import type { SkillChoice } from "../domain/run.ts";
 
 /** Skill the Coordinator always adds on rework for roles that change files (Spike-0011 §4). */
@@ -115,9 +115,8 @@ export function writeRoleFiles(o: {
   const editLine = o.edits
     ? ` You may also run \`git mv\` (as \`git -C ${o.repo} mv\`) and the repository's npm scripts ${EDITOR_NPM_SCRIPTS.map((s) => `\`npm run ${s}\``).join(", ")}, each with or without arguments.`
     : "";
-  const readLine = REVIEWER_ROLES.includes(o.role)
-    ? ` You may read with ${READ_COMMANDS.map((c) => `\`${c}\``).join(", ")} and read-only git, also in a pipeline (e.g. \`git show <sha> | grep <text>\`).`
-    : "";
+  // Hook rule (agentPreToolUse): a git argument cannot leave the workspace. Said once, to every role.
+  const readLine = ` Read files with the Read, Grep and Glob tools; there are no shell read commands. Git runs only on paths inside this workspace: an argument with a \`..\` path component, an absolute path, a leading \`~\`, shell characters (\`$\`, backtick, \`{ }\`, \`*\`, \`?\`, \`[\`, \`<\`, \`>\`, and \`\\\` in Bash), \`--no-index\`, \`-c\`, \`--git-dir\`, \`--work-tree\` or \`-C\` with another directory makes the hook refuse the command.`;
   const repoLine = `The product repository is \`${o.repo}/\`. Your shell starts in this workspace: run git as \`git -C ${o.repo} <command>\` (never \`cd\` before git: it is refused). ${checks.length ? `Once a check's \`cd ${o.repo} && …\` has run, the shell stays inside the repository: run read-only git bare there (\`git status\`, \`git diff\`, \`git log\`, \`git show\`), not \`git -C ${o.repo}\`.` : ""}${checkLine}${editLine}${readLine} Paths in your result are relative to the repository (\`src/x.ts\`, not \`${o.repo}/src/x.ts\`).`;
   const sections = [part("core"), part(o.edits ? "editing" : "read-only"), repoLine, part(o.role)];
   mkdirSync(join(o.taskRoot, ".claude"), { recursive: true });
@@ -131,7 +130,8 @@ export function writeRoleFiles(o: {
   );
   writeFileSync(
     join(o.taskRoot, ".claude", "settings.json"),
-    `${JSON.stringify({ permissions: { defaultMode: o.edits ? "acceptEdits" : "default" } }, null, 2)}\n`,
+    // OMI_REPO: the one directory the agent hook lets `git -C` name (agentPreToolUse).
+    `${JSON.stringify({ permissions: { defaultMode: o.edits ? "acceptEdits" : "default" }, env: { OMI_REPO: o.repo } }, null, 2)}\n`,
   );
   // Only the chosen skills: a skill dropped since the last run is gone (re-runs are safe).
   const skillsDir = join(o.taskRoot, ".claude", "skills");
