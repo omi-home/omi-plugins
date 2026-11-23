@@ -165,7 +165,17 @@ export type RollUp = { ready: true } | { ready: false; reason: string };
  * unticked box under its `## Scope / Acceptance` means work not split into tasks yet (Bug-0001
  * #162). Never closes anything itself.
  */
-export function rollUp(children: Child[], total: number, body = ""): RollUp {
+export function rollUp(
+  children: Child[],
+  total: number,
+  body = "",
+  /**
+   * A Story or Bug parent (DevTask-0143 #408): its Scope boxes are checked against its children
+   * (the DevTasks and the QATask Verify/Retest, all Done), not ticked by hand, so an unticked box
+   * never holds the roll-up.
+   */
+  scopeByChildren = false,
+): RollUp {
   const no = (reason: string): RollUp => ({ ready: false, reason });
   if (children.length < total) return no(`${total - children.length} child(ren) not verified`);
   if (!children.length) return no("no children");
@@ -183,7 +193,7 @@ export function rollUp(children: Child[], total: number, body = ""): RollUp {
     );
   }
   if (!children.some(done)) return no("every child is cancelled: a person decides");
-  const unticked = uncheckedScope(body);
+  const unticked = scopeByChildren ? 0 : uncheckedScope(body);
   if (unticked) return no(`scope not done: ${unticked} unchecked box(es) under Scope / Acceptance`);
   return { ready: true };
 }

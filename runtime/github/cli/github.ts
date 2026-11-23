@@ -16,6 +16,7 @@ import {
   projectPlan,
   type StatusDrift,
 } from "../adapters/project-fields.ts";
+import { qaPlan } from "../adapters/qa-plan.ts";
 import { approvedActions, repoApply, repoPlan } from "../adapters/repo.ts";
 import type { RepoAction } from "../application/repo-config.ts";
 
@@ -131,6 +132,28 @@ export function issueDepend(
   );
   const human = `depend    ${r.issue} blocked by ${r.blockedBy}${r.added ? "" : " (existing)"}\n`;
   return { data: r, human };
+}
+
+export function qaPlanCommand(
+  issue: number,
+  dev: string[] | undefined,
+  loadConfig: () => OmiConfig,
+): GithubCliResult {
+  const config = loadConfig();
+  const r = qaPlan(config, issue, {
+    dev: (dev ?? []).map((d) => parentArg(d, config.github, "--dev")),
+  });
+  const human = [
+    `plan      #${r.target.number} ${r.target.kind}${r.target.storyType ? ` (${r.target.storyType})` : ""}`,
+    ...r.issues.map(
+      (i) =>
+        `${i.kind.padEnd(11)} ${i.ref} ${i.title}${i.created ? "" : " (existing)"}${i.changes.length ? ` [${i.changes.join(", ")}]` : ""}`,
+    ),
+    ...r.dependencies.map(
+      (d) => `depend    ${d.issue} blocked by ${d.blockedBy}${d.added ? "" : " (existing)"}`,
+    ),
+  ];
+  return { data: r, human: lines(human) };
 }
 
 export function githubProjectPlan(config: OmiConfig): GithubCliResult {

@@ -16,6 +16,7 @@ import {
   issueCreate,
   issueDepend,
   projectValidate,
+  qaPlanCommand,
   repoValidate,
 } from "../github/cli/github.ts";
 import { projectInbox, projectQueue } from "../github/cli/queue.ts";
@@ -188,7 +189,16 @@ Commands:
                          Record that Issue #n is blocked by #m (native dependency; another repo is
                          fine). Refuses cycles; re-running is a no-op. \`ticket validate\` then holds
                          #n until #m is closed
-  issue findings <n>     List the findings other tasks carried over to Issue #n
+  qa plan <n> [--dev <m|owner/repo#m>]...
+                         Plan the QA tasks of Story #n (FR/NFR/CR; legacy and v2) or Bug #n. Story: QATask
+                         "Test design" (label qa.designLabel) and QATask "Verify", children of #n, body
+                         per §11 (Story's AC copied, empty TC table, Regression scope by Story type,
+                         Environment); Verify is Blocked by every DevTask child of #n, --dev adds DevTasks
+                         made later. Bug: DevTask "Fix" (Steps to reproduce / Expected / Actual copied,
+                         a regression test TC-<bug>-<n> box) and QATask "Retest" Blocked by it. A task
+                         is recognised by <!-- omi:qa-plan=<n>;kind=… -->: a re-run creates nothing twice
+                         and adds only the missing label or dependency
+  issue findings <n>    List the findings other tasks carried over to Issue #n
                          (<!-- omi:carried-findings=... --> comments: source | finding | action)
   issue section get <n> <name>   Print the <!-- omi:section=<name> --> section of Issue #n
   issue section set <n> <name>   Replace (or append) that section with --body-file <path>
@@ -360,6 +370,7 @@ const NESTED = new Set([
   "pr merge",
   "issue depend",
   "issue findings",
+  "qa plan",
   "release check",
   "release tag",
   "move",
@@ -507,6 +518,7 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         "pr",
         "cleanup",
         "issue",
+        "qa",
         "project",
         "github",
         "handoff",
@@ -872,6 +884,11 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
           ok,
           issueDepend(issue, values.on, () => repo(cwd).config),
         );
+      case "qa plan":
+        return githubOut(
+          ok,
+          qaPlanCommand(issue, values.dev, () => repo(cwd).config),
+        );
       case "issue findings": {
         const r = issueFindings(repo(cwd).config, issue);
         return ok(r.data, r.human);
@@ -1067,6 +1084,7 @@ const parse = (args: string[]) =>
       type: { type: "string" },
       parent: { type: "string" },
       on: { type: "string" },
+      dev: { type: "string", multiple: true },
       "approved-plan": { type: "string" },
       milestone: { type: "string" },
       name: { type: "string" },

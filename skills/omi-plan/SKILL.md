@@ -18,7 +18,7 @@ You are the OMI Coordinator planning this request with the Product Owner: $ARGUM
 - First ask of each piece: does it need to exist? Is it already in the repo or another Issue? Drop or reuse before creating.
 - One task = one executable Issue (DevTask, TestTask, DevOpsTask, DocumentationTask, Spike) that one agent finishes in one PR, with an Acceptance list a check, test or comment can prove. Unknowns become a Spike first.
 - Body: Objective, Context / Parent, Scope / Acceptance (checkboxes), Dependencies, Definition of Done; the Issue body is the spec, so put decisions and sources there.
-- A Feature, Change Request, FR or NFR that needs analysis goes to `omi task analyze <n>` instead of being split by hand.
+- A Feature, Change Request, FR or NFR that needs analysis goes to `omi task analyze <n>` instead of being split by hand. Once the PO accepts that analysis, run `omi qa plan <story>`: it makes the Story's QATask "Test design" and "Verify"; do not write those two by hand. A new Bug gets `omi qa plan <bug>` (its Fix DevTask and Retest QATask) the same way.
 
 **4. Create them through the CLI.** Show the PO the list (title, one-line objective, dependencies) and get a yes, then for each: write the body to the scratchpad, `omi issue create --type <t> --parent <n> --title <text> --body-file <f>`, then `omi issue depend <n> --on <m>` for every blocker and `omi ticket validate <n>`. Report the created Issues by full title and number; work starts with `/omi-task`.
 

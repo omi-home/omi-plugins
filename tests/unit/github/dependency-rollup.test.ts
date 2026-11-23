@@ -71,6 +71,16 @@ test("rollUp: unticked Scope / Acceptance of the parent holds it (Bug-0001 #162)
   assert.deepEqual(rollUp([kid("#1")], 1, "## Steps to Reproduce\n- [ ] x"), { ready: true });
 });
 
+test("TC-408-09: a Story/Bug parent rolls up on its children, not on its unticked Scope boxes (#408)", () => {
+  const body = "## Scope / Acceptance\n- [ ] AC1\n- [ ] AC2";
+  assert.equal(rollUp([kid("#1")], 1, body).ready, false, "other parents keep the Bug-0001 check");
+  assert.deepEqual(rollUp([kid("#1"), kid("#2")], 2, body, true), { ready: true });
+  // Still the children that decide: an open Verify / Retest holds the parent.
+  const held = rollUp([kid("#1"), kid("#2", { state: "OPEN", stateReason: null })], 2, body, true);
+  assert.deepEqual(held, { ready: false, reason: "open: #2" });
+  assert.equal(rollUp([], 0, body, true).ready, false);
+});
+
 /** Issues by "owner/repo#n" → what they are blocked by. */
 function fakeGraph(edges: Record<string, string[]>, totals: Record<string, number> = {}) {
   const added: string[] = [];

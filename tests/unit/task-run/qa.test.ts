@@ -5,8 +5,10 @@ import { OmiConfig } from "../../../runtime/shared/config.ts";
 import { planWorkflow } from "../../../runtime/task-run/domain/plan.ts";
 import {
   missingAuto,
+  missingAutoTests,
   nextRun,
   parseTestDesign,
+  parseTestTable,
   parseVerify,
   proposeBugs,
   renderRun,
@@ -14,6 +16,21 @@ import {
   renderTestTable,
   verifyPassed,
 } from "../../../runtime/task-run/domain/qa.ts";
+
+test("TC-408-10: missingAutoTests lists Auto = Y ids no test source names, whole ids only", () => {
+  const table = parseTestTable(
+    "| ID | AC | Steps | Expected | Auto (Y/N) | Regression (Y/N) |\n|---|---|---|---|---|---|\n" +
+      "| TC-7-01 | a | b | c | Y | N |\n| TC-7-02 | a | b | c | N | N |\n| TC-7-03 | a | b | c | Y | N |\n",
+  );
+  assert.deepEqual(missingAutoTests(table, []), ["TC-7-01", "TC-7-03"]);
+  assert.deepEqual(missingAutoTests(table, ["test('TC-7-01 a')", "it('TC-7-03: b')"]), []);
+  // TC-7-010 is another case; ATC-7-03 is another word.
+  assert.deepEqual(missingAutoTests(table, ["test('TC-7-010')", "test('ATC-7-03')"]), [
+    "TC-7-01",
+    "TC-7-03",
+  ]);
+  assert.deepEqual(missingAutoTests([], ["x"]), []);
+});
 
 const codeOf = (fn: () => unknown) => {
   try {

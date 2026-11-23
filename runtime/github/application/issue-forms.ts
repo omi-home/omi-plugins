@@ -121,7 +121,7 @@ function headings(lines: string[]): Heading[] {
  * such heading or all are empty. The label counts as a whole word: "Impact" is not "Impacted
  * files"; "(from roadmap)" may follow.
  */
-function sectionText(body: string, label: string): string | undefined {
+export function sectionText(body: string, label: string): string | undefined {
   const lines = body.split(/\r?\n/);
   const hs = headings(lines);
   const re = new RegExp(`^${reEscape(norm(label))}(?![\\p{L}\\p{N}])`, "u");

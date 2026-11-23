@@ -122,7 +122,7 @@ export function taskRun(deps: AgentRunDeps, issue: number): RunResult {
       const done =
         plan.kind === "qa"
           ? runQa(sliceDeps, { ...target, plan, parent })
-          : { ctx: runSlice(sliceDeps, { ...target, plan }) };
+          : { ctx: runSlice(sliceDeps, { ...target, plan, parent }) };
       const ctx = done.ctx;
       const closed = done.qa?.verdict === "PASSED";
       // v2: `omi sync` after the agent's result (In review / Done are `auto` rules); legacy: mirror.
