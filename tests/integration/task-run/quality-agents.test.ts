@@ -177,7 +177,7 @@ test("live qa-engineer (test task): authors tests for the criteria, production c
     "qa-engineer",
     dir,
     base,
-    "qa-automation",
+    "implement",
     `${SEARCH_ISSUE}\nAutomated coverage for AC-1 and AC-2 is missing.\n`,
     ["src/"],
   );

@@ -129,7 +129,7 @@ export const PASSED_REQUIRES: Partial<Record<Role, "section" | "files" | "by-ste
 };
 
 /** Step id of the acceptance QA step (also with a rework suffix, `qa-qa1`). */
-export const isAcceptanceQaStep = (stepId: string) => /^qa(-|$)/.test(stepId);
+export const isAcceptanceQaStep = (stepId: string) => /^qa(-qa\d+)?$/.test(stepId);
 
 /** Read-only by role, or the QA Engineer in the acceptance step (edits:false): no files, no commit. */
 export const isReadOnlyStep = (role: Role, stepId: string) =>

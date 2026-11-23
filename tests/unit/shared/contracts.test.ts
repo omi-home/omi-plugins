@@ -4,11 +4,20 @@ import { parseConfig } from "../../../runtime/shared/config.ts";
 import {
   CleanupResult,
   commentMarker,
+  isReadOnlyStep,
   parseContract,
   StepComment,
   StepResult,
 } from "../../../runtime/shared/contracts.ts";
 import { OmiError } from "../../../runtime/shared/errors/errors.ts";
+
+test("isReadOnlyStep: QA is read-only only in the acceptance step (exact id)", () => {
+  assert.equal(isReadOnlyStep("qa-engineer", "qa"), true);
+  assert.equal(isReadOnlyStep("qa-engineer", "qa-qa1"), true);
+  for (const id of ["implement", "implement-qa1", "qa-automation"]) {
+    assert.equal(isReadOnlyStep("qa-engineer", id), false, id);
+  }
+});
 
 const issue = { repository: "omi-home/omi-plugins", number: 17 };
 const step = {
