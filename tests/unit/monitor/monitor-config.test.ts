@@ -143,7 +143,7 @@ test("config set: --if-match mismatch is CONFIG_CONFLICT, a matching etag passes
   assert.notEqual(fresh.out.data.etag, etag);
 });
 
-test("config set: changing checks or setup needs --confirm-commands", () => {
+test("config set: changing checks, setup or regression needs --confirm-commands", () => {
   const ws = workspace();
   const change = { changes: [{ path: "checks.test.run", value: "rm -rf /tmp/x" }] };
   const denied = set(ws, change);
@@ -156,6 +156,17 @@ test("config set: changing checks or setup needs --confirm-commands", () => {
   );
   assert.equal(set(ws, change, "--confirm-commands").code, 0);
   assert.match(readFileSync(file(ws), "utf8"), /run: rm -rf \/tmp\/x # gate/);
+});
+
+test("config set: changing regression.command needs --confirm-commands", () => {
+  const ws = workspace();
+  const change = { changes: [{ path: "regression.command", value: "node --test {files}" }] };
+  const denied = set(ws, change);
+  assert.equal(denied.code, 1);
+  assert.equal(denied.out.error.code, "POLICY_VIOLATION");
+  assert.equal(readFileSync(file(ws), "utf8"), YAML);
+  assert.equal(set(ws, change, "--confirm-commands").code, 0);
+  assert.match(readFileSync(file(ws), "utf8"), /node --test \{files\}/);
 });
 
 test("config set: --body-file input and output redaction", () => {

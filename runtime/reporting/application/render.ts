@@ -101,6 +101,7 @@ export function renderStepReport(c: StepComment): string {
     commit: c.commitSha ? c.commitSha.slice(0, 8) : "—",
     status: c.status,
     summary: block(c.summary),
+    regressionProof: c.regressionProof ? `\n${block(c.regressionProof)}\n` : "",
     changes: list(c.changedFiles.map((p) => `\`${p}\``)),
     evidence: list([
       ...c.evidencePaths.map((p) => `\`${p}\``),

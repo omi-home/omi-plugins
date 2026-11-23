@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -77,6 +78,8 @@ interface Script {
   denies?: string[];
   /** Content of `tests/greet.test.ts` the engineer writes in each step (by step id). */
   testFile?: Record<string, string>;
+  /** File name under tests/ for `testFile` (default greet.test.ts). */
+  testName?: string;
 }
 
 const git = (cwd: string, ...a: string[]) =>
@@ -97,6 +100,8 @@ function worktree() {
 function fakeGitHub() {
   const comments: { id: number; body: string; html_url: string; author_association: string }[] = [];
   const faults: string[] = [];
+  /** Body of the executable Issue (#9) as the REST API returns it. */
+  const restIssue = { body: "## Scope\nFix the greeting." };
   /** Sub-issues of the parent Story (#8): the Test design QATask with its TC table, if any. */
   const siblings: unknown[] = [];
   const run: GhRunner = (args, input) => {
@@ -104,6 +109,7 @@ function fakeGitHub() {
     if (fault) return { status: 1, stdout: "", stderr: fault };
     const ok = (v: unknown) => ({ status: 0, stdout: JSON.stringify(v), stderr: "" });
     if (args.some((a) => a.includes("/sub_issues"))) return ok([siblings]);
+    if (args.includes("repos/o/r/issues/9")) return ok({ body: restIssue.body });
     if (args.includes("graphql")) {
       const node = (n: number, body: string, type: string, parent: unknown) => ({
         number: n,
@@ -139,7 +145,7 @@ function fakeGitHub() {
     c.body = body;
     return ok(c);
   };
-  return { comments, faults, run, siblings };
+  return { comments, faults, run, siblings, restIssue };
 }
 
 function stubAgents(script: Script) {
@@ -206,14 +212,15 @@ function stubAgents(script: Script) {
       const files = [file];
       if (script.addsTestFrom && packet.stepId >= script.addsTestFrom) {
         mkdirSync(join(wt, "tests"), { recursive: true });
-        writeFileSync(join(wt, "tests", "regression.test.txt"), "t\n");
+        writeFileSync(join(wt, "tests", "regression.test.txt"), "TC-8-01: greets\n");
         files.push("tests/regression.test.txt");
       }
       const testFile = script.testFile?.[packet.stepId];
       if (testFile !== undefined) {
         mkdirSync(join(wt, "tests"), { recursive: true });
-        writeFileSync(join(wt, "tests", "greet.test.ts"), testFile);
-        files.push("tests/greet.test.ts");
+        const name = script.testName ?? "greet.test.ts";
+        writeFileSync(join(wt, "tests", name), testFile);
+        files.push(`tests/${name}`);
       }
       const breaking = script.breakChecksInRound === packet.round && packet.stepId === "implement";
       if (breaking) writeFileSync(join(wt, "broken"), "");
@@ -315,6 +322,7 @@ function setup(
   plan?: WorkflowPlan,
   dbPath = ":memory:",
   agentsConfig: Record<string, unknown> = {},
+  extraConfig: Record<string, unknown> = {},
 ) {
   const { dir, base } = worktree();
   const db = openState(dbPath);
@@ -329,6 +337,7 @@ function setup(
     github: { owner: "o", repo: "r", projectNumber: 1 },
     checks: { test: { run: `node -e "process.exit(require('fs').existsSync('broken')?1:0)"` } },
     agents: agentsConfig,
+    ...extraConfig,
   });
   const gh = fakeGitHub();
   const agents = stubAgents(script);
@@ -834,7 +843,7 @@ test("Bug Resolution: a fix without a regression test is a failed gate, not a re
     { addsTestFrom: "implement-fix1" },
     delivery({ workflow: "Bug Resolution", regressionTest: true }),
   );
-  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  assert.equal(runSlice(s.deps, { ...s.target, parent: 8 }).state, "PR_PENDING");
   assert.deepEqual(roles(s.agents.calls), [
     "software-engineer",
     "software-engineer",
@@ -843,7 +852,152 @@ test("Bug Resolution: a fix without a regression test is a failed gate, not a re
   const checks = s.gh.comments.map((c) => c.body).filter((b) => /step=checks/.test(b));
   assert.match(checks[0] ?? "", /\| Status \| FAILED \|[\s\S]*REG-001/);
   assert.match(checks[1] ?? "", /\| Status \| PASSED \|/);
+  assert.match(checks[1] ?? "", /### Regression proof\nskipped: regression\.command chưa cấu hình/);
   assert.equal(s.agents.packets[1]?.openFindings[0]?.id, "REG-001");
+});
+
+/** A test file without the bug's code is no regression test (TC-<bug>-<n>). */
+test("DevTask-0140: a test file without TC-<bug>-<n> fails REG-001", () => {
+  const s = setup(
+    { testFile: { implement: "test('greets', () => {})\n" } },
+    delivery({ workflow: "Bug Resolution", regressionTest: true }),
+  );
+  runSlice(s.deps, { ...s.target, parent: 8 });
+  const checks = s.gh.comments.map((c) => c.body).filter((b) => /step=checks/.test(b));
+  assert.match(checks[0] ?? "", /REG-001[^\n]*TC-8-<n>/);
+});
+
+/**
+ * Fake test runner: exit 2 when the copied TC test file or the shared path is missing (setup broken),
+ * else 0 when the fixed source (src/* containing "work") exists, 1 when the bug is still there.
+ */
+const PROOF_SCRIPT = join(mkdtempSync(join(tmpdir(), "omi-proof-")), "fake-test.cjs");
+writeFileSync(
+  PROOF_SCRIPT,
+  `const fs = require("fs");
+for (const f of process.argv.slice(2)) {
+  if (!fs.existsSync(f) || !fs.readFileSync(f, "utf8").includes("TC-8-")) {
+    console.error("setup broken: test file not copied: " + f);
+    process.exit(2);
+  }
+}
+let shared = "";
+try { shared = fs.readFileSync("shared-dir/keep.txt", "utf8"); } catch {}
+if (shared !== "k") { console.error("setup broken: shared-dir not linked"); process.exit(2); }
+const fixed = fs.existsSync("src") && fs.readdirSync("src").some((n) => fs.readFileSync("src/" + n, "utf8").includes("work"));
+console.log(fixed ? "fixed" : "bug reproduced");
+process.exit(fixed ? 0 : 1);
+`,
+);
+const FAKE_PROOF = {
+  regression: {
+    command: `node "${PROOF_SCRIPT.replaceAll("\\", "/")}" {files}`,
+    share: ["shared-dir"],
+  },
+};
+
+function proofSetup(
+  script: Script,
+  regression: Record<string, unknown> = FAKE_PROOF.regression,
+  body?: string,
+) {
+  const s = setup(
+    script,
+    delivery({ workflow: "Bug Resolution", regressionTest: true }),
+    ":memory:",
+    {},
+    { regression },
+  );
+  git(s.target.worktree, "update-ref", "refs/remotes/origin/develop", s.target.baseSha);
+  mkdirSync(join(s.target.worktree, "shared-dir"));
+  writeFileSync(join(s.target.worktree, "shared-dir", "keep.txt"), "k");
+  if (body !== undefined) s.gh.restIssue.body = body;
+  const checks = () => s.gh.comments.map((c) => c.body).filter((b) => /step=checks/.test(b));
+  return { ...s, checks };
+}
+
+const TC_TEST = { testFile: { implement: "test('TC-8-01: greets', () => {})\n" } };
+
+test("DevTask-0140: the test fails before the fix and passes on HEAD: a Regression proof section, nothing left behind", () => {
+  const s = proofSetup(TC_TEST);
+  assert.equal(runSlice(s.deps, { ...s.target, parent: 8 }).state, "PR_PENDING");
+  const report = s.checks()[0] ?? "";
+  assert.match(report, /\| Status \| PASSED \|/);
+  assert.match(report, /### Regression proof/);
+  assert.match(report, /merge-base HEAD origin\/develop/);
+  assert.match(report, /\| before fix `[0-9a-f]{8}` \| 1 \| fail \(expected\) \|/);
+  assert.match(report, /\| HEAD `[0-9a-f]{8}` \| 0 \| pass \(expected\) \|/);
+  assert.equal(git(s.target.worktree, "worktree", "list").split("\n").length, 1);
+  assert.equal(readFileSync(join(s.target.worktree, "shared-dir", "keep.txt"), "utf8"), "k");
+  const logs = readdirSync(s.deps.evidenceDir, { recursive: true }).map(String);
+  assert.ok(logs.some((f) => f.endsWith("regression-before.log")));
+  assert.ok(logs.some((f) => f.endsWith("regression-after.log")));
+  // The before run really ran the copied test with the linked share (exit 1 = bug, not 2 = setup broken).
+  const before = logs.find((f) => f.endsWith("regression-before.log")) ?? "";
+  assert.match(readFileSync(join(s.deps.evidenceDir, before), "utf8"), /bug reproduced/);
+  const after = logs.find((f) => f.endsWith("regression-after.log")) ?? "";
+  assert.match(readFileSync(join(s.deps.evidenceDir, after), "utf8"), /fixed/);
+});
+
+test("ARC-004: a TC file name with shell syntax is REG-001 and the regression command never runs", () => {
+  const s = proofSetup(
+    { testFile: { implement: "test('TC-8-01: greets', () => {})\n" }, testName: "a$b.test.ts" },
+    { command: `node -e "require('fs').writeFileSync('ran.marker','x')" {files}` },
+  );
+  runSlice(s.deps, { ...s.target, parent: 8 });
+  assert.match(
+    s.checks()[0] ?? "",
+    /REG-001[^\n]*not allowed in a shell command[^\n]*a\$b\.test\.ts/,
+  );
+  assert.equal(existsSync(join(s.target.worktree, "ran.marker")), false);
+  assert.equal(git(s.target.worktree, "worktree", "list").split("\n").length, 1);
+});
+
+test("DevTask-0140: a test that passes before the fix is REG-002 (does not reproduce the bug)", () => {
+  const s = proofSetup(TC_TEST, { command: `node -e "process.exit(0)" {files}` });
+  runSlice(s.deps, { ...s.target, parent: 8 });
+  assert.match(s.checks()[0] ?? "", /\| Status \| FAILED \|[\s\S]*REG-002[^\n]*does not reproduce/);
+  assert.equal(git(s.target.worktree, "worktree", "list").split("\n").length, 1);
+});
+
+test("DevTask-0140: a test that fails on HEAD is REG-002 and a timeout still cleans up", () => {
+  const s = proofSetup(TC_TEST, { command: `node -e "process.exit(1)" {files}` });
+  runSlice(s.deps, { ...s.target, parent: 8 });
+  assert.match(s.checks()[0] ?? "", /REG-002[^\n]*does not pass after the fix/);
+  const t = proofSetup(TC_TEST, {
+    command: `node -e "setTimeout(()=>{},60000)" {files}`,
+    timeoutSeconds: 1,
+    share: ["shared-dir"],
+  });
+  runSlice(t.deps, { ...t.target, parent: 8 });
+  assert.match(t.checks()[0] ?? "", /REG-002[^\n]*timeout/);
+  assert.equal(git(t.target.worktree, "worktree", "list").split("\n").length, 1);
+  assert.equal(readFileSync(join(t.target.worktree, "shared-dir", "keep.txt"), "utf8"), "k");
+});
+
+test("DevTask-0140: the omi:pre-fix-commit marker picks the commit; one outside origin/develop is REG-003", () => {
+  const ok = proofSetup(TC_TEST);
+  ok.gh.restIssue.body = `Fix\n<!-- omi:pre-fix-commit=${ok.target.baseSha} -->`;
+  assert.equal(runSlice(ok.deps, { ...ok.target, parent: 8 }).state, "PR_PENDING");
+  assert.match(ok.checks()[0] ?? "", /marker omi:pre-fix-commit/);
+
+  const bad = proofSetup(TC_TEST);
+  // a commit that exists but is not in origin/develop: the first commit of a side branch
+  git(bad.target.worktree, "commit", "-q", "--allow-empty", "-m", "side");
+  const side = git(bad.target.worktree, "rev-parse", "HEAD");
+  git(bad.target.worktree, "reset", "-q", "--hard", bad.target.baseSha);
+  bad.gh.restIssue.body = `<!-- omi:pre-fix-commit=${side} -->`;
+  runSlice(bad.deps, { ...bad.target, parent: 8 });
+  assert.match(bad.checks()[0] ?? "", /REG-003/);
+});
+
+test("DevTask-0140: no regression block, or no regression test plan: checks unchanged", () => {
+  const s = setup(TC_TEST, delivery({ workflow: "Bug Resolution", regressionTest: true }));
+  assert.equal(runSlice(s.deps, { ...s.target, parent: 8 }).state, "PR_PENDING");
+  const feature = proofSetup(TC_TEST);
+  const noPlan = { ...feature.target, plan: delivery() };
+  runSlice(feature.deps, noPlan);
+  assert.doesNotMatch(feature.checks()[0] ?? "", /Regression proof/);
 });
 
 const TC_TABLE =

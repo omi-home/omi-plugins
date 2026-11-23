@@ -48,6 +48,10 @@ Commands:
                          risk:high/security or asked) (→ Architect on escalation)
                          → release validation (→ QA Engineer for bugs, ui, qa:manual) until In Review
                          or it needs a person (Waiting PO, Blocked). Runs agents: spends tokens.
+                         A Bug's DevTask: checks also prove the regression test (TC-<bug>-<n>) fails on
+                         the commit before the fix and passes on HEAD (config regression.command; the
+                         commit is <!-- omi:pre-fix-commit=<sha> --> in the Issue body, else the
+                         merge-base with origin/<base>); findings REG-001..003.
                          A QATask (test task) is read-only: one QA Engineer step on the newest develop,
                          no commit, no PR, no review. Label qa.designLabel (default qa:test-design):
                          Test design, writes the TC-<story>-<n> table into the Issue (section qa).
@@ -221,8 +225,8 @@ Commands:
                          Edit omi.config.yaml from JSON {"changes":[{"path":"git.baseBranch","value":"dev"},
                          {"path":"setup","unset":true}]} (stdin, or --body-file). Validated as a whole,
                          comments kept, written atomically; unknown fields or wrong types: CONFIG_INVALID
-                         and the file stays; stale --if-match: CONFIG_CONFLICT; changing checks or setup
-                         (shell commands) needs --confirm-commands: POLICY_VIOLATION
+                         and the file stays; stale --if-match: CONFIG_CONFLICT; changing checks, setup or
+                         regression (shell commands) needs --confirm-commands: POLICY_VIOLATION
   skill list [--role <role>]
                          Read-only: each role's default and allowed skills (agent-pack) and what each
                          skill is for; the input for \`task run --skills\`

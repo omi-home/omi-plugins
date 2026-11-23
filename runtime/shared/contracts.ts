@@ -676,6 +676,8 @@ export const StepComment = z
     /** Host-observed tokens and wall time of the step (spec §14 cost measurement). */
     usage: TokenUsage.optional(),
     durationMs: z.int().min(0).optional(),
+    /** "Regression proof" section of the checks report (DevTask-0140 #404), markdown, redacted. */
+    regressionProof: z.string().max(8000).optional(),
     nextAction: text(500),
     executionId: id,
     createdAt: z.iso.datetime(),
