@@ -175,6 +175,21 @@ export const MIGRATIONS: readonly string[] = [
       ON DELETE CASCADE
   );
   `,
+  // 11 — PO decisions accepted by the last non-dry-run `omi sync` (DevTask-0127 #372), replaced with the
+  // snapshot; `omi queue` lists them. Status names only, no Issue text.
+  `
+  CREATE TABLE project_po_decision (
+    repository   TEXT NOT NULL,
+    project      INTEGER NOT NULL,
+    issue        INTEGER NOT NULL,
+    type         TEXT NOT NULL,
+    from_status  TEXT NOT NULL,
+    to_status    TEXT NOT NULL,
+    PRIMARY KEY (repository, project, issue),
+    FOREIGN KEY (repository, project) REFERENCES project_snapshot (repository, project)
+      ON DELETE CASCADE
+  );
+  `,
 ];
 
 /** `label` names the database in errors ("state", "profile"). */

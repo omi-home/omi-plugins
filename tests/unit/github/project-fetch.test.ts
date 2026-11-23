@@ -353,8 +353,8 @@ test("fetchProjectModel: fetch + build in one call", () => {
   assert.equal(m.skipped[0]?.number, 1);
 });
 
-test("migration 10 adds the snapshot tables at the latest version; a newer database is refused", () => {
-  assert.equal(MIGRATIONS.length, 10);
+test("migrations 10-11 add the snapshot and PO decision tables at the latest version", () => {
+  assert.equal(MIGRATIONS.length, 11);
   const db = openState(":memory:");
   assert.equal(Number(db.prepare("PRAGMA user_version").get()?.user_version), MIGRATIONS.length);
   const tables = db
@@ -374,10 +374,11 @@ test("migration 10 upgrades a version-9 database in place and keeps its rows", (
   old.exec(
     "INSERT INTO workflow_run (id, repository, issue, workflow, state, created_at, updated_at) VALUES ('r1','o/r',1,'w','RUNNING','t','t')",
   );
-  assert.equal(migrate(old), 10);
+  assert.equal(migrate(old), 11);
   assert.equal(old.prepare("SELECT id FROM workflow_run").get()?.id, "r1");
   assert.equal(old.prepare("SELECT count(*) AS n FROM project_snapshot").get()?.n, 0);
-  old.exec("PRAGMA user_version = 11");
+  assert.equal(old.prepare("SELECT count(*) AS n FROM project_po_decision").get()?.n, 0);
+  old.exec("PRAGMA user_version = 12");
   assert.throws(() => migrate(old), code("SCHEMA_VERSION_UNSUPPORTED"));
 });
 

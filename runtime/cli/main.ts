@@ -18,6 +18,7 @@ import {
   projectValidate,
   repoValidate,
 } from "../github/cli/github.ts";
+import { projectInbox, projectQueue } from "../github/cli/queue.ts";
 import { issueClose, issueMove, issueValidate, stateDeps } from "../github/cli/state.ts";
 import { projectSync } from "../github/cli/sync.ts";
 import {
@@ -50,6 +51,7 @@ import { redact, redactDeep } from "../shared/redact.ts";
 import { CONFIG_FILE, locate } from "../shared/workspace.ts";
 import { taskAnalyze } from "../task-run/cli/analyze.ts";
 import { ticketValidate } from "../task-run/cli/gates.ts";
+import { openRunIssues } from "../task-run/cli/open-run-issues.ts";
 import { taskRun } from "../task-run/cli/run.ts";
 import { skillList } from "../task-run/cli/skills.ts";
 import { taskStart } from "../task-run/cli/start.ts";
@@ -155,6 +157,12 @@ Commands:
                          queue, inbox. --dry-run: same report, no GitHub write, no snapshot. First run
                          without snapshot: the current state is the baseline, nothing is reverted.
                          Re-running changes nothing
+  queue                  v2 only, read-only: the Coordinator's work, one row per Issue (number, full
+                         title, status, reason), by number: Ready with no open run in state.sqlite,
+                         Rework, and the PO decisions the last \`omi sync\` accepted. Run \`omi sync\`
+                         first; --output json for the list
+  inbox                  v2 only, read-only: what waits for the PO, grouped by status (Awaiting PO,
+                         Acceptance), each with number, title and type; --output json for the groups
   issue create           Create an Issue: --type <OMI type> --title <text> --body-file <path>
                          [--parent <n|owner/repo#n>]. Numbered <IssueType>-<NNNN>- per type, linked
                          as a sub-issue (hierarchy matrix checked first), added to the Project.
@@ -820,6 +828,10 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         return githubOut(ok, issueValidate(stateDeps(cwd)));
       case "sync":
         return githubOut(ok, projectSync({ dryRun: values["dry-run"] }, stateDeps(cwd)));
+      case "queue":
+        return githubOut(ok, projectQueue({ ...stateDeps(cwd), openRunIssues }));
+      case "inbox":
+        return githubOut(ok, projectInbox(stateDeps(cwd)));
       case "issue create":
         return githubOut(
           ok,

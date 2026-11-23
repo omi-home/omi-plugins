@@ -22,7 +22,7 @@ const NESTED = 50;
 const PRS = 20;
 const LATEST = 30;
 
-const ISSUE = `number state stateReason
+const ISSUE = `number title state stateReason
   repository{nameWithOwner}
   issueType{name}
   milestone{number}
@@ -74,6 +74,7 @@ const Blocker = z.strictObject({
 const IssueContent = z.strictObject({
   __typename: z.literal("Issue"),
   number: z.int().positive(),
+  title: z.string().optional(),
   state: z.enum(["OPEN", "CLOSED"]),
   stateReason: z.string().nullable(),
   repository: Repo,
@@ -213,6 +214,7 @@ export function fetchProjectIssues(config: OmiConfig, run: GhRunner = spawnGh): 
       }));
       issues.push({
         number: c.number,
+        ...(c.title === undefined ? {} : { title: c.title }),
         type: c.issueType?.name ?? null,
         status: node.fieldValueByName?.name ?? null,
         state: c.state === "OPEN" ? "open" : "closed",

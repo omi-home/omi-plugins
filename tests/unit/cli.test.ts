@@ -97,6 +97,12 @@ Commands:
                          queue, inbox. --dry-run: same report, no GitHub write, no snapshot. First run
                          without snapshot: the current state is the baseline, nothing is reverted.
                          Re-running changes nothing
+  queue                  v2 only, read-only: the Coordinator's work, one row per Issue (number, full
+                         title, status, reason), by number: Ready with no open run in state.sqlite,
+                         Rework, and the PO decisions the last \`omi sync\` accepted. Run \`omi sync\`
+                         first; --output json for the list
+  inbox                  v2 only, read-only: what waits for the PO, grouped by status (Awaiting PO,
+                         Acceptance), each with number, title and type; --output json for the groups
   issue create           Create an Issue: --type <OMI type> --title <text> --body-file <path>
                          [--parent <n|owner/repo#n>]. Numbered <IssueType>-<NNNN>- per type, linked
                          as a sub-issue (hierarchy matrix checked first), added to the Project.

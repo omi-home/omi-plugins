@@ -69,7 +69,14 @@ export function projectSync(
       complete = true;
     } finally {
       if (complete) {
-        writeSnapshot(db, key, projectNumber, [...finalSnapshot.values()], deps.now);
+        writeSnapshot(
+          db,
+          key,
+          projectNumber,
+          [...finalSnapshot.values()],
+          deps.now,
+          plan.poDecisions,
+        );
       } else if (previous !== null && patches.length) {
         // Keep what the PO changed and sync has not handled yet visible to the next run.
         const merged = new Map(previous.map((i) => [i.number, i]));
