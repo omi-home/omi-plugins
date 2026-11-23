@@ -82,6 +82,7 @@ test("architecture contract rules are loaded into the role AGENTS.md (ARC-001, n
   assert.doesNotMatch(agentsMd("business-analyst"), /place every new file by it/);
 });
 
+const GIT_ESCAPE = "OMI: agents run git only on paths inside their task workspace.";
 const ws = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-agent-ws-")));
 const call = (tool_name: string, tool_input: HookInput["tool_input"]) =>
   agentPreToolUse({ cwd: ws, tool_name, tool_input }, ws);
@@ -128,6 +129,175 @@ test("agent hook: git stays read-only (no difftool, --ext-diff, --extcmd, --outp
   for (const c of ["git diff", "git -C omi-plugins log -5", "git diff -- src/a.ts"]) {
     assert.equal(call("Bash", { command: c }), null, c);
   }
+});
+
+// DevTask-0138 #395 (Bug-0012 #391, #393 SEC-001/005/007): a token ban on git arguments.
+test("agent hook: git arguments cannot leave the task workspace", () => {
+  for (const c of [
+    "git diff --no-index /dev/null x",
+    "git diff --no-ind /dev/null x",
+    "git diff a/../../x AGENTS.md",
+    "git diff a\\..\\..\\x AGENTS.md",
+    "git diff ~root/x AGENTS.md",
+    "git diff ~/x AGENTS.md",
+    "git diff ~+/x AGENTS.md",
+    "git diff /etc/passwd AGENTS.md",
+    "git diff C:/Users/x/.ssh/id_rsa AGENTS.md",
+    "git diff //host/share/x AGENTS.md",
+    "git diff app/*/x AGENTS.md",
+    "git diff app/?/x AGENTS.md",
+    "git diff app/[a]/x AGENTS.md",
+    "git diff {a,..}/x y",
+    "git diff $HOME/x y",
+    "git diff `pwd`/x y",
+    "git show HEAD:../x",
+    "git show '../x'",
+    'git diff "a/.."/x y',
+    "git -C /tmp log",
+    "git -C .. log",
+    "git -C app/.. log",
+    "git --git-dir=/x log",
+    "git --git-dir /x log",
+    "git --work-tree=x log",
+    "git --namespace=x log",
+    "git --exec-path=x log",
+    "git -c core.pager=cat show",
+    "git -ccore.pager=cat show",
+    "git diff HEAD > /tmp/o",
+    "git diff HEAD >> o",
+    "git diff < x",
+    "git diff HEAD 2>&1",
+    "cd .. && git diff x y",
+    "cd /tmp && git diff x y",
+    "cd && git diff x y",
+    "cd ~ && git diff x y",
+    "cd $HOME && git diff x y",
+    "Set-Location .. ; git diff x y",
+    "FOO=1 git diff ../x y",
+    "GIT_DIR=/x git log",
+    "git.exe diff ../x y",
+    "echo a | git diff /x y",
+  ]) {
+    assert.equal(call("Bash", { command: c }), GIT_ESCAPE, c);
+  }
+  assert.equal(call("PowerShell", { command: "git diff ..\\x y" }), GIT_ESCAPE);
+  assert.equal(call("PowerShell", { command: "git diff C:\\x y" }), GIT_ESCAPE);
+  assert.equal(call("PowerShell", { command: "git diff $env:USERPROFILE y" }), GIT_ESCAPE);
+});
+
+test("agent hook: ordinary git (refs, ranges, relative paths, the task repo) passes", () => {
+  for (const c of [
+    "git diff",
+    "git diff origin/develop...HEAD",
+    "git diff origin/develop..HEAD --stat",
+    "git diff HEAD~1 -- runtime/a.ts",
+    "git diff HEAD^ -- runtime/a.ts",
+    "git show abc123",
+    "git show abc123:runtime/a.ts",
+    "git log -5 --oneline",
+    "git log --oneline origin/develop..HEAD",
+    "git status --porcelain",
+    "git -C app diff --stat",
+    "git -C app/ log -5",
+    "git -C 'app' show HEAD",
+    "git diff -C --stat",
+    "git log -c -1",
+    "FOO=1 git status",
+    "git.exe status",
+    "cd app && git status",
+    "cd app && git diff --stat | head",
+    "npm test && git status",
+  ]) {
+    assert.equal(call("Bash", { command: c }), null, c);
+  }
+  assert.equal(call("PowerShell", { command: "git diff src\\a.ts" }), null, "\\ is a separator");
+});
+
+// #395 round 2 SEC-001: a hidden git fails closed.
+test("agent hook: a command that mentions git runs only plain lowercase git segments", () => {
+  for (const c of [
+    "timeout 5 git diff --no-index /dev/null x",
+    "time git diff ~/x y",
+    "nohup git log",
+    "command git log",
+    "env GIT_DIR=/x git log",
+    "(git diff a b)",
+    "{ git diff a b; }",
+    "! git log",
+    "GIT diff a b",
+    "Git.EXE log",
+    "X='a b' git diff a b",
+    "if true; then git log; fi",
+    "for i in 1; do git log; done",
+    "{ cd ..; }; git diff x y",
+    "! cd ..; git diff x y",
+    "builtin cd ..; git diff x y",
+    "command cd ..; git diff x y",
+    "popd; git diff x y",
+    ". ./x.sh; git diff x y",
+    "CDPATH=/tmp cd x && git diff a b",
+    "(cd ..); git log",
+  ]) {
+    assert.equal(call("Bash", { command: c }), GIT_ESCAPE, c);
+  }
+});
+
+// #395 round 4 SEC-001/002: quotes, backslashes and backticks cannot hide the git word.
+test("agent hook: a git word hidden by quoting still fails closed", () => {
+  for (const c of ["g''it diff ~/x y", "g\\it log", 'cd ..; "g"it diff x y']) {
+    assert.equal(call("Bash", { command: c }), GIT_ESCAPE, c);
+  }
+  for (const c of [
+    "g`it log",
+    "$ExecutionContext.SessionState.Path.SetLocation('..'); git diff x y",
+  ]) {
+    assert.equal(call("PowerShell", { command: c }), GIT_ESCAPE, c);
+  }
+});
+
+test("agent hook: git as a word only; github/.gitignore commands are not git commands", () => {
+  for (const c of [
+    "npm run test -- tests/unit/github/a.test.ts",
+    "cd my-github-app && npm test",
+    "cat .gitignore",
+    "cd runtime && git diff --stat",
+  ]) {
+    assert.equal(call("Bash", { command: c }), null, c);
+  }
+});
+
+// #395 round 2 SEC-002: only `-C <repo>` before the subcommand; attached short-option values are paths.
+test("agent hook: global git options other than -C are refused; attached values are checked", () => {
+  for (const c of [
+    "git --config-env=core.fsmonitor=FOO status",
+    "git --super-prefix=x status",
+    "git --attr-source=x status",
+    "git --no-pager diff",
+    "git -p diff",
+    "git log -O/etc/x",
+    "git diff -O../x",
+  ]) {
+    assert.equal(call("Bash", { command: c }), GIT_ESCAPE, c);
+  }
+  assert.equal(call("Bash", { command: "git log -5 -U3 --stat" }), null);
+});
+
+test("agent hook: -C names only the task repo (env OMI_REPO / third argument)", () => {
+  const abs = join(ws, "..", "outside-repo").replaceAll("\\", "/");
+  const at = (command: string, repo: string) =>
+    agentPreToolUse({ cwd: ws, tool_name: "Bash", tool_input: { command } }, ws, repo);
+  assert.equal(at("git -C app diff --stat", "app"), null);
+  assert.equal(at("git -C app/ log", "app"), null);
+  assert.equal(at("git -C other diff", "app"), GIT_ESCAPE);
+  assert.equal(at(`git -C ${abs} status`, abs), null, "an absolute repo outside the workspace");
+  assert.equal(at(`git -C ${abs}/sub status`, abs), GIT_ESCAPE);
+  assert.equal(at("git -C /tmp status", abs), GIT_ESCAPE);
+  assert.equal(at("git -C app diff", "other"), GIT_ESCAPE);
+});
+
+test("agent hook: refusals of #382 keep their own message before the path ban", () => {
+  assert.match(call("Bash", { command: "git -C app push" }) ?? "", /agents never push/);
+  assert.match(call("Bash", { command: "gh pr list" }) ?? "", /do not call GitHub/);
 });
 
 test("agent hook: file tools write only inside the task workspace", () => {
