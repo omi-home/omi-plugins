@@ -190,6 +190,11 @@ export const MIGRATIONS: readonly string[] = [
       ON DELETE CASCADE
   );
   `,
+  // 12 — open findings of a run (JSON: findings + reviewers that FAILED), so they survive BLOCKED and
+  // resume in another process (Bug-0013 #392). Null = none recorded (runs that predate it).
+  `
+  ALTER TABLE workflow_run ADD COLUMN open_findings TEXT;
+  `,
 ];
 
 /** `label` names the database in errors ("state", "profile"). */
