@@ -185,6 +185,43 @@ test("acceptStepResult: a secret straddling the cut point does not leak, an emoj
   assert.ok(e.endsWith(TRUNCATION_SUFFIX));
 });
 
+test("acceptStepResult: claimed-but-unchanged note cuts after redaction, by code point (#380 CR-001)", () => {
+  const { dir, base } = repo();
+  const p = buildTaskPacket(input(dir, base));
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "src", "a.ts"), "a");
+  const note = " [runtime: claimed but not changed since baseSha: src/never.ts]";
+  const room = 2000 - note.length;
+  const secret = `ghp_${"A".repeat(36)}`;
+  const text = `${"x".repeat(room - 11)} ${secret}`;
+  const { result: r } = acceptStepResultWithWarnings(
+    p,
+    result({ summary: text, changedFiles: ["src/a.ts", "src/never.ts"] }),
+  );
+  assert.match(r.summary, /claimed but not changed/);
+  assert.doesNotMatch(r.summary, /ghp_/);
+  assert.doesNotMatch(r.summary, /AAAA/);
+  const emoji = `${"x".repeat(room - 1)}😀${"z".repeat(20)}`;
+  const e = acceptStepResultWithWarnings(
+    p,
+    result({ summary: emoji, changedFiles: ["src/a.ts", "src/never.ts"] }),
+  ).result.summary;
+  assert.doesNotMatch(e, /[\ud800-\udbff](?![\udc00-\udfff])/);
+});
+
+test("acceptStepResult: no 'cut to' warning when redaction alone shortened the field (#380 CR-004)", () => {
+  const { dir, base } = repo();
+  const p = buildTaskPacket(input(dir, base));
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "src", "a.ts"), "a");
+  const text = `start ghp_${"A".repeat(2100)} end`;
+  const { result: r, warnings } = acceptStepResultWithWarnings(p, result({ summary: text }));
+  assert.equal(r.summary, "start [REDACTED:github-token] end");
+  assert.equal(warnings.length, 1);
+  assert.doesNotMatch(warnings[0] ?? "", /cut to/);
+  assert.match(warnings[0] ?? "", /shortened/);
+});
+
 test("acceptStepResult: a long summary does not excuse any other contract violation (#318)", () => {
   const { dir, base } = repo();
   const p = buildTaskPacket(input(dir, base));

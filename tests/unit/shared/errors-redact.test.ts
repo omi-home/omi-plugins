@@ -27,12 +27,14 @@ test("redact: prose with token/Bearer/Basic is untouched, secret-looking values 
     "the profile's token management is documented",
     "Bearer authentication. Basic configuration needed",
     "each token expires quickly",
+    "see token redact.test.ts and Bearer issue-380-fix, Basic DevTask-0129",
   ]) {
     assert.equal(redact(prose), prose);
   }
   const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123def";
   assert.equal(redact(`Bearer ${jwt}`), "Bearer [REDACTED]");
-  assert.equal(redact("token abcd1234efgh"), "token [REDACTED]");
+  assert.equal(redact("token abcd1234efgh5678ijkl9012"), "token [REDACTED]");
+  assert.equal(redact("Authorization: Basic dXNlcjpw"), "Authorization: Basic [REDACTED]");
   assert.equal(redact(`token ghp_${"a".repeat(30)}`), "token [REDACTED:github-token]");
 });
 
