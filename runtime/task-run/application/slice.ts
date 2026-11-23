@@ -55,6 +55,7 @@ import { EDITOR_NPM_SCRIPTS } from "../domain/permissions.ts";
 import type { AnalysisPlan, DeliveryPlan, QaPlan, WorkflowPlan } from "../domain/plan.ts";
 import {
   jsonOf,
+  missingAutoTests,
   nextRun,
   parseTestDesign,
   parseTestTable,
@@ -753,7 +754,11 @@ function checksStep(
   ctx: WorkflowContext,
   /** Gate findings decided by the runtime itself (e.g. a missing regression test). */
   extra: Finding[] = [],
-  base = { stepId: "checks", title: "Deterministic Checks", next: "Code review." },
+  base: { stepId: string; title: string; next: string; notes?: string[] } = {
+    stepId: "checks",
+    title: "Deterministic Checks",
+    next: "Code review.",
+  },
 ): { findings: Finding[]; results: CheckRun[] } {
   const { addArtifact, enqueueReport } = d.ports.store;
   const { render: renderStepReport, publish: publishPending } = d.ports.reports;
@@ -802,7 +807,12 @@ function checksStep(
       requestedEffort: null,
       actualEffort: null,
       status: ok ? "PASSED" : "FAILED",
-      summary: results.map((r) => `${r.name}: ${r.outcome}`).join(", "),
+      summary: cut(
+        [results.map((r) => `${r.name}: ${r.outcome}`).join(", "), ...(base.notes ?? [])].join(
+          "\n",
+        ),
+        2000,
+      ),
       findings,
       durationMs: results.reduce((sum, r) => sum + r.durationMs, 0),
       nextAction: ok ? base.next : "The engineer fixes the failed checks.",
@@ -967,7 +977,14 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
                 },
               ]
             : [];
-        const gate = checksStep(d, t, ctx, regression);
+        // Test design gate (#408): every `Auto = Y` case of the Story's TC table has a test.
+        const tc = t.parent ? tcGate(d, t, t.parent) : { findings: [], notes: [] };
+        const gate = checksStep(d, t, ctx, [...regression, ...tc.findings], {
+          stepId: "checks",
+          title: "Deterministic Checks",
+          next: "Code review.",
+          notes: tc.notes,
+        });
         checks = gate.results;
         checkedHead = gate.findings.length ? null : git(["rev-parse", "HEAD"], t.worktree);
         if (gate.findings.length) {
@@ -1197,6 +1214,64 @@ const designTable = (
     .flatMap((s) => parseTestTable(s.body ?? ""))
     .filter((c) => c.id.startsWith(`TC-${story}-`));
 };
+
+/** Test files of the worktree (tracked and new), at most 1 MiB each: what a TC id may be named in. */
+const testSources = (d: SliceDeps, worktree: string): string[] =>
+  d.ports
+    .git(["ls-files", "--cached", "--others", "--exclude-standard"], worktree)
+    .split(/\r?\n/)
+    .filter((f) => f && isTest(f))
+    .flatMap((f) => {
+      const file = join(worktree, f);
+      try {
+        return statSync(file).size <= 1024 * 1024 ? [readFileSync(file, "utf8")] : [];
+      } catch {
+        return []; // listed but gone (deleted in the worktree)
+      }
+    });
+
+/**
+ * Gate TCG-001 (DevTask-0143 #408): the DevTask of a Story whose sibling Test design QATask already
+ * has a TC table needs a test file naming each `Auto = Y` case (`TC-<story>-<n>`). No Test design
+ * QATask, or an empty table, never blocks: the report says the gate was not applied.
+ */
+function tcGate(
+  d: SliceDeps,
+  t: SliceTarget,
+  story: number,
+): { findings: Finding[]; notes: string[] } {
+  const table = designTable(d, t.run.repository, story);
+  if (!table.length) {
+    return {
+      findings: [],
+      notes: [
+        `Test design gate not applied: no TC table under #${story} (label ${d.config.qa.designLabel}).`,
+      ],
+    };
+  }
+  const missing = missingAutoTests(table, testSources(d, t.worktree));
+  const auto = table.filter((c) => c.auto).length;
+  if (!missing.length) {
+    return {
+      findings: [],
+      notes: [`Test design gate passed: ${auto} Auto = Y case(s) of #${story} have a test.`],
+    };
+  }
+  return {
+    findings: [
+      {
+        id: "TCG-001",
+        severity: "high",
+        observed: cut(
+          `${missing.length} of ${auto} Auto = Y case(s) of #${story} have no test naming their id in a test file: ${missing.join(", ")}`,
+          1000,
+        ),
+        expected: `Every Auto = Y case has a test whose file names its id (TC-${story}-<n>), e.g. in the test title.`,
+      },
+    ],
+    notes: [`Test design gate failed: missing ${missing.join(", ")}.`],
+  };
+}
 
 /**
  * Read-only QATask run (DevTask-0134 #385): one QA Engineer step on a freshly fetched base HEAD, no

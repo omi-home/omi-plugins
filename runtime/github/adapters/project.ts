@@ -332,11 +332,17 @@ export function markFinished(
   for (let depth = 0; at && depth < MAX_DEPTH; depth++) {
     const info = readParent(config, at, run);
     if (!info) break;
-    const verdict = rollUp(info.children, info.subIssuesSummary.total, info.body);
+    const label = (t: string) => info.labels.nodes.some((l) => l.name === `type:${t}`);
+    // A Story (fr/nfr/change-request) or Bug: its children stand for its Scope boxes (#408).
+    const verdict = rollUp(
+      info.children,
+      info.subIssuesSummary.total,
+      info.body,
+      VERIFY_TYPES.some(label),
+    );
     if (!verdict.ready) {
       return { changes, held: `${at.owner}/${at.repo}#${at.number}: ${verdict.reason}` };
     }
-    const label = (t: string) => info.labels.nodes.some((l) => l.name === `type:${t}`);
     const milestone = label("milestone");
     // Bug / requirement: children done means "verify" (#99), not done: a person accepts it.
     const verify = VERIFY_TYPES.some(label);

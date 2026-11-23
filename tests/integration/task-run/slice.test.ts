@@ -75,6 +75,8 @@ interface Script {
   noopFromRound?: number;
   /** Commands the host refused the engineer (permission_denials of its implement step, #252). */
   denies?: string[];
+  /** Content of `tests/greet.test.ts` the engineer writes in each step (by step id). */
+  testFile?: Record<string, string>;
 }
 
 const git = (cwd: string, ...a: string[]) =>
@@ -95,10 +97,13 @@ function worktree() {
 function fakeGitHub() {
   const comments: { id: number; body: string; html_url: string; author_association: string }[] = [];
   const faults: string[] = [];
+  /** Sub-issues of the parent Story (#8): the Test design QATask with its TC table, if any. */
+  const siblings: unknown[] = [];
   const run: GhRunner = (args, input) => {
     const fault = faults.shift();
     if (fault) return { status: 1, stdout: "", stderr: fault };
     const ok = (v: unknown) => ({ status: 0, stdout: JSON.stringify(v), stderr: "" });
+    if (args.some((a) => a.includes("/sub_issues"))) return ok([siblings]);
     if (args.includes("graphql")) {
       const node = (n: number, body: string, type: string, parent: unknown) => ({
         number: n,
@@ -134,7 +139,7 @@ function fakeGitHub() {
     c.body = body;
     return ok(c);
   };
-  return { comments, faults, run };
+  return { comments, faults, run, siblings };
 }
 
 function stubAgents(script: Script) {
@@ -203,6 +208,12 @@ function stubAgents(script: Script) {
         mkdirSync(join(wt, "tests"), { recursive: true });
         writeFileSync(join(wt, "tests", "regression.test.txt"), "t\n");
         files.push("tests/regression.test.txt");
+      }
+      const testFile = script.testFile?.[packet.stepId];
+      if (testFile !== undefined) {
+        mkdirSync(join(wt, "tests"), { recursive: true });
+        writeFileSync(join(wt, "tests", "greet.test.ts"), testFile);
+        files.push("tests/greet.test.ts");
       }
       const breaking = script.breakChecksInRound === packet.round && packet.stepId === "implement";
       if (breaking) writeFileSync(join(wt, "broken"), "");
@@ -833,6 +844,49 @@ test("Bug Resolution: a fix without a regression test is a failed gate, not a re
   assert.match(checks[0] ?? "", /\| Status \| FAILED \|[\s\S]*REG-001/);
   assert.match(checks[1] ?? "", /\| Status \| PASSED \|/);
   assert.equal(s.agents.packets[1]?.openFindings[0]?.id, "REG-001");
+});
+
+const TC_TABLE =
+  "| ID | AC | Steps | Expected | Auto (Y/N) | Regression (Y/N) |\n|---|---|---|---|---|---|\n" +
+  "| TC-8-01 | AC1 | a | b | Y | N |\n| TC-8-02 | AC2 | c | d | N | Y |\n| TC-8-03 | AC3 | e | f | Y | N |\n";
+
+test("TC-408-07: a DevTask whose Story has a TC table fails checks (TCG-001) until every Auto = Y case has a test", () => {
+  const s = setup(
+    {
+      testFile: {
+        implement: "test('TC-8-01 greets', () => {})\n",
+        "implement-fix1": "test('TC-8-01 greets', () => {})\ntest('TC-8-03 farewell', () => {})\n",
+      },
+    },
+    delivery(),
+  );
+  s.gh.siblings.push({ number: 10, body: TC_TABLE, labels: [{ name: "qa:test-design" }] });
+  assert.equal(runSlice(s.deps, { ...s.target, parent: 8 }).state, "PR_PENDING");
+  const checks = s.gh.comments.map((c) => c.body).filter((b) => /step=checks/.test(b));
+  assert.match(checks[0] ?? "", /\| Status \| FAILED \|[\s\S]*TCG-001[\s\S]*TC-8-03/);
+  assert.doesNotMatch(checks[0] ?? "", /TC-8-02|TC-8-01 /); // manual case and covered case not listed
+  assert.match(checks[1] ?? "", /\| Status \| PASSED \|/);
+  assert.equal(s.agents.packets[1]?.openFindings[0]?.id, "TCG-001");
+  assert.deepEqual(roles(s.agents.calls).slice(0, 3), [
+    "software-engineer",
+    "software-engineer",
+    "code-reviewer",
+  ]);
+});
+
+test("TC-408-08: no Test design QATask or an empty table never blocks; the report says so", () => {
+  for (const siblings of [
+    [],
+    [{ number: 10, body: "| ID |\n|---|\n", labels: [{ name: "qa:test-design" }] }],
+  ]) {
+    const s = setup({}, delivery());
+    s.gh.siblings.push(...siblings);
+    assert.equal(runSlice(s.deps, { ...s.target, parent: 8 }).state, "PR_PENDING");
+    const checks = s.gh.comments.map((c) => c.body).filter((b) => /step=checks/.test(b));
+    assert.equal(checks.length, 1);
+    assert.match(checks[0] ?? "", /\| Status \| PASSED \|/);
+    assert.match(checks[0] ?? "", /Test design gate not applied/);
+  }
 });
 
 /** Analysis run: TICKET_VALIDATED, the main checkout as cwd, sections captured. */

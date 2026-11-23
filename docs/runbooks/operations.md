@@ -90,6 +90,28 @@ QATask (legacy: type `test-task`) chạy QA Engineer **chỉ đọc**: không co
 
 FAILED: Coordinator tạo Bug + DevTask fix và cập nhật Doc "Regression Suite" bằng `omi`; sau khi fix merge: `omi task unblock <n> --reason …` rồi `omi task run <n>` lại cùng QATask → `Run #k+1`. Nhánh `github.model: v2` (issue type QATask) đi theo `planWorkflow` v2 của DevTask-0132 #383.
 
+### Quy trình QA: `omi qa plan` và gate TC (DevTask-0143 #408)
+
+Quy trình QA đã duyệt (PO 2026-11-23, phiên s71) áp cho mọi repo dùng plugin; Coordinator sinh QATask bằng lệnh xác định, không viết tay:
+
+| Bước | Lệnh / ai làm | Ra cái gì |
+|---|---|---|
+| 1. BA chốt AC | `omi task analyze <story>` | AC trong body Story |
+| 2. Test design | `omi qa plan <story>` rồi `omi task run <test-design>` | QATask "Test design" (label `qa.designLabel`) chứa bảng `TC-<story>-<n>`; không PR |
+| 3. DevTask hiện thực | `omi task run <devtask>` | Code + test cho mọi case `Auto = Y`, tên test mang mã TC; có PR |
+| 4. Verify | `omi task run <verify>` | Comment `Run #k` theo TC ID; QATask Verify `Blocked by` mọi DevTask con, là điều kiện đóng Story |
+| 5. Verify FAILED | `omi issue create --type Bug --parent <story>` theo đề xuất trong report, rồi `omi qa plan <bug>`; sau khi fix merge: `omi task unblock <verify>` + `omi task run <verify>` | Bug + DevTask fix + QATask Retest; chạy lại cùng QATask Verify (`Run #k+1`) |
+
+`omi qa plan <n> [--dev <m|owner/repo#m>]…` (cả `github.model` legacy lẫn v2):
+
+- **Story** (UserStory có `Story Type` FR/NFR/CR; legacy: type `fr`/`nfr`/`change-request`): tạo nếu chưa có QATask "Test design" (kèm label `qa.designLabel`, tạo label nếu repo chưa có) và QATask "Verify", là sub-issue của Story. Body theo mẫu §11: `AC coverage` chép Acceptance Criteria của Story (thiếu AC → `TICKET_INVALID`, chạy `task analyze` trước), bảng `Test cases` trống, `Regression scope` theo loại Story (FR / NFR / CR), `Environment`. Verify `Blocked by` mọi DevTask con còn hiệu lực của Story (bỏ DevTask đã đóng not planned/duplicate); `--dev` thêm DevTask tạo sau hoặc ở repo khác. Legacy: QATask là type `test-task`, DevTask là `dev-task`.
+- **Bug**: tạo nếu chưa có DevTask "Fix" (body chép Steps to reproduce / Expected / Actual, Acceptance có ô "regression test `TC-<bug>-<n>` fail trước fix, pass sau fix") và QATask "Retest" `Blocked by` DevTask đó. Bug thiếu Steps to reproduce hoặc Expected / Actual → `TICKET_INVALID`, không ghi gì.
+- **Chạy lại an toàn**: task do lệnh tạo được nhận ra bằng marker ở dòng đầu body `<!-- omi:qa-plan=<n>;kind=<test-design|verify|fix|retest> -->`, không theo tiêu đề; chạy lại chỉ bổ sung label hoặc dependency còn thiếu, không tạo trùng (kể cả khi Verify đã Done). Task đóng not planned bị bỏ qua và được lập lại. Mọi kiểm tra (loại Issue, AC, cha còn mở, hierarchy) chạy trước lần ghi đầu tiên.
+
+**Gate test cho DevTask** (bước checks của `omi task run`): khi DevTask có Issue cha (Story) mà QATask "Test design" anh em đã có bảng TC, mỗi case `Auto = Y` phải có test mang đúng mã `TC-<story>-<n>` trong một file test của worktree (theo quy ước `test/`, `tests/`, `*.test.*`, `*.spec.*`; mã khớp nguyên mã: `TC-7-01` không nằm trong `TC-7-010`). Thiếu → finding `TCG-001` (liệt kê ID thiếu) → CHECKS_FAILED, engineer sửa như mọi finding của checks. Không có QATask Test design, hoặc bảng trống → không chặn; report của bước checks ghi "Test design gate not applied".
+
+**Roll-up**: Story/Bug cha (legacy: `fr`, `nfr`, `change-request`, `bug`) chuyển tiếp khi QATask Verify/Retest và mọi task con đã Done; các ô `- [ ]` ở `Scope / Acceptance` của chính Story/Bug không còn chặn (task con thay cho ô). Cha khác (Feature…) vẫn bị chặn bởi ô chưa tick. Model v2: luật `auto` trong `workflow.yaml` đã chỉ dựa vào task con.
+
 ### Năm role agent (DevTask-0131 #382, ADR-0005 D4)
 
 Role thực thi: `software-engineer`, `qa-engineer`, `ui-ux-designer`, `code-reviewer`, `security-reviewer`; `business-analyst` chỉ do `omi task analyze` chọn; `solution-architect` do `omi task analyze` chọn và chạy ở bước leo thang review của `omi task run` (sau 2 round FAILED; quyết định PO 2026-11-23, #382 CR-002). Một kế hoạch delivery không bao giờ chứa BA hay Architect. Áp cho cả `github.model: legacy` lẫn `v2`. Ánh xạ legacy: `role:frontend|backend|database|devops` (vẫn được chấp nhận, chỉ một nhãn) và type `dev-task`/`devops-task`/`documentation-task` → `software-engineer`; type `test-task` → QATask chỉ đọc của `qa-engineer` (mục trên). `agents.routing.<role>` và `--skills <role>=…` dùng tên role mới (`omi skill list`).

@@ -109,6 +109,19 @@ export const verifyPassed = (r: VerifyResult, checksPassed: boolean): boolean =>
 export const missingAuto = (table: TestCase[], output: string): string[] =>
   table.filter((c) => c.auto && !output.includes(c.id)).map((c) => c.id);
 
+/**
+ * Gate TCG-001 (DevTask-0143 #408): ids of the `Auto = Y` cases of a Test design table that no test
+ * source names. An id counts as named only as a whole (`TC-7-01` is not in `TC-7-010`).
+ */
+export function missingAutoTests(table: TestCase[], testSources: string[]): string[] {
+  return table
+    .filter(
+      (c) =>
+        c.auto && !testSources.some((s) => new RegExp(`(?<![A-Za-z0-9])${c.id}(?!\\d)`).test(s)),
+    )
+    .map((c) => c.id);
+}
+
 /** The JSON a QA Engineer puts in its `qa` section, with or without a code fence. */
 export function jsonOf(markdown: string): unknown {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(markdown);
