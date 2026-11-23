@@ -15,6 +15,7 @@ import type {
 import type { ErrorCode } from "../../shared/errors/errors.ts";
 import type { GhRunner } from "../../shared/github/client.ts";
 import type { Db } from "../../shared/sqlite/db.ts";
+import type { RunFindings } from "../domain/findings.ts";
 import type { Policy, WorkflowEvent } from "../domain/fsm.ts";
 import type { GateResult, RunRow, SkillChoice, StepRow } from "../domain/run.ts";
 
@@ -27,6 +28,9 @@ export interface RunStore {
     event: WorkflowEvent,
     policy?: Policy,
   ): { run: RunRow; context: WorkflowContext };
+  /** Open findings of the run, persisted so a resumed `task run` starts from them (Bug-0013 #392). */
+  runFindings(db: Db, runId: string): RunFindings;
+  saveRunFindings(db: Db, runId: string, findings: RunFindings): void;
   startStep(db: Db, o: { runId: string; stepId: string; round: number; role: Role }): StepRow;
   stepResult(db: Db, id: number): StepResult;
   beginAttempt(

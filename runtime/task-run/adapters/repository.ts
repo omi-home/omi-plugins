@@ -18,6 +18,7 @@ import {
 } from "../../shared/contracts.ts";
 import { type ErrorCode, OmiError } from "../../shared/errors/errors.ts";
 import { type Db, tx } from "../../shared/sqlite/db.ts";
+import { NO_FINDINGS, RunFindings } from "../domain/findings.ts";
 import {
   initialContext,
   POLICY,
@@ -187,6 +188,26 @@ export function advanceRun(
       ).run(runId, ctx.round, verdict, now);
     }
     return { run: getRun(db, runId) as RunRow, context: next };
+  });
+}
+
+/** Open findings of a run (Bug-0013 #392); none recorded yet = no findings. Re-validated on read. */
+export function runFindings(db: Db, runId: string): RunFindings {
+  const r = db.prepare("SELECT open_findings FROM workflow_run WHERE id = ?").get(runId);
+  if (!r) throw new OmiError("INVALID_TRANSITION", `run ${runId} does not exist`);
+  if (r.open_findings === null) return NO_FINDINGS;
+  return parseContract(RunFindings, JSON.parse(String(r.open_findings)), "stored run findings");
+}
+
+/** Replaces the open findings of a run: written as soon as a step changes them, before the run moves on. */
+export function saveRunFindings(db: Db, runId: string, findings: RunFindings): void {
+  tx(db, "save run findings", () => {
+    const r = db
+      .prepare("UPDATE workflow_run SET open_findings = ? WHERE id = ?")
+      .run(JSON.stringify(findings), runId);
+    if (r.changes !== 1) {
+      throw new OmiError("INVALID_TRANSITION", `run ${runId} does not exist`);
+    }
   });
 }
 

@@ -56,6 +56,8 @@ interface Script {
   reviewNext?: string;
   /** Security Reviewer verdict; CRITICAL = BLOCKED with a critical finding. */
   security?: Verdict | "CRITICAL";
+  /** Security Reviewer verdicts, one per run of it (then `security`, then PASSED). */
+  securityVerdicts?: Verdict[];
   /** This analyst stops with an open question. */
   analysisBlocks?: string;
   /** QA Engineer verdicts, one per QA run (default PASSED); INVALID cites an absolute path. */
@@ -228,7 +230,7 @@ function stubAgents(script: Script) {
         ...(script.reviewNext ? { nextAction: script.reviewNext } : {}),
       };
     } else if (role === "security-reviewer") {
-      const v = script.security ?? "PASSED";
+      const v = script.securityVerdicts?.shift() ?? script.security ?? "PASSED";
       const critical = v === "CRITICAL";
       result = {
         ...base,
@@ -455,8 +457,8 @@ test("2 + Architect + 2: every round reported, delta findings, no fifth Dev, one
   );
   assert.deepEqual(
     devPackets[2]?.openFindings.map((f) => f.id),
-    ["ARC-001"],
-    "round 3 follows the plan",
+    ["ARC-001", "CR-001"],
+    "round 3 follows the plan and keeps the review finding the plan does not repeat (Bug-0013)",
   );
   assert.equal(devPackets[0]?.issueContext.map((e) => e.issue.number).join(), "9,8");
   assert.equal(repo.reviewRounds(s.db, "run"), 4);
@@ -684,6 +686,122 @@ test("PO resume after a critical finding re-runs the Security Reviewer, not its 
     [1, 2],
   );
   assert.equal(roles(s.agents.calls).filter((r) => r === "code-reviewer").length, 1);
+});
+
+// ---- Bug-0013 #392: open findings survive BLOCKED and resume ----
+
+const sec001 = (p: TaskPacket | undefined) => p?.openFindings.map((f) => f.id);
+
+test("FAILED security review → Architect BLOCKED → unblock → run: the Architect and round 3 get SEC-001 (#392)", () => {
+  const s = setup({ securityVerdicts: ["FAILED", "FAILED"] }, delivery({ security: true }));
+  const real = s.deps.runAgent;
+  let garbage = true;
+  // First Architect answer is refused (CONTRACT_INVALID): the run is BLOCKED, as in run 382-7407f8b8.
+  const runAgent = (l: AgentLaunch) => {
+    const out = real(l);
+    if (!garbage || !l.stdin.includes('"role": "solution-architect"')) return out;
+    garbage = false;
+    return JSON.stringify({ type: "result", is_error: false, result: "no json", usage: {} });
+  };
+  assert.equal(runSlice({ ...s.deps, runAgent }, s.target).state, "BLOCKED");
+  assert.deepEqual(repo.runFindings(s.db, "run"), {
+    findings: [
+      {
+        id: "SEC-001",
+        severity: "high",
+        observed: "SQL built from input",
+        expected: "parameterize",
+      },
+    ],
+    failedReviewers: ["security-reviewer"],
+  });
+  repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+  // A new `task run` process: nothing in memory, everything from state.sqlite.
+  assert.equal(runSlice({ ...s.deps, runAgent }, s.target).state, "PR_PENDING");
+  const architect = s.agents.packets.filter((p) => p.role === "solution-architect");
+  assert.deepEqual(sec001(architect.at(-1)), ["SEC-001"], "the resumed Architect sees the finding");
+  const dev3 = s.agents.packets.find((p) => p.role === "software-engineer" && p.round === 3);
+  assert.deepEqual(
+    sec001(dev3),
+    ["ARC-001", "SEC-001"],
+    "plan plus the review finding it does not repeat",
+  );
+  // Round 3 confirms: the Security Reviewer that FAILED ran again and passed.
+  assert.deepEqual(repo.runFindings(s.db, "run"), { findings: [], failedReviewers: [] });
+});
+
+test("a reviewer that FAILED runs again after resume even when no label selects it any more (#392)", () => {
+  let unblocked = false;
+  const s = setup(
+    {
+      securityVerdicts: ["FAILED"],
+      review: (round) => (round === 2 && !unblocked ? "BLOCKED" : "PASSED"),
+    },
+    delivery({ security: true }),
+  );
+  assert.equal(runSlice(s.deps, s.target).state, "BLOCKED"); // round 2 code review stops
+  assert.deepEqual(repo.runFindings(s.db, "run").failedReviewers, ["security-reviewer"]);
+  unblocked = true;
+  repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+  const noLabel = { ...s.target, plan: delivery({ security: false }) };
+  assert.equal(runSlice(s.deps, noLabel).state, "PR_PENDING");
+  assert.ok(s.agents.calls.includes("security-reviewer:2"), s.agents.calls.join());
+  assert.deepEqual(repo.runFindings(s.db, "run"), { findings: [], failedReviewers: [] });
+});
+
+test("a run with a blocking finding no reviewer closed never reaches PR_PENDING (#392)", () => {
+  const s = setup({}, delivery());
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  // Tamper like a lost round: back in QA with SEC-001 open and the Security Reviewer unconfirmed.
+  const ctx = repo.runContext(s.db, "run");
+  s.db
+    .prepare("UPDATE workflow_run SET state = 'IN_QA', context = ? WHERE id = 'run'")
+    .run(JSON.stringify({ ...ctx, state: "IN_QA" }));
+  repo.saveRunFindings(s.db, "run", {
+    findings: [
+      {
+        id: "SEC-001",
+        severity: "medium",
+        observed: "SQL built from input",
+        expected: "parameterize",
+      },
+    ],
+    failedReviewers: ["security-reviewer"],
+  });
+  const before = s.agents.packets.length;
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const after = s.agents.packets.slice(before);
+  // Not straight to PR_PENDING: engineer (with SEC-001 + REL-003), then both reviewers.
+  assert.deepEqual(
+    after.map((p) => p.role),
+    ["software-engineer", "code-reviewer", "security-reviewer"],
+  );
+  assert.deepEqual(sec001(after[0]), ["REL-003", "SEC-001"]);
+  assert.deepEqual(repo.runFindings(s.db, "run"), { findings: [], failedReviewers: [] });
+});
+
+test("with the Security Reviewer failing again the same run ends at WAITING_PO, never PR_PENDING (#392)", () => {
+  const s = setup({}, delivery());
+  assert.equal(runSlice(s.deps, s.target).state, "PR_PENDING");
+  const ctx = repo.runContext(s.db, "run");
+  s.db
+    .prepare("UPDATE workflow_run SET state = 'IN_QA', context = ? WHERE id = 'run'")
+    .run(JSON.stringify({ ...ctx, state: "IN_QA" }));
+  repo.saveRunFindings(s.db, "run", {
+    findings: [
+      {
+        id: "SEC-001",
+        severity: "high",
+        observed: "SQL built from input",
+        expected: "parameterize",
+      },
+    ],
+    failedReviewers: ["security-reviewer"],
+  });
+  const failing = stubAgents({ security: "FAILED" });
+  const ctx2 = runSlice({ ...s.deps, runAgent: failing.runAgent }, s.target);
+  assert.notEqual(ctx2.state, "PR_PENDING");
+  assert.equal(ctx2.state, "WAITING_PO");
 });
 
 test("Bug Resolution: a fix without a regression test is a failed gate, not a review", () => {

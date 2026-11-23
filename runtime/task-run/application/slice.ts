@@ -33,6 +33,13 @@ import type { GhRunner } from "../../shared/github/client.ts";
 import { redact, redactDeep } from "../../shared/redact.ts";
 import type { Db } from "../../shared/sqlite/db.ts";
 import { cutAt } from "../../shared/text.ts";
+import {
+  afterReview,
+  carryOpen,
+  type ReviewVerdict,
+  type RunFindings,
+  unconfirmed,
+} from "../domain/findings.ts";
 import { policyFrom, type WorkflowEvent } from "../domain/fsm.ts";
 import { EDITOR_NPM_SCRIPTS } from "../domain/permissions.ts";
 import type { AnalysisPlan, DeliveryPlan, WorkflowPlan } from "../domain/plan.ts";
@@ -745,7 +752,7 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
   const DEV: StepSpec = { ...DEV_BASE, role: plan.engineer };
   const policy = policyFrom(d.config);
   const { git } = d.ports;
-  const { advanceRun, runContext } = d.ports.store;
+  const { advanceRun, runContext, runFindings, saveRunFindings } = d.ports.store;
   const publishPending = d.ports.reports.publish;
   mkdirSync(d.evidenceDir, { recursive: true });
   publishPending(d.db, t.run.id, { gh: d.gh }); // finish what a crashed invocation persisted
@@ -754,7 +761,15 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
     ctx = advanceRun(d.db, t.run.id, e, policy).context;
   };
   const refresh = () => runContext(d.db, t.run.id);
-  let findings: Finding[] = [];
+  // Open findings live in state.sqlite: a run resumed after BLOCKED starts from them (Bug-0013 #392).
+  let open = runFindings(d.db, t.run.id);
+  /** Records the new open findings before the run moves on, so no process boundary can lose them. */
+  const setOpen = (next: RunFindings) => {
+    open = next;
+    saveRunFindings(d.db, t.run.id, next);
+  };
+  /** Same reviewers as before, new findings (the engineer's checks, QA, the Architect's plan). */
+  const setFindings = (findings: Finding[]) => setOpen({ ...open, findings });
   let checks: CheckRun[] | undefined; // last checks of this run, for review and architect
   let checkedHead: string | null = null; // HEAD the last passing checks ran on
   let needDev = true;
@@ -771,7 +786,7 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
           const spec = ctx.validationFixes
             ? { ...DEV, stepId: `implement-fix${ctx.validationFixes}` }
             : DEV;
-          const dev = agentStep(d, t, spec, ctx, findings);
+          const dev = agentStep(d, t, spec, ctx, open.findings);
           if (!dev) return refresh();
           if (dev.status !== "PASSED") {
             advance({ type: "BLOCK" }); // engineer could not finish: a person decides
@@ -796,42 +811,49 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
         checkedHead = gate.findings.length ? null : git(["rev-parse", "HEAD"], t.worktree);
         if (gate.findings.length) {
           advance({ type: "CHECKS_FAILED" });
-          findings = gate.findings;
+          // The engineer fixes the checks and still owes the review findings that are open.
+          setFindings(carryOpen(gate.findings, open.findings));
           needDev = true;
           break;
         }
-        const review = agentStep(d, t, REVIEW, ctx, findings, checks);
+        const review = agentStep(d, t, REVIEW, ctx, open.findings, checks);
         if (!review) return refresh();
         if (review.status !== "PASSED" && review.status !== "FAILED") {
           advance({ type: "BLOCK" });
           return ctx;
         }
-        let verdict = review;
-        // Security gate (PO 2026-11-18): label risk:high/security, or the reviewer routes it.
-        if (
-          review.status === "PASSED" &&
-          (plan.security || /^security-review:/.test(review.nextAction ?? ""))
-        ) {
-          const sec = agentStep(d, t, SECURITY, ctx, findings, checks);
+        const verdicts: ReviewVerdict[] = [
+          { role: "code-reviewer", status: review.status, findings: review.findings },
+        ];
+        // Security gate (PO 2026-11-18): label risk:high/security, or the reviewer routes it. A
+        // Security Reviewer that FAILED earlier runs again whatever selects it now (Bug-0013 #392).
+        const securityDue =
+          (review.status === "PASSED" &&
+            (plan.security || /^security-review:/.test(review.nextAction ?? ""))) ||
+          open.failedReviewers.includes("security-reviewer");
+        if (securityDue) {
+          const sec = agentStep(d, t, SECURITY, ctx, open.findings, checks);
           if (!sec) return refresh();
-          if (sec.status === "BLOCKED") {
+          if (sec.status !== "PASSED" && sec.status !== "FAILED") {
             // A critical finding escalates to the PO at once; any other block stops for a person.
             const critical = sec.findings.some((f) => f.severity === "critical");
             advance({ type: critical ? "ESCALATE_TO_PO" : "BLOCK" });
             return ctx;
           }
-          verdict = sec;
+          verdicts.push({ role: "security-reviewer", status: sec.status, findings: sec.findings });
         }
-        findings = verdict.findings;
-        advance({ type: verdict.status === "PASSED" ? "REVIEW_PASSED" : "REVIEW_FAILED" });
+        setOpen(afterReview(open, verdicts));
+        const passed = verdicts.every((v) => v.status === "PASSED");
+        advance({ type: passed ? "REVIEW_PASSED" : "REVIEW_FAILED" });
         needDev = false;
         break;
       }
       case "ARCHITECT_ESCALATION": {
-        const plan = agentStep(d, t, ARCHITECT, ctx, findings, checks);
+        const plan = agentStep(d, t, ARCHITECT, ctx, open.findings, checks);
         if (!plan) return refresh();
         if (plan.status === "PASSED") {
-          findings = plan.findings; // the correction plan is what round 3 addresses
+          // The correction plan is what round 3 addresses, plus every blocking review finding it does not repeat.
+          setFindings(carryOpen(plan.findings, open.findings));
           advance({ type: "ARCHITECT_PLAN_ACCEPTED" });
         } else {
           advance({ type: "ARCHITECT_SCOPE_CHANGE" });
@@ -839,15 +861,40 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
         break;
       }
       case "IN_QA": {
+        // Gate (Bug-0013 #392): no PR_PENDING while a blocking finding is open or a reviewer that
+        // FAILED has not passed since. Normally the review loop leaves none; a resumed or
+        // inconsistent run goes back to the engineer and the reviewers instead.
+        const unconfirmedNow = unconfirmed(open);
+        if (unconfirmedNow.length) {
+          setFindings(
+            carryOpen(
+              [
+                {
+                  id: "REL-003",
+                  severity: "high",
+                  observed: cut(
+                    `Not confirmed closed by a reviewer: ${unconfirmedNow.join("; ")}.`,
+                    1000,
+                  ),
+                  expected:
+                    "Resolve the open findings; the reviewers that FAILED run again and confirm they are closed.",
+                },
+              ],
+              open.findings,
+            ),
+          );
+          advance({ type: "QA_FAILED" });
+          break;
+        }
         const release = releaseStep(d, t, ctx, checkedHead);
         checks = release.checks ?? checks;
         if (release.findings.length) {
-          findings = release.findings;
+          setFindings(carryOpen(release.findings, open.findings));
           advance({ type: "QA_FAILED" });
           break;
         }
         if (plan.manualQa) {
-          const qa = agentStep(d, t, QA, ctx, findings, checks);
+          const qa = agentStep(d, t, QA, ctx, open.findings, checks);
           if (!qa) return refresh();
           // QA may run check commands: the clean worktree release validation saw must stay clean.
           const dirty = git(["status", "--porcelain", "--untracked-files=all"], t.worktree);
@@ -871,7 +918,7 @@ ${dirty}`;
             return ctx;
           }
           if (qa.status === "FAILED") {
-            findings = qa.findings;
+            setFindings(qa.findings);
             advance({ type: "QA_FAILED" });
             break;
           }
