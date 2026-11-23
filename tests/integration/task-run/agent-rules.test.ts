@@ -242,6 +242,19 @@ test("agent hook: a command that mentions git runs only plain lowercase git segm
   }
 });
 
+// #395 round 4 SEC-001/002: quotes, backslashes and backticks cannot hide the git word.
+test("agent hook: a git word hidden by quoting still fails closed", () => {
+  for (const c of ["g''it diff ~/x y", "g\\it log", 'cd ..; "g"it diff x y']) {
+    assert.equal(call("Bash", { command: c }), GIT_ESCAPE, c);
+  }
+  for (const c of [
+    "g`it log",
+    "$ExecutionContext.SessionState.Path.SetLocation('..'); git diff x y",
+  ]) {
+    assert.equal(call("PowerShell", { command: c }), GIT_ESCAPE, c);
+  }
+});
+
 test("agent hook: git as a word only; github/.gitignore commands are not git commands", () => {
   for (const c of [
     "npm run test -- tests/unit/github/a.test.ts",
