@@ -13,18 +13,23 @@ import {
 import { OmiError } from "../../shared/errors/errors.ts";
 import { type GhRunner, graphql, markerAuthor, spawnGh } from "../../shared/github/client.ts";
 import { redact } from "../../shared/redact.ts";
+import { parseSources } from "../../shared/sources.ts";
 import { cutAt } from "../../shared/text.ts";
 
 /** Parent levels fetched above the executable Issue (Task → Feature → Milestone → Epic …). */
 const DEPTH = 5;
-// ponytail: plain head truncation, nearest Issue first; pick `<!-- omi:section=… -->` sections
-// when ancestor specs crowd out the useful parts.
 export const PER_ISSUE_CHARS = 12_000;
 export const TOTAL_CHARS = 40_000;
+/** Budget of the Issues a task body lists in its `Sources` section (taken out of TOTAL_CHARS). */
+export const PER_SOURCE_CHARS = 6_000;
+export const SOURCES_TOTAL_CHARS = 16_000;
 
 const NODE = "number title body repository{nameWithOwner} labels(first:20){nodes{name}}";
 let parents = "";
 for (let i = 0; i < DEPTH; i++) parents = `parent{${NODE} ${parents}}`;
+const SOURCE_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
+  repository(owner:$owner,name:$repo){issue(number:$number){${NODE}}}
+}`;
 const QUERY = `query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){issue(number:$number){
     ${NODE} comments(last:100){nodes{body authorAssociation author{login}}} ${parents}
@@ -68,6 +73,86 @@ const Response = z.strictObject({
     })
     .nullable(),
 });
+
+const SourceResponse = z.strictObject({
+  repository: z.strictObject({ issue: z.strictObject(fields).nullable() }).nullable(),
+});
+
+interface Block {
+  name: string;
+  tier: number; // 0 Objective/Scope/Acceptance/DoD headings, 1 omi:section markers, 2 the rest
+  text: string;
+}
+
+const OPEN = /^<!--\s*omi:section=([\w.-]+)\s*-->/;
+const CLOSE = /^<!--\s*\/omi:section=[\w.-]+\s*-->/;
+const KEY_HEADING = /objective|scope|acceptance|definition of done|tiêu chí/i;
+
+/** Splits a body at `omi:section` markers and level 1–2 headings (outside marked sections). */
+function blocksOf(body: string): Block[] {
+  const blocks: Block[] = [];
+  let cur: { name: string; tier: number; lines: string[] } = { name: "body", tier: 2, lines: [] };
+  let marked = false;
+  const flush = () => {
+    const text = cur.lines.join("\n");
+    if (text.trim()) blocks.push({ name: cur.name, tier: cur.tier, text });
+  };
+  for (const line of body.split("\n")) {
+    const t = line.trim();
+    const open = OPEN.exec(t);
+    const heading = /^#{1,2}\s+(.+?)\s*#*$/.exec(t);
+    if (open) {
+      flush();
+      cur = { name: open[1] as string, tier: 1, lines: [line] };
+      marked = true;
+    } else if (CLOSE.test(t) && marked) {
+      cur.lines.push(line);
+      flush();
+      cur = { name: "body", tier: 2, lines: [] };
+      marked = false;
+    } else if (heading && !marked) {
+      flush();
+      const name = heading[1] as string;
+      cur = { name, tier: KEY_HEADING.test(name) ? 0 : 2, lines: [line] };
+    } else cur.lines.push(line);
+  }
+  flush();
+  return blocks;
+}
+
+/**
+ * Fits `body` into `max` chars. Over budget: key headings first, then `omi:section` sections, then
+ * the rest, each in document order; the block that crosses the budget is head-cut. Kept blocks stay
+ * in document order; what was dropped or cut is named with its lost size.
+ */
+export function fitBody(
+  body: string,
+  max: number,
+): { body: string; omitted: { section: string; chars: number }[] } {
+  if (body.length <= max) return { body, omitted: [] };
+  const blocks = blocksOf(body);
+  const kept = new Map<Block, number>();
+  let left = max;
+  for (const tier of [0, 1, 2]) {
+    for (const b of blocks) {
+      if (b.tier !== tier || left <= 0) continue;
+      const take = Math.min(b.text.length, left);
+      kept.set(b, take);
+      left -= take + 1; // + joining newline
+    }
+  }
+  const text = cutAt(
+    blocks
+      .filter((b) => kept.has(b))
+      .map((b) => cutAt(b.text, kept.get(b) ?? 0))
+      .join("\n"),
+    max,
+  );
+  const omitted = blocks
+    .map((b) => ({ section: b.name, chars: b.text.length - (kept.get(b) ?? 0) }))
+    .filter((o) => o.chars > 0);
+  return { body: text, omitted };
+}
 
 const typeOf = (n: Node): IssueType | null => labelType(n.labels.nodes) ?? null;
 
@@ -118,20 +203,62 @@ export function fetchIssueContext(
   const trusted = markerAuthor(run);
   if (!issue) throw new OmiError("TICKET_INVALID", `issue ${owner}/${repo}#${number} not found`);
 
-  const issueContext: IssueContextEntry[] = [];
-  let budget = TOTAL_CHARS;
-  for (let n: Node | null | undefined = issue; n && budget > 0; n = n.parent) {
+  const entry = (n: Node | z.infer<z.ZodObject<typeof fields>>, perIssue: number, room: number) => {
     const body = redact(n.body);
-    const keep = Math.min(body.length, PER_ISSUE_CHARS, budget);
-    budget -= keep;
-    issueContext.push({
-      issue: { repository: n.repository.nameWithOwner, number: n.number },
-      type: typeOf(n),
-      title: cut(redact(n.title), 300),
-      body: cutAt(body, keep),
-      truncated: keep < body.length,
-    });
+    const keep = Math.min(body.length, perIssue, room);
+    const fit = fitBody(body, keep);
+    return {
+      keep: fit.body.length,
+      entry: {
+        issue: { repository: n.repository.nameWithOwner, number: n.number },
+        type: typeOf(n as Node),
+        title: cut(redact(n.title), 300),
+        body: fit.body,
+        truncated: keep < body.length,
+        ...(fit.omitted.length ? { omitted: fit.omitted } : {}),
+      } satisfies IssueContextEntry,
+    };
+  };
+
+  // Issues the task body lists in `Sources` (outside the parent chain), read first so their
+  // share of the budget is reserved before the chain fills it.
+  const chain = new Set<string>();
+  for (let n: Node | null | undefined = issue; n; n = n.parent) {
+    chain.add(`${n.repository.nameWithOwner.toLowerCase()}#${n.number}`);
   }
+  const sources: IssueContextEntry[] = [];
+  let sourceRoom = SOURCES_TOTAL_CHARS;
+  for (const ref of parseSources(redact(issue.body), issue.repository.nameWithOwner)) {
+    if (sourceRoom <= 0) break;
+    if (chain.has(`${ref.repository.toLowerCase()}#${ref.number}`)) continue;
+    const [o, r] = ref.repository.split("/") as [string, string];
+    // The body is untrusted: never read a repository outside the configured owner.
+    if (o.toLowerCase() !== owner.toLowerCase()) continue;
+    try {
+      const found = graphql(
+        SOURCE_QUERY,
+        { owner: o, repo: r, number: ref.number },
+        SourceResponse,
+        "source issue",
+        run,
+      ).repository?.issue;
+      if (!found) continue;
+      const made = entry(found, PER_SOURCE_CHARS, sourceRoom);
+      sourceRoom -= made.keep;
+      sources.push(made.entry);
+    } catch (e) {
+      if (!(e instanceof OmiError)) throw e; // unreadable source: the packet goes without it
+    }
+  }
+
+  const issueContext: IssueContextEntry[] = [];
+  let budget = TOTAL_CHARS - sources.reduce((n, s) => n + s.body.length, 0);
+  for (let n: Node | null | undefined = issue; n && budget > 0; n = n.parent) {
+    const made = entry(n, PER_ISSUE_CHARS, budget);
+    budget -= made.keep;
+    issueContext.push(made.entry);
+  }
+  issueContext.push(...sources);
   return {
     issueContext,
     carriedFindings: parseCarriedFindings(

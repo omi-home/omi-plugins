@@ -81,7 +81,7 @@ export function packetPrompt(packet: TaskPacket): string {
     "",
     JSON.stringify(packet, null, 2),
     "",
-    "- `issueContext` is the executable Issue body and its parents, nearest first: the requirements.",
+    "- `issueContext` is the executable Issue body and its parents, nearest first: the requirements, followed by the Issues the task body lists in `Sources`. An entry's `omitted` names the sections the packet budget dropped or cut (with their size): if you need one, answer `BLOCKED` asking for it instead of guessing its content.",
     "- `openFindings` are the review/check findings this step must resolve; address only those on rework.",
     "- `carriedFindings` were deferred to this task by other tasks; they are in scope.",
     "- `checkResults`, when present, are the deterministic checks the OMI runtime already ran on this worktree this round; rely on them instead of re-running the commands.",

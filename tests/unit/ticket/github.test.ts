@@ -171,6 +171,34 @@ test("validateTicket: soft gates warn", () => {
   assert.equal(gate(ticket(spike), "type")?.status, "pass");
 });
 
+test("validateTicket: #n outside the parent chain and Sources warns, never fails", () => {
+  const body = (extra: string) => `## Acceptance\n- [ ] ok\n${extra}`;
+  const refs = (t: Ticket) => validateTicket(t, config).find((c) => c.name === "references");
+  // Chain (#1 parent, #7 grandparent), itself (#5), code, comments, headings: no warning.
+  const chain = ticket({
+    body: body("see #1 and #7 and #5\n`#99`\n<!-- #98 -->\n```\n#97\n```"),
+    parent: {
+      number: 1,
+      state: "OPEN",
+      repository: { nameWithOwner: "o/r" },
+      parent: { number: 7, state: "OPEN", repository: { nameWithOwner: "o/r" } },
+    },
+  });
+  assert.equal(refs(chain), undefined);
+  // Stray reference warns and does not fail the gate.
+  const stray = refs(ticket({ body: body("spec in #302 and #303") }));
+  assert.equal(stray?.status, "warn");
+  assert.match(stray?.detail ?? "", /#302, #303/);
+  assert.ok(
+    validateTicket(ticket({ body: body("#302") }), config).every((c) => c.status !== "fail"),
+  );
+  // Declared in Sources: quiet.
+  assert.equal(
+    refs(ticket({ body: body("spec in #302\n\n## Sources\n- #302\n- o/r#303") })),
+    undefined,
+  );
+});
+
 test("fetchTicket: missing repo/issue → TICKET_INVALID; strict response shape", () => {
   const nf = { type: "NOT_FOUND", message: "x" };
   assert.equal(
