@@ -154,6 +154,21 @@ test("dirty clone or unknown files in the task workspace: CLEANUP_FAILED, everyt
   assert.match(git(s.wt, "branch", "--list", "feature/5-x"), /feature\/5-x/);
 });
 
+test("TC-410-01: the empty result.json stub of the agent host does not block cleanup; other content does", () => {
+  const s = merged();
+  writeFileSync(join(dirname(s.wt), "result.json"), "{}");
+  const ok = cleanupRun(s.db, s.opts());
+  assert.equal(failedStep(ok), undefined);
+  assert.equal(existsSync(s.wt), false);
+  const t = merged();
+  writeFileSync(join(dirname(t.wt), "result.json"), '{"a":1}');
+  assert.match(
+    cleanupRun(t.db, t.opts()).steps.find((x) => x.status === "failed")?.detail ?? "",
+    /unknown files: result\.json/,
+  );
+  assert.equal(existsSync(t.wt), true);
+});
+
 test("a held cleanup lease refuses a concurrent cleanup", () => {
   const s = merged();
   acquireLease(s.db, { key: `cleanup:${s.runId}`, holder: "other", ttlMs: 60_000 });
