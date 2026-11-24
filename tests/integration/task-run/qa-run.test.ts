@@ -3,11 +3,12 @@
 import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { cleanupRun } from "../../../runtime/cleanup/adapters/cleanup.ts";
 import { claudeCode } from "../../../runtime/harness/adapters/claude-code/harness.ts";
 import type { AgentLaunch } from "../../../runtime/harness/domain/harness.ts";
 import { stepReports } from "../../../runtime/reporting/adapters/step-reports.ts";
@@ -84,7 +85,10 @@ function setup(replies: Reply[], plan: QaPlan, checkScript = "console.log('TC-8-
   writeFileSync(join(upstream, "README.md"), "x\n");
   git(upstream, "add", ".");
   git(upstream, "commit", "-qm", "base");
-  const dir = mkdtempSync(join(tmpdir(), "omi-qa-wt-"));
+  // the clone sits alone in its task workspace root, as cleanup expects
+  const root = mkdtempSync(join(tmpdir(), "omi-qa-wt-"));
+  const dir = join(root, "clone");
+  mkdirSync(dir);
   git(dir, "clone", "-q", upstream, ".");
   const base = git(dir, "rev-parse", "HEAD");
   const db = openState(":memory:");
@@ -313,6 +317,20 @@ test("TC-385-16: a QATask without a parent Issue is refused (POLICY_VIOLATION)",
   assert.equal(s.closed(), 0);
 });
 
+const writeMarker = (dir: string, branch: string) =>
+  writeFileSync(
+    join(dir, ".git", "omi-owner.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      repository: "o/r",
+      issue: 9,
+      branch,
+      baseSha: "0".repeat(40),
+      runId: "run",
+      createdAt: new Date().toISOString(),
+    }),
+  );
+
 const lowDefect = {
   title: "t",
   repro: "r",
@@ -333,7 +351,7 @@ test("TC-420-01: Verify leaves the clone on the task branch, so a rerun after un
   assert.equal(git(s.dir, "symbolic-ref", "--short", "HEAD"), "test/9-qa");
   // a clone an older run left detached is put back on the task branch (named by the marker)
   git(s.dir, "checkout", "-q", "--detach");
-  writeFileSync(join(s.dir, ".git", "omi-owner.json"), JSON.stringify({ branch: "test/9-qa" }));
+  writeMarker(s.dir, "test/9-qa");
   repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
   const second = runQa(s.deps, s.target);
   assert.equal(second.qa?.verdict, "PASSED");
@@ -347,6 +365,19 @@ test("TC-420-02: after Verify PASSED the clone is on the task branch at origin/d
   assert.equal(git(s.dir, "symbolic-ref", "--short", "HEAD"), "test/9-qa");
   assert.equal(git(s.dir, "rev-parse", "HEAD"), git(s.upstream, "rev-parse", "HEAD"));
   assert.equal(git(s.dir, "status", "--porcelain"), "");
+  // finalize's cleanup accepts the clone: no "detached HEAD" failure of verify-clean-worktree
+  writeMarker(s.dir, "test/9-qa");
+  repo.claimResource(s.db, { runId: "run", kind: "branch", ref: "test/9-qa" });
+  repo.claimResource(s.db, { runId: "run", kind: "worktree", ref: s.dir });
+  const cleaned = cleanupRun(s.db, {
+    runId: "run",
+    receipt: undefined,
+    noCode: { base: "develop" },
+    tempRoot: tmpdir(),
+  });
+  const verifyStep = cleaned.steps.find((x) => x.name === "verify-clean-worktree");
+  assert.equal(verifyStep?.status, "done", verifyStep?.detail);
+  assert.equal(cleaned.state, "COMPLETED");
 });
 
 test("TC-420-03: a rerun after unblock on the same commit calls the agent again (new step id)", () => {

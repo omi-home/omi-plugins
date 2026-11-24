@@ -49,6 +49,8 @@ export interface RunStore {
   takeUnblockReason(db: Db, runId: string): string | undefined;
   startStep(db: Db, o: { runId: string; stepId: string; round: number; role: Role }): StepRow;
   stepResult(db: Db, id: number): StepResult;
+  /** Step ids of the run starting with `prefix`. */
+  stepIds(db: Db, runId: string, prefix: string): string[];
   beginAttempt(
     db: Db,
     stepRunId: number,
@@ -163,9 +165,16 @@ export interface IssueContextPort {
   ): Pick<TaskPacket, "issueContext" | "carriedFindings" | "issueComments">;
 }
 
+/** The task workspace's ownership marker (worktree adapter). */
+export interface WorkspacePort {
+  /** Branch the marker of the clone names; OWNERSHIP_MISMATCH when it is missing or invalid. */
+  ownedBranch(worktree: string): string;
+}
+
 export interface SlicePorts {
   store: RunStore;
   git: GitPort;
+  workspace: WorkspacePort;
   roleFiles: RoleFilesPort;
   checks: ChecksPort;
   regression: RegressionPort;

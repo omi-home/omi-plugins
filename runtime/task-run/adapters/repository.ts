@@ -303,6 +303,16 @@ export function stepResult(db: Db, id: number): StepResult {
   return parseContract(StepResult, JSON.parse(String(r.result)), "stored step result");
 }
 
+export function stepIds(db: Db, runId: string, prefix: string): string[] {
+  const like = `${prefix.replace(/[\\%_]/g, "\\$&")}%`;
+  return db
+    .prepare(
+      "SELECT DISTINCT step_id FROM step_run WHERE run_id = ? AND step_id LIKE ? ESCAPE '\\'",
+    )
+    .all(runId, like)
+    .map((r) => String(r.step_id));
+}
+
 /** Idempotent: the same (run, step, round) always maps to one row. */
 export function startStep(
   db: Db,

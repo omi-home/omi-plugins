@@ -1440,28 +1440,20 @@ function tcGate(
 }
 
 /** The task branch of a QATask clone: the checked-out one, or the ownership marker's when detached. */
-function qaBranch(git: SliceDeps["ports"]["git"], worktree: string): string {
+function qaBranch(d: SliceDeps, worktree: string): string {
   try {
-    return git(["symbolic-ref", "--quiet", "--short", "HEAD"], worktree);
+    return d.ports.git(["symbolic-ref", "--quiet", "--short", "HEAD"], worktree);
   } catch {
-    // detached HEAD (a clone left by an older run): fall through to the marker
+    // detached HEAD (a clone left by an older run): the ownership marker names the branch
+    return d.ports.workspace.ownedBranch(worktree);
   }
-  const dir = git(["rev-parse", "--absolute-git-dir"], worktree);
-  const marker = JSON.parse(readFileSync(join(dir, "omi-owner.json"), "utf8")) as {
-    branch?: string;
-  };
-  if (!marker.branch) throw new OmiError("OWNERSHIP_MISMATCH", "ownership marker has no branch");
-  return marker.branch;
 }
 
 /** Next unused QA step index of the run: 0 for the first agent step, then 1, 2, … */
 function nextQaIndex(d: SliceDeps, runId: string): number {
-  const rows = d.db
-    .prepare("SELECT DISTINCT step_id FROM step_run WHERE run_id = ? AND step_id LIKE 'qa%'")
-    .all(runId);
   let next = 0;
-  for (const r of rows) {
-    const m = /^qa(?:-qa(\d+))?$/.exec(String(r.step_id));
+  for (const id of d.ports.store.stepIds(d.db, runId, "qa")) {
+    const m = /^qa(?:-qa(\d+))?$/.exec(id);
     if (m) next = Math.max(next, Number(m[1] ?? 0) + 1);
   }
   return next;
@@ -1472,8 +1464,8 @@ function nextQaIndex(d: SliceDeps, runId: string): number {
  * commit, no PR, no review. Test design writes the TC table into the Issue's `qa` section; Verify
  * runs the repo's checks, reconciles the agent's per-TC results and posts or updates `Run #k`.
  * PASSED leaves the run for `omi task finalize` (noCode); FAILED holds it BLOCKED for the Coordinator.
- * A rerun on the same develop commit keeps `Run #k` (same agent step id): it reuses the stored QA
- * assessment, re-runs the checks and updates the existing comment; a new commit starts `Run #k+1`.
+ * A rerun on the same develop commit keeps and updates the `Run #k` comment but is a new QA agent
+ * attempt (new step id, never a replay of the stored assessment); a new commit starts `Run #k+1`.
  */
 export function runQa(
   d: SliceDeps,
@@ -1504,7 +1496,7 @@ export function runQa(
   git(["fetch", "origin", base], target.worktree);
   // Reset the task's own branch (a QATask has no commit of its own) instead of detaching HEAD: a
   // detached clone is refused by the workspace reuse and by finalize (Bug #420).
-  git(["checkout", "-B", qaBranch(git, target.worktree), `origin/${base}`], target.worktree);
+  git(["checkout", "-B", qaBranch(d, target.worktree), `origin/${base}`], target.worktree);
   const head = git(["rev-parse", "HEAD"], target.worktree);
   const t = { ...target, baseSha: head };
 
