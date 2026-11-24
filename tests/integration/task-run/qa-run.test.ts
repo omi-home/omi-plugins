@@ -313,22 +313,59 @@ test("TC-385-16: a QATask without a parent Issue is refused (POLICY_VIOLATION)",
   assert.equal(s.closed(), 0);
 });
 
+const lowDefect = {
+  title: "t",
+  repro: "r",
+  expected: "e",
+  actual: "a",
+  severity: "low",
+  tc: ["TC-8-02"],
+};
+
+test("TC-420-01: Verify leaves the clone on the task branch, so a rerun after unblock is not refused", () => {
+  const s = setup(
+    [{ qa: verify("pass", "fail", [lowDefect]) }, { qa: verify("pass", "pass") }],
+    VERIFY,
+  );
+  git(s.dir, "switch", "-q", "-c", "test/9-qa");
+  const first = runQa(s.deps, s.target);
+  assert.equal(first.ctx.state, "BLOCKED");
+  assert.equal(git(s.dir, "symbolic-ref", "--short", "HEAD"), "test/9-qa");
+  // a clone an older run left detached is put back on the task branch (named by the marker)
+  git(s.dir, "checkout", "-q", "--detach");
+  writeFileSync(join(s.dir, ".git", "omi-owner.json"), JSON.stringify({ branch: "test/9-qa" }));
+  repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+  const second = runQa(s.deps, s.target);
+  assert.equal(second.qa?.verdict, "PASSED");
+  assert.equal(git(s.dir, "symbolic-ref", "--short", "HEAD"), "test/9-qa");
+});
+
+test("TC-420-02: after Verify PASSED the clone is on the task branch at origin/develop, clean", () => {
+  const s = setup([{ qa: verify("pass", "pass") }], VERIFY);
+  git(s.dir, "switch", "-q", "-c", "test/9-qa");
+  assert.equal(runQa(s.deps, s.target).qa?.verdict, "PASSED");
+  assert.equal(git(s.dir, "symbolic-ref", "--short", "HEAD"), "test/9-qa");
+  assert.equal(git(s.dir, "rev-parse", "HEAD"), git(s.upstream, "rev-parse", "HEAD"));
+  assert.equal(git(s.dir, "status", "--porcelain"), "");
+});
+
+test("TC-420-03: a rerun after unblock on the same commit calls the agent again (new step id)", () => {
+  const s = setup(
+    [{ qa: verify("pass", "fail", [lowDefect]) }, { qa: verify("pass", "pass") }],
+    VERIFY,
+  );
+  assert.equal(runQa(s.deps, s.target).qa?.verdict, "FAILED");
+  repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+  const again = runQa(s.deps, s.target);
+  assert.equal(s.launches.length, 2);
+  assert.notEqual(s.packets[0]?.stepId, s.packets[1]?.stepId);
+  assert.equal(again.qa?.verdict, "PASSED");
+  assert.equal(again.qa?.run, 1);
+});
+
 test("TC-385-17: a rerun on the same commit updates Run #k, it does not post a second comment", () => {
   const s = setup(
-    [
-      {
-        qa: verify("pass", "fail", [
-          {
-            title: "t",
-            repro: "r",
-            expected: "e",
-            actual: "a",
-            severity: "low",
-            tc: ["TC-8-02"],
-          },
-        ]),
-      },
-    ],
+    [{ qa: verify("pass", "fail", [lowDefect]) }, { qa: verify("pass", "fail", [lowDefect]) }],
     VERIFY,
   );
   const first = runQa(s.deps, s.target);

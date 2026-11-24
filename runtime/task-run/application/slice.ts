@@ -1439,6 +1439,34 @@ function tcGate(
   };
 }
 
+/** The task branch of a QATask clone: the checked-out one, or the ownership marker's when detached. */
+function qaBranch(git: SliceDeps["ports"]["git"], worktree: string): string {
+  try {
+    return git(["symbolic-ref", "--quiet", "--short", "HEAD"], worktree);
+  } catch {
+    // detached HEAD (a clone left by an older run): fall through to the marker
+  }
+  const dir = git(["rev-parse", "--absolute-git-dir"], worktree);
+  const marker = JSON.parse(readFileSync(join(dir, "omi-owner.json"), "utf8")) as {
+    branch?: string;
+  };
+  if (!marker.branch) throw new OmiError("OWNERSHIP_MISMATCH", "ownership marker has no branch");
+  return marker.branch;
+}
+
+/** Next unused QA step index of the run: 0 for the first agent step, then 1, 2, … */
+function nextQaIndex(d: SliceDeps, runId: string): number {
+  const rows = d.db
+    .prepare("SELECT DISTINCT step_id FROM step_run WHERE run_id = ? AND step_id LIKE 'qa%'")
+    .all(runId);
+  let next = 0;
+  for (const r of rows) {
+    const m = /^qa(?:-qa(\d+))?$/.exec(String(r.step_id));
+    if (m) next = Math.max(next, Number(m[1] ?? 0) + 1);
+  }
+  return next;
+}
+
 /**
  * Read-only QATask run (DevTask-0134 #385): one QA Engineer step on a freshly fetched base HEAD, no
  * commit, no PR, no review. Test design writes the TC table into the Issue's `qa` section; Verify
@@ -1474,7 +1502,9 @@ export function runQa(
   // Verify runs on the newest base: a rerun after a fix merged sees the fix.
   const base = d.config.git.baseBranch;
   git(["fetch", "origin", base], target.worktree);
-  git(["checkout", "--detach", `origin/${base}`], target.worktree);
+  // Reset the task's own branch (a QATask has no commit of its own) instead of detaching HEAD: a
+  // detached clone is refused by the workspace reuse and by finalize (Bug #420).
+  git(["checkout", "-B", qaBranch(git, target.worktree), `origin/${base}`], target.worktree);
   const head = git(["rev-parse", "HEAD"], target.worktree);
   const t = { ...target, baseSha: head };
 
@@ -1525,7 +1555,9 @@ export function runQa(
     }
   }
   const k = nextRun(trustedComments(d, issue), head).k;
-  const kctx = { ...ctx, qaReworks: k - 1 }; // distinct step ids per run: `qa`, `qa-qa1`, …
+  // A new attempt of the QA agent every time the step runs (also a rerun after `task unblock` on
+  // the same commit, which keeps Run #k): step ids `qa`, `qa-qa1`, … never replay an old result.
+  const kctx = { ...ctx, qaReworks: Math.max(k - 1, nextQaIndex(d, target.run.id)) };
   const gate = checksStep(d, t, kctx, [], {
     stepId: "checks",
     title: "Deterministic Checks",
