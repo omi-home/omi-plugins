@@ -5,17 +5,28 @@ import { fetchIssueContext } from "../../handoff/adapters/context.ts";
 import { harnessFor } from "../../harness/adapters/registry.ts";
 import type { Harness } from "../../harness/domain/harness.ts";
 import type { Selection } from "../../profile/domain/selection.ts";
+import { OmiError } from "../../shared/errors/errors.ts";
 import { runChecks } from "../adapters/checks.ts";
 import { commitWork } from "../adapters/commit.ts";
 import { runRegressionProof } from "../adapters/regression.ts";
 import * as repository from "../adapters/repository.ts";
 import { stepSkills, writeRoleFiles } from "../adapters/role-files.ts";
-import { git } from "../adapters/worktree.ts";
+import { git, readMarker } from "../adapters/worktree.ts";
 import type { SlicePorts } from "../application/ports.ts";
 
 export const taskRunPorts: Omit<SlicePorts, "reports"> = {
   store: repository, // incl. `upsertReport`
   git,
+  workspace: {
+    ownedBranch(worktree) {
+      const marker = readMarker(worktree);
+      if (!marker)
+        throw new OmiError("OWNERSHIP_MISMATCH", "task workspace has no OMI ownership marker", {
+          path: worktree,
+        });
+      return marker.branch;
+    },
+  },
   roleFiles: { stepSkills, writeRoleFiles },
   checks: { runChecks },
   regression: { runProof: runRegressionProof },

@@ -3,11 +3,12 @@
 import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { cleanupRun } from "../../../runtime/cleanup/adapters/cleanup.ts";
 import { claudeCode } from "../../../runtime/harness/adapters/claude-code/harness.ts";
 import type { AgentLaunch } from "../../../runtime/harness/domain/harness.ts";
 import { stepReports } from "../../../runtime/reporting/adapters/step-reports.ts";
@@ -77,14 +78,17 @@ interface Reply {
 }
 
 function setup(replies: Reply[], plan: QaPlan, checkScript = "console.log('TC-8-01 ok')") {
-  const upstream = mkdtempSync(join(tmpdir(), "omi-qa-up-"));
+  const upstream = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-qa-up-")));
   git(upstream, "init", "-q", "-b", "develop");
   git(upstream, "config", "user.email", "t@example.invalid");
   git(upstream, "config", "user.name", "t");
   writeFileSync(join(upstream, "README.md"), "x\n");
   git(upstream, "add", ".");
   git(upstream, "commit", "-qm", "base");
-  const dir = mkdtempSync(join(tmpdir(), "omi-qa-wt-"));
+  // the clone sits alone in its task workspace root, as cleanup expects
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-qa-wt-")));
+  const dir = join(root, "clone");
+  mkdirSync(dir);
   git(dir, "clone", "-q", upstream, ".");
   const base = git(dir, "rev-parse", "HEAD");
   const db = openState(":memory:");
@@ -313,22 +317,86 @@ test("TC-385-16: a QATask without a parent Issue is refused (POLICY_VIOLATION)",
   assert.equal(s.closed(), 0);
 });
 
+const writeMarker = (dir: string, branch: string) =>
+  writeFileSync(
+    join(dir, ".git", "omi-owner.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      repository: "o/r",
+      issue: 9,
+      branch,
+      baseSha: "0".repeat(40),
+      runId: "run",
+      createdAt: new Date().toISOString(),
+    }),
+  );
+
+const lowDefect = {
+  title: "t",
+  repro: "r",
+  expected: "e",
+  actual: "a",
+  severity: "low",
+  tc: ["TC-8-02"],
+};
+
+test("TC-420-01: Verify leaves the clone on the task branch, so a rerun after unblock is not refused", () => {
+  const s = setup(
+    [{ qa: verify("pass", "fail", [lowDefect]) }, { qa: verify("pass", "pass") }],
+    VERIFY,
+  );
+  git(s.dir, "switch", "-q", "-c", "test/9-qa");
+  const first = runQa(s.deps, s.target);
+  assert.equal(first.ctx.state, "BLOCKED");
+  assert.equal(git(s.dir, "symbolic-ref", "--short", "HEAD"), "test/9-qa");
+  // a clone an older run left detached is put back on the task branch (named by the marker)
+  git(s.dir, "checkout", "-q", "--detach");
+  writeMarker(s.dir, "test/9-qa");
+  repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+  const second = runQa(s.deps, s.target);
+  assert.equal(second.qa?.verdict, "PASSED");
+  assert.equal(git(s.dir, "symbolic-ref", "--short", "HEAD"), "test/9-qa");
+});
+
+test("TC-420-02: after Verify PASSED the clone is on the task branch at origin/develop, clean", () => {
+  const s = setup([{ qa: verify("pass", "pass") }], VERIFY);
+  git(s.dir, "switch", "-q", "-c", "test/9-qa");
+  assert.equal(runQa(s.deps, s.target).qa?.verdict, "PASSED");
+  assert.equal(git(s.dir, "symbolic-ref", "--short", "HEAD"), "test/9-qa");
+  assert.equal(git(s.dir, "rev-parse", "HEAD"), git(s.upstream, "rev-parse", "HEAD"));
+  assert.equal(git(s.dir, "status", "--porcelain"), "");
+  // finalize's cleanup accepts the clone: no "detached HEAD" failure of verify-clean-worktree
+  writeMarker(s.dir, "test/9-qa");
+  repo.claimResource(s.db, { runId: "run", kind: "branch", ref: "test/9-qa" });
+  repo.claimResource(s.db, { runId: "run", kind: "worktree", ref: s.dir });
+  const cleaned = cleanupRun(s.db, {
+    runId: "run",
+    receipt: undefined,
+    noCode: { base: "develop" },
+    tempRoot: tmpdir(),
+  });
+  const verifyStep = cleaned.steps.find((x) => x.name === "verify-clean-worktree");
+  assert.equal(verifyStep?.status, "done", verifyStep?.detail);
+  assert.equal(cleaned.state, "COMPLETED");
+});
+
+test("TC-420-03: a rerun after unblock on the same commit calls the agent again (new step id)", () => {
+  const s = setup(
+    [{ qa: verify("pass", "fail", [lowDefect]) }, { qa: verify("pass", "pass") }],
+    VERIFY,
+  );
+  assert.equal(runQa(s.deps, s.target).qa?.verdict, "FAILED");
+  repo.advanceRun(s.db, "run", { type: "UNBLOCK" });
+  const again = runQa(s.deps, s.target);
+  assert.equal(s.launches.length, 2);
+  assert.notEqual(s.packets[0]?.stepId, s.packets[1]?.stepId);
+  assert.equal(again.qa?.verdict, "PASSED");
+  assert.equal(again.qa?.run, 1);
+});
+
 test("TC-385-17: a rerun on the same commit updates Run #k, it does not post a second comment", () => {
   const s = setup(
-    [
-      {
-        qa: verify("pass", "fail", [
-          {
-            title: "t",
-            repro: "r",
-            expected: "e",
-            actual: "a",
-            severity: "low",
-            tc: ["TC-8-02"],
-          },
-        ]),
-      },
-    ],
+    [{ qa: verify("pass", "fail", [lowDefect]) }, { qa: verify("pass", "fail", [lowDefect]) }],
     VERIFY,
   );
   const first = runQa(s.deps, s.target);

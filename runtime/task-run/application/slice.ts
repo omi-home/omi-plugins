@@ -1439,13 +1439,33 @@ function tcGate(
   };
 }
 
+/** The task branch of a QATask clone: the checked-out one, or the ownership marker's when detached. */
+function qaBranch(d: SliceDeps, worktree: string): string {
+  try {
+    return d.ports.git(["symbolic-ref", "--quiet", "--short", "HEAD"], worktree);
+  } catch {
+    // detached HEAD (a clone left by an older run): the ownership marker names the branch
+    return d.ports.workspace.ownedBranch(worktree);
+  }
+}
+
+/** Next unused QA step index of the run: 0 for the first agent step, then 1, 2, … */
+function nextQaIndex(d: SliceDeps, runId: string): number {
+  let next = 0;
+  for (const id of d.ports.store.stepIds(d.db, runId, "qa")) {
+    const m = /^qa(?:-qa(\d+))?$/.exec(id);
+    if (m) next = Math.max(next, Number(m[1] ?? 0) + 1);
+  }
+  return next;
+}
+
 /**
  * Read-only QATask run (DevTask-0134 #385): one QA Engineer step on a freshly fetched base HEAD, no
  * commit, no PR, no review. Test design writes the TC table into the Issue's `qa` section; Verify
  * runs the repo's checks, reconciles the agent's per-TC results and posts or updates `Run #k`.
  * PASSED leaves the run for `omi task finalize` (noCode); FAILED holds it BLOCKED for the Coordinator.
- * A rerun on the same develop commit keeps `Run #k` (same agent step id): it reuses the stored QA
- * assessment, re-runs the checks and updates the existing comment; a new commit starts `Run #k+1`.
+ * A rerun on the same develop commit keeps and updates the `Run #k` comment but is a new QA agent
+ * attempt (new step id, never a replay of the stored assessment); a new commit starts `Run #k+1`.
  */
 export function runQa(
   d: SliceDeps,
@@ -1474,7 +1494,9 @@ export function runQa(
   // Verify runs on the newest base: a rerun after a fix merged sees the fix.
   const base = d.config.git.baseBranch;
   git(["fetch", "origin", base], target.worktree);
-  git(["checkout", "--detach", `origin/${base}`], target.worktree);
+  // Reset the task's own branch (a QATask has no commit of its own) instead of detaching HEAD: a
+  // detached clone is refused by the workspace reuse and by finalize (Bug #420).
+  git(["checkout", "-B", qaBranch(d, target.worktree), `origin/${base}`], target.worktree);
   const head = git(["rev-parse", "HEAD"], target.worktree);
   const t = { ...target, baseSha: head };
 
@@ -1525,7 +1547,9 @@ export function runQa(
     }
   }
   const k = nextRun(trustedComments(d, issue), head).k;
-  const kctx = { ...ctx, qaReworks: k - 1 }; // distinct step ids per run: `qa`, `qa-qa1`, …
+  // A new attempt of the QA agent every time the step runs (also a rerun after `task unblock` on
+  // the same commit, which keeps Run #k): step ids `qa`, `qa-qa1`, … never replay an old result.
+  const kctx = { ...ctx, qaReworks: Math.max(k - 1, nextQaIndex(d, target.run.id)) };
   const gate = checksStep(d, t, kctx, [], {
     stepId: "checks",
     title: "Deterministic Checks",
