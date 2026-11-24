@@ -54,6 +54,7 @@ import { policyFrom, type WorkflowEvent } from "../domain/fsm.ts";
 import { EDITOR_NPM_SCRIPTS } from "../domain/permissions.ts";
 import type { AnalysisPlan, DeliveryPlan, QaPlan, WorkflowPlan } from "../domain/plan.ts";
 import {
+  blockedOnly,
   jsonOf,
   missingAutoTests,
   nextRun,
@@ -62,9 +63,11 @@ import {
   parseVerify,
   proposeBugs,
   reconcile,
+  regressionProofOf,
   renderRun,
   renderTestDesign,
   renderTestTable,
+  TC_FORMAT_NOTE,
   verifyPassed,
 } from "../domain/qa.ts";
 import {
@@ -1110,6 +1113,7 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
   const setFindings = (findings: Finding[]) => setOpen({ ...open, findings });
   let checks: CheckRun[] | undefined; // last checks of this run, for review and architect
   let checkedHead: string | null = null; // HEAD the last passing checks ran on
+  let proof: string | undefined; // "Regression proof" of this round's checks, for the manual QA step
   let needDev = true;
   if (ctx.state === "WORKSPACE_READY") advance({ type: "DEV_STARTED" });
   for (;;) {
@@ -1145,6 +1149,7 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
           proof: regression.proof,
         });
         checks = gate.results;
+        proof = regression.proof;
         checkedHead = gate.findings.length ? null : git(["rev-parse", "HEAD"], t.worktree);
         if (gate.findings.length) {
           advance({ type: "CHECKS_FAILED" });
@@ -1231,7 +1236,18 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
           break;
         }
         if (plan.manualQa) {
-          const qa = agentStep(d, t, QA, ctx, open.findings, checks);
+          const qaSpec: StepSpec =
+            plan.workflow === "Bug Resolution"
+              ? {
+                  ...QA,
+                  notes: [
+                    "Mode: Bug Resolution manual QA — there is no TC table; judge by the Acceptance of the Issue and by the regression proof below.",
+                    proof ??
+                      "Regression proof: none from this invocation's checks step (resumed run); see the checks report on the Issue.",
+                  ],
+                }
+              : QA;
+          const qa = agentStep(d, t, qaSpec, ctx, open.findings, checks);
           if (!qa) return refresh();
           // QA may run check commands: the clean worktree release validation saw must stay clean.
           const dirty = git(["status", "--porcelain", "--untracked-files=all"], t.worktree);
@@ -1359,7 +1375,45 @@ const RestSubIssue = z.looseObject({
   number: z.int(),
   body: z.string().nullable(),
   labels: z.array(z.union([z.string(), z.looseObject({ name: z.string() })])),
+  state: z.string().optional(),
+  type: z.looseObject({ name: z.string() }).nullish(),
 });
+
+const MAX_PROOF_TASKS = 5;
+
+/**
+ * "Regression proof" notes for a Bug's Retest (TC-420-05): the proof of every merged (closed) DevTask Fix
+ * under the Bug, read from the newest checks comment of that DevTask that has one.
+ */
+function bugProofNotes(d: SliceDeps, repository: string, bug: number): string[] {
+  try {
+    const pages = api(
+      d.gh,
+      ["--paginate", "--slurp", `repos/${repository}/issues/${bug}/sub_issues?per_page=100`],
+      "list sub-issues",
+    );
+    const fixes = parseContract(z.array(z.array(RestSubIssue)), pages, "list sub-issues")
+      .flat()
+      .filter((s) => s.state === "closed" && /^(DevTask|dev-task)$/.test(s.type?.name ?? ""))
+      .slice(0, MAX_PROOF_TASKS);
+    const notes = fixes.flatMap((s) => {
+      const proofs = trustedComments(d, { repository, number: s.number })
+        .map((c) => regressionProofOf(c.body))
+        .filter((p): p is string => p !== undefined);
+      const proof = proofs[proofs.length - 1];
+      return proof ? [`Regression proof of DevTask Fix #${s.number} (merged):\n${proof}`] : [];
+    });
+    return notes.length
+      ? notes
+      : [
+          `Regression proof: no merged DevTask Fix under Bug #${bug} has a Regression proof section.`,
+        ];
+  } catch (e) {
+    return [
+      `Regression proof of the Bug's DevTask Fix could not be read: ${cut((e as Error).message, 300)}`,
+    ];
+  }
+}
 
 /** TC cases of the Test design QATask(s) among the Story's sub-issues, read in full (not the packet copy). */
 const designTable = (
@@ -1484,9 +1538,21 @@ export function runQa(
     ctx = advanceRun(d.db, target.run.id, { type: "DEV_STARTED" }, policy).context;
   }
   if (ctx.state !== "RUNNING") return { ctx };
-  const stop = (code: string, message: string) => {
+  const stop = (code: string, message: string, extra?: { details?: unknown; raw?: unknown }) => {
     const file = join(d.evidenceDir, `qa-r${ctx.round}${ERROR_SUFFIX}`);
-    writeFileSync(file, JSON.stringify(redactDeep({ code, message }), null, 2));
+    let details = redactDeep(extra?.details ?? null);
+    if (extra?.raw !== undefined) {
+      // The step's raw result stays as evidence, so the contract error can be fixed (TC-420-07).
+      const rawFile = join(d.evidenceDir, `qa-r${ctx.round}.result.json`);
+      writeFileSync(rawFile, JSON.stringify(redactDeep(extra.raw), null, 2));
+      d.ports.store.addArtifact(d.db, { runId: target.run.id, kind: "log", path: rawFile });
+      // The path is ours, not a secret: it must stay usable, so it is added after redaction.
+      details = {
+        ...(details && typeof details === "object" ? details : {}),
+        rawResultPath: rawFile,
+      };
+    }
+    writeFileSync(file, JSON.stringify({ code, message: redact(message), details }, null, 2));
     ctx = advanceRun(d.db, target.run.id, { type: "BLOCK" }, policy).context;
     return { ctx };
   };
@@ -1502,7 +1568,17 @@ export function runQa(
 
   const story = target.parent;
   if (!story) return stop("POLICY_VIOLATION", "a QATask needs a parent Issue (the Story or Bug)");
-  const spec: StepSpec = { ...QA, title: plan.workflow, notes: [QA_FORMAT[plan.mode](story)] };
+  const spec: StepSpec = {
+    ...QA,
+    title: plan.workflow,
+    notes: [QA_FORMAT[plan.mode](story), TC_FORMAT_NOTE],
+  };
+  /** A contract error of the QA result: the issues of `parseContract` and the raw result stay as evidence. */
+  const contractStop = (e: unknown, raw: unknown) =>
+    stop("CONTRACT_INVALID", (e as Error).message, {
+      details: e instanceof OmiError ? e.details : undefined,
+      raw,
+    });
   const dirty = () => git(["status", "--porcelain", "--untracked-files=all"], t.worktree);
   const section = (r: StepResult) => r.sectionUpdates.find((u) => u.section === "qa")?.markdown;
   const finish = (qa: QaOutcome) => {
@@ -1524,7 +1600,7 @@ export function runQa(
     try {
       d.writeSection?.("qa", renderTestDesign(parseTestDesign(jsonOf(md), story)));
     } catch (e) {
-      return stop("CONTRACT_INVALID", (e as Error).message);
+      return contractStop(e, r);
     }
     return finish({ mode: plan.mode, verdict: "PASSED", proposals: [] });
   }
@@ -1564,7 +1640,16 @@ export function runQa(
           `TC table (from the Test design QATask under #${story}; report every ID):\n${renderTestTable(table)}`,
         ],
       }
-    : spec;
+    : plan.retest
+      ? {
+          ...spec,
+          notes: [
+            ...(spec.notes ?? []),
+            "Mode: Bug Retest — the cases are the Bug's Steps to reproduce; judge by them and by the regression proof below.",
+            ...bugProofNotes(d, issue.repository, story),
+          ],
+        }
+      : spec;
   const r = agentStep(d, t, vspec, kctx, [], gate.results);
   if (!r) return { ctx: runContext(d.db, t.run.id) };
   const left = dirty();
@@ -1586,13 +1671,27 @@ export function runQa(
       });
     }
   } catch (e) {
-    return stop("CONTRACT_INVALID", (e as Error).message);
+    return contractStop(e, r);
   }
   const passed = verifyPassed(result, checksPassed);
   const proposals = passed ? [] : proposeBugs(result, t.run.issue, head);
-  if (!passed && !proposals.length) {
+  // Blocked cases with green checks and no failure are not a suite failure: nothing to propose,
+  // the run stops Blocked and says which cases (TC-420-04).
+  const blocked = passed || !checksPassed || proposals.length ? [] : blockedOnly(result);
+  if (!passed && !proposals.length && !blocked.length) {
     proposals.push(
       `## Automated suite failed on ${head.slice(0, 8)}\n**Found in:** QATask #${t.run.issue}`,
+    );
+  }
+  if (blocked.length) {
+    const file = join(d.evidenceDir, `qa-r${ctx.round}${ERROR_SUFFIX}`);
+    writeFileSync(
+      file,
+      JSON.stringify(
+        redactDeep({ code: "POLICY_VIOLATION", message: `case blocked: ${blocked.join(", ")}` }),
+        null,
+        2,
+      ),
     );
   }
   const body = renderRun({

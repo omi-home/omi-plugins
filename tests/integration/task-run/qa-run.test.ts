@@ -3,7 +3,7 @@
 import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -17,7 +17,7 @@ import type { TaskPacket } from "../../../runtime/shared/contracts.ts";
 import type { GhRunner } from "../../../runtime/shared/github/client.ts";
 import { openState } from "../../../runtime/shared/sqlite/db.ts";
 import * as repo from "../../../runtime/task-run/adapters/repository.ts";
-import { runQa } from "../../../runtime/task-run/application/slice.ts";
+import { lastStepError, runQa } from "../../../runtime/task-run/application/slice.ts";
 import { taskRunPorts } from "../../../runtime/task-run/cli/ports.ts";
 import type { QaPlan } from "../../../runtime/task-run/domain/plan.ts";
 
@@ -405,6 +405,66 @@ test("TC-385-17: a rerun on the same commit updates Run #k, it does not post a s
   const again = runQa(s.deps, s.target);
   assert.equal(again.qa?.run, 1);
   assert.equal(s.gh.comments.filter((c) => c.body.startsWith("<!-- omi:qa-run=")).length, 1);
+});
+
+test("TC-420-04: blocked cases without a failure and with green checks stop Blocked as `case blocked`, not as a suite failure", () => {
+  const s = setup([{ qa: verify("pass", "blocked") }], VERIFY);
+  const r = runQa(s.deps, s.target);
+  assert.equal(r.ctx.state, "BLOCKED");
+  assert.equal(r.qa?.verdict, "FAILED");
+  assert.deepEqual(r.qa?.proposals, []);
+  const err = lastStepError(s.deps.evidenceDir);
+  assert.equal(err?.message, "case blocked: TC-8-02");
+  const run = s.gh.comments.find((c) => c.body.startsWith("<!-- omi:qa-run=1"));
+  assert.doesNotMatch(run?.body ?? "", /Automated suite failed/);
+});
+
+test("TC-420-04: the suite-failed proposal stays for checks that really fail", () => {
+  const s = setup([{ qa: verify("pass", "blocked") }], VERIFY, "process.exit(1)");
+  const r = runQa(s.deps, s.target);
+  assert.match(r.qa?.proposals[0] ?? "", /Automated suite failed on/);
+});
+
+test("TC-420-05: a Bug's Retest packet carries the Regression proof of the merged DevTask Fix", () => {
+  const s = setup(
+    [{ qa: { cases: [{ id: "TC-8-01", result: "pass" }], defects: [], manualRegression: [] } }],
+    {
+      ...VERIFY,
+      retest: true,
+    },
+  );
+  s.gh.siblings.push(
+    { number: 11, body: "", labels: [], state: "closed", type: { name: "DevTask" } },
+    { number: 12, body: "", labels: [], state: "open", type: { name: "DevTask" } },
+  );
+  s.gh.comments.push({
+    id: 100,
+    body: "<!-- omi:step -->\n### Summary\nok\n\n### Regression proof\n- PROOF-MARKER-420\n| before fix | 1 | fail (expected) |\n\n### Logs (retained artifacts)\n_None_",
+    html_url: "https://x/100",
+    author_association: "MEMBER",
+  });
+  runQa(s.deps, s.target);
+  const stdin = s.launches[0]?.stdin ?? "";
+  assert.match(stdin, /Regression proof of DevTask Fix #11 \(merged\)/);
+  assert.match(stdin, /PROOF-MARKER-420/);
+  assert.doesNotMatch(stdin, /DevTask Fix #12/);
+  assert.doesNotMatch(stdin, /Logs \(retained artifacts\)/);
+  assert.match(stdin, /Bug Retest/);
+});
+
+test("TC-420-07: a QA result against the contract leaves the issues and the raw result as evidence, and the packet names the TC id format", () => {
+  const bad = { cases: [{ id: "TC-8-1", result: "pass" }], defects: [], manualRegression: [] };
+  const s = setup([{ qa: bad }], VERIFY);
+  const r = runQa(s.deps, s.target);
+  assert.equal(r.ctx.state, "BLOCKED");
+  assert.match(s.launches[0]?.stdin ?? "", /TC-<issue>-NN/);
+  const err = lastStepError(s.deps.evidenceDir);
+  assert.ok(err?.file.endsWith("qa-r1.error.json"));
+  const file = JSON.parse(readFileSync(err?.file as string, "utf8")) as {
+    details: { issues: { path: string; message: string }[]; rawResultPath: string };
+  };
+  assert.ok(file.details.issues.some((i) => i.path === "cases.0.id" && i.message.length > 0));
+  assert.match(readFileSync(file.details.rawResultPath, "utf8"), /TC-8-1/);
 });
 
 test("TC-385-13: a QA Engineer that cannot assess BLOCKs the run without a Run comment", () => {
