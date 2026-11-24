@@ -3,7 +3,7 @@
 import "../../support/isolate-profile-db.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -78,7 +78,7 @@ interface Reply {
 }
 
 function setup(replies: Reply[], plan: QaPlan, checkScript = "console.log('TC-8-01 ok')") {
-  const upstream = mkdtempSync(join(tmpdir(), "omi-qa-up-"));
+  const upstream = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-qa-up-")));
   git(upstream, "init", "-q", "-b", "develop");
   git(upstream, "config", "user.email", "t@example.invalid");
   git(upstream, "config", "user.name", "t");
@@ -86,7 +86,7 @@ function setup(replies: Reply[], plan: QaPlan, checkScript = "console.log('TC-8-
   git(upstream, "add", ".");
   git(upstream, "commit", "-qm", "base");
   // the clone sits alone in its task workspace root, as cleanup expects
-  const root = mkdtempSync(join(tmpdir(), "omi-qa-wt-"));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-qa-wt-")));
   const dir = join(root, "clone");
   mkdirSync(dir);
   git(dir, "clone", "-q", upstream, ".");
