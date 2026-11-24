@@ -24,6 +24,7 @@ import {
 import {
   closingIssues,
   createPr,
+  foreignCloseCheck,
   type PullRequest,
   prBody,
   repoFacts,
@@ -107,18 +108,18 @@ export function prCreate(
     throw new OmiError("POLICY_VIOLATION", `${facts.open.length} open PRs from ${head}`);
   }
   const existing = facts.open[0];
-  const pr =
-    existing ??
-    createPr(
-      {
-        repositoryId: facts.id,
-        base,
-        head,
-        title: deps.title ?? ticket.title,
-        body: prBody(ref.repository, issue, deps.body),
-      },
-      gh,
-    );
+  const wanted = {
+    title: deps.title ?? ticket.title,
+    body: prBody(ref.repository, issue, deps.body),
+  };
+  const foreign = foreignCloseCheck(existing ?? wanted, primary);
+  if (foreign.status === "fail") {
+    // Before any create: a PR closing another Issue must never exist (Bug-0017 #426).
+    throw new OmiError("POLICY_VIOLATION", `${foreign.name}: ${foreign.detail}`, {
+      checks: [foreign],
+    });
+  }
+  const pr = existing ?? createPr({ repositoryId: facts.id, base, head, ...wanted }, gh);
   const closing =
     base === facts.defaultBranch ? closingIssues(pr.id, { run: gh, sleep: deps.sleep }) : null;
   const checks = validatePr(pr, { primary, base, head, closing });
@@ -252,7 +253,13 @@ export function prMerge(deps: TaskDeps, issue: number): MergeResult {
     );
   }
   mergePr(
-    { prId: facts.pr.id, method: METHOD[t.config.git.mergeMethod], headOid: facts.pr.headRefOid },
+    {
+      prId: facts.pr.id,
+      method: METHOD[t.config.git.mergeMethod],
+      headOid: facts.pr.headRefOid,
+      headline: `${facts.pr.title ?? t.ticket.title} (#${facts.pr.number})`,
+      body: `Closes #${t.ref.number}`,
+    },
     gh,
   );
   const after = prFacts(t.config, { head: t.head, base: t.base, states: ["MERGED"] }, gh);

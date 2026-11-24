@@ -144,7 +144,10 @@ Commands:
                          then Done + parent roll-up. --dry-run shows the cleanup plan only
   pr create <n>          Push Issue #n's task branch, create or reuse its PR → develop (Release: develop →
                          main) and verify base, head and the one primary Issue; marks it In Review.
-                         --title <text> (default: Issue title), --body-file <path> (extra PR description)
+                         --title <text> (default: Issue title), --body-file <path> (extra PR description).
+                         A title/body with a GitHub closing keyword (close/fix/resolve + #n) for another
+                         Issue is refused (pr-foreign-close); pr merge re-checks the live PR and sends its
+                         own squash message
   pr validate <n>        Read-only merge eligibility of Issue #n's task PR: state, base, primary
                          Issue, tip, conflicts, CI, reviews, merge method, protection, risk
   pr merge <n>           Merge Issue #n's task PR when every gate passes (configured method, pinned
