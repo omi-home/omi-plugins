@@ -257,7 +257,7 @@ export function prMerge(deps: TaskDeps, issue: number): MergeResult {
       prId: facts.pr.id,
       method: METHOD[t.config.git.mergeMethod],
       headOid: facts.pr.headRefOid,
-      headline: `${facts.pr.title ?? t.ticket.title} (#${facts.pr.number})`,
+      headline: `${facts.pr.title} (#${facts.pr.number})`,
       body: `Closes #${t.ref.number}`,
     },
     gh,

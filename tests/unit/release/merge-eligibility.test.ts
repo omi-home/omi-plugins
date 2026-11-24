@@ -31,6 +31,7 @@ function facts(pr: Record<string, unknown> = {}, repo: Partial<PrFacts> = {}): P
       headRefName: "feature/5-x",
       headRefOid: TIP,
       body: prBody("o/r", 5),
+      title: "DevTask-0005-Task 5",
       mergeCommit: null,
       labels: { nodes: [] },
       commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },

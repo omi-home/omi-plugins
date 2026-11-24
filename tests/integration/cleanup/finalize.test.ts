@@ -108,6 +108,7 @@ function fakeGh(f: Fake): GhRunner {
         baseRefName: "develop",
         headRefName: f.branch,
         headRefOid: f.tip,
+        title: "DevTask-0005-Task 5",
         body: f.closing ? "Closes #5" : prBody("o/repo", 5),
         mergeCommit: { oid: "c".repeat(40) },
         labels: { nodes: [] },

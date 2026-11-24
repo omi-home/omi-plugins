@@ -15,7 +15,7 @@ export const PullRequest = z.strictObject({
   headRefName: z.string(),
   headRefOid: z.string(),
   body: z.string(),
-  title: z.string().optional(),
+  title: z.string(),
 });
 export type PullRequest = z.infer<typeof PullRequest>;
 

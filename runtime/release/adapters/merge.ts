@@ -27,7 +27,7 @@ const PrNode = z.strictObject({
   headRefName: z.string(),
   headRefOid: z.string(),
   body: z.string(),
-  title: z.string().optional(),
+  title: z.string(),
   mergeCommit: z.strictObject({ oid: z.string() }).nullable(),
   labels: z.strictObject({ nodes: z.array(z.strictObject({ name: z.string() })) }),
   commits: z.strictObject({

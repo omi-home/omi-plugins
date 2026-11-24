@@ -69,6 +69,7 @@ function fakeGh(o: { open?: number; merged?: string; state?: "OPEN" | "CLOSED" }
         baseRefName: "main",
         headRefName: "develop",
         headRefOid: o.merged,
+        title: "Release 0.3.0",
         body: prBody("o/repo", 7),
         mergeCommit: { oid: o.merged },
         labels: { nodes: [] },
