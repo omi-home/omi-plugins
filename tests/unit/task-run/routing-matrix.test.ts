@@ -11,12 +11,14 @@ const agentsOf = (p: WorkflowPlan): Role[] =>
     ? p.analysts
     : p.kind === "qa"
       ? ["qa-engineer"] // one read-only agent: no review, no PR (DevTask-0134 #385)
-      : [
-          p.engineer,
-          "code-reviewer",
-          ...(p.security ? (["security-reviewer"] as Role[]) : []),
-          ...(p.manualQa ? (["qa-engineer"] as Role[]) : []),
-        ];
+      : p.kind === "design"
+        ? [p.designer] // one read-only agent: spec into the body (DevTask-0132 #383)
+        : [
+            p.engineer,
+            "code-reviewer",
+            ...(p.security ? (["security-reviewer"] as Role[]) : []),
+            ...(p.manualQa ? (["qa-engineer"] as Role[]) : []),
+          ];
 
 const MATRIX: [string, IssueType, string[], IssueType | null, string, Role[]][] = [
   [

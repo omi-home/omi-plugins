@@ -1,13 +1,29 @@
 // Workflow composition (spec §10 workflow catalogue, DevTask-0026 #55): the CLI picks a small set
 // of reusable stages from the Issue type and labels, never every agent. A delivery plan never picks the Business Analyst or Solution Architect: only the analysis plan of `omi task analyze` does. Pure: no I/O.
-import type { IssueType, Role } from "../../shared/contracts.ts";
+import type { IssueType, IssueTypeV2, Role } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 
+/** Model v2 types that own a run (DevTask-0132 #383); every other native type is refused. */
+export const EXECUTABLE_V2 = ["DesignTask", "DevTask", "QATask"] as const;
+export type ExecutableV2 = (typeof EXECUTABLE_V2)[number];
+export const isExecutableV2 = (t: string | undefined): t is ExecutableV2 =>
+  EXECUTABLE_V2.includes(t as ExecutableV2);
+
+/**
+ * The legacy type a v2 run is recorded under (the run table stores a legacy `IssueType`; a
+ * DesignTask has no legacy peer and reuses `dev-task`). `spike` stays a DevTask with a label.
+ */
+export const RUN_TYPE_OF_V2: Record<ExecutableV2, IssueType> = {
+  DesignTask: "dev-task",
+  DevTask: "dev-task",
+  QATask: "test-task",
+};
+
 export interface PlanInput {
-  type: IssueType;
+  type: IssueType | IssueTypeV2;
   labels: string[];
-  /** OMI type of the parent Issue, when it has one in this repository. */
-  parentType?: IssueType | null;
+  /** OMI type of the parent Issue, when it has one in this repository (`bug` / `Bug` for a Bug). */
+  parentType?: IssueType | IssueTypeV2 | null;
   /** Label of a Test design QATask (`qa.designLabel` of the config). */
   qaDesignLabel?: string;
 }
@@ -28,8 +44,18 @@ export interface DeliveryPlan {
 /** Requirement/container Issue without a worktree: analysts write their sections, PO decides. */
 export interface AnalysisPlan {
   kind: "analysis";
-  workflow: "Requirement Analysis" | "Change Request Analysis" | "Feature Analysis";
+  workflow: "Requirement Analysis" | "Change Request Analysis" | "Feature Analysis" | "Design";
   analysts: Role[];
+}
+
+/**
+ * DesignTask (DevTask-0132 #383): one read-only UI/UX Designer step; its `design` section goes into
+ * the Issue body, then `omi move <n> "In review"`. No commit, no PR; the Coordinator approves.
+ */
+export interface DesignPlan {
+  kind: "design";
+  workflow: "Design";
+  designer: Role;
 }
 
 /**
@@ -44,7 +70,14 @@ export interface QaPlan {
   retest: boolean;
 }
 
-export type WorkflowPlan = DeliveryPlan | AnalysisPlan | QaPlan;
+export type WorkflowPlan = DeliveryPlan | AnalysisPlan | QaPlan | DesignPlan;
+
+/** The read-only analysis form of a design plan, run by the shared analyst loop. */
+export const designAsAnalysis = (p: DesignPlan): AnalysisPlan => ({
+  kind: "analysis",
+  workflow: "Design",
+  analysts: [p.designer],
+});
 
 const ROLE_LABEL: Record<string, Role> = {
   "role:frontend": "software-engineer",
@@ -62,6 +95,7 @@ export const MANUAL_QA_LABELS = ["ui", "qa:manual"];
 
 export function planWorkflow(i: PlanInput): WorkflowPlan {
   const has = (l: string) => i.labels.includes(l);
+  const parentIsBug = i.parentType === "bug" || i.parentType === "Bug";
   switch (i.type) {
     case "feature":
       return {
@@ -88,13 +122,17 @@ export function planWorkflow(i: PlanInput): WorkflowPlan {
         workflow: "Requirement Analysis",
         analysts: ["business-analyst", "solution-architect"],
       };
-    case "test-task": {
+    case "DesignTask":
+      return { kind: "design", workflow: "Design", designer: "ui-ux-designer" };
+    case "test-task":
+    case "QATask": {
       const design = i.labels.includes(i.qaDesignLabel ?? DEFAULT_QA_DESIGN_LABEL);
       return design
         ? { kind: "qa", workflow: "QA Test Design", mode: "test-design", retest: false }
-        : { kind: "qa", workflow: "QA Verify", mode: "verify", retest: i.parentType === "bug" };
+        : { kind: "qa", workflow: "QA Verify", mode: "verify", retest: parentIsBug };
     }
     case "dev-task":
+    case "DevTask": // a `spike` label keeps it a DevTask (ADR-0005 D7)
     case "devops-task":
     case "documentation-task": {
       const roles = i.labels.flatMap((l) => (ROLE_LABEL[l] ? [ROLE_LABEL[l]] : []));
@@ -103,7 +141,7 @@ export function planWorkflow(i: PlanInput): WorkflowPlan {
       }
       // PO 2026-11-23: role:* labels stay accepted; every executable type maps to one of two roles.
       const engineer: Role = "software-engineer";
-      const bug = i.parentType === "bug";
+      const bug = parentIsBug;
       return {
         kind: "delivery",
         workflow: bug ? "Bug Resolution" : has("refactor") ? "Refactor" : "Feature Implementation",
@@ -116,8 +154,8 @@ export function planWorkflow(i: PlanInput): WorkflowPlan {
     default:
       throw new OmiError(
         "POLICY_VIOLATION",
-        i.type === "bug"
-          ? "a Bug is fixed through a child DevTask: run that task"
+        i.type === "bug" || i.type === "Bug"
+          ? "a Bug is fixed through a child DevTask and a child QATask: run one of those"
           : `no OMI workflow runs ${i.type} issues`,
       );
   }

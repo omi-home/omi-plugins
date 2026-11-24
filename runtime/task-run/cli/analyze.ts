@@ -5,7 +5,12 @@
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { setStatus } from "../../github/adapters/project.ts";
-import { isV2, lifecycleStart, lifecycleSync } from "../../github/cli/lifecycle.ts";
+import {
+  isV2,
+  lifecycleReview,
+  lifecycleStart,
+  lifecycleSync,
+} from "../../github/cli/lifecycle.ts";
 import { writeSection } from "../../handoff/adapters/context.ts";
 import { loadProfiles, profileSecretResolver } from "../../profile/adapters/profile-config.ts";
 import { selectProfile } from "../../profile/domain/selection.ts";
@@ -27,13 +32,38 @@ import {
 import { parseSkillChoice } from "../adapters/role-files.ts";
 import { git } from "../adapters/worktree.ts";
 import { runAnalysis } from "../application/slice.ts";
+import { designAsAnalysis } from "../domain/plan.ts";
 import type { RunRow } from "../domain/run.ts";
 import { commandEnvFor, RUN_LEASE_MS, step } from "./common.ts";
-import { typeOf } from "./gates.ts";
+import { readyGates, runTypeOf, startGates, typeOf, typeOfV2 } from "./gates.ts";
 import { harnessOf, taskRunPorts } from "./ports.ts";
-import { type AgentRunDeps, blockedBy, harnessGate, planFor, type RunResult } from "./run.ts";
+import {
+  type AgentRunDeps,
+  blockedBy,
+  harnessGate,
+  planFor,
+  type RunResult,
+  taskRun,
+} from "./run.ts";
 
-export function taskAnalyze(deps: AgentRunDeps, issue: number): RunResult {
+export const taskAnalyze = (deps: AgentRunDeps, issue: number): RunResult =>
+  readOnlyRun(deps, issue, "analysis");
+
+/**
+ * `omi task run <n>` entry (DevTask-0132 #383): a v2 DesignTask runs the read-only UI/UX Designer
+ * (`design` section into the body, then `omi move <n> "In review"`); every other type goes to
+ * `taskRun`. The Coordinator approves a design; the CLI never moves it to Done.
+ */
+export function taskRunByType(deps: AgentRunDeps, issue: number): RunResult {
+  const gh = deps.gh ?? spawnGh;
+  const { config } = repo(deps.cwd);
+  if (isV2(config) && typeOfV2(fetchTicket(config, issue, gh)) === "DesignTask") {
+    return readOnlyRun(deps, issue, "design");
+  }
+  return taskRun(deps, issue);
+}
+
+function readOnlyRun(deps: AgentRunDeps, issue: number, mode: "analysis" | "design"): RunResult {
   const gh = deps.gh ?? spawnGh;
   const { root, workspace, config } = repo(deps.cwd);
   const selection = selectProfile(
@@ -44,12 +74,19 @@ export function taskAnalyze(deps: AgentRunDeps, issue: number): RunResult {
   const skills = parseSkillChoice(PLUGIN_ROOT, deps.pick?.skills, deps.pick?.reason);
   const ref = { repository: `${config.github.owner}/${config.github.repo}`, number: issue };
   const ticket = fetchTicket(config, issue, gh);
-  const bad = validateTicket(ticket, config).find((c) => c.status === "fail");
+  // A design run also passes the v2 Definition of Ready, like `task start` does.
+  const checks =
+    mode === "design"
+      ? [...startGates(ticket, config), ...readyGates(ticket, config, gh).checks]
+      : validateTicket(ticket, config);
+  const bad = checks.find((c) => c.status === "fail");
   if (bad) throw new OmiError(bad.code ?? "TICKET_INVALID", `${bad.name}: ${bad.detail}`);
-  const plan = planFor(config, ticket, gh);
-  if (plan.kind !== "analysis") {
-    throw new OmiError("POLICY_VIOLATION", `${plan.workflow}: use \`omi task run ${issue}\``);
+  const planned = planFor(config, ticket, gh);
+  if (planned.kind !== (mode === "design" ? "design" : "analysis")) {
+    throw new OmiError("POLICY_VIOLATION", `${planned.workflow}: use \`omi task run ${issue}\``);
   }
+  const plan = planned.kind === "design" ? designAsAnalysis(planned) : planned;
+  if (plan.kind !== "analysis") throw new OmiError("INTERNAL", "analysis plan expected");
   harnessGate(deps, selection);
   const file = statePath(deps.cwd);
   const db = openState(file);
@@ -66,7 +103,7 @@ export function taskAnalyze(deps: AgentRunDeps, issue: number): RunResult {
       run ??= createRun(db, {
         id: `${issue}-${randomUUID().slice(0, 8)}`,
         issue: ref,
-        workflow: typeOf(ticket) as IssueType,
+        workflow: (mode === "design" ? runTypeOf(ticket, config) : typeOf(ticket)) as IssueType,
       });
       if (run.state === "CREATED") run = step(db, run, "TICKET_VALID");
       // v2 has no Analysis status: the work is "In progress" (omi move). Legacy keeps Analysis.
@@ -100,6 +137,11 @@ export function taskAnalyze(deps: AgentRunDeps, issue: number): RunResult {
       );
       // Analysis done or an open question: either way the PO decides next.
       // v2 (no Waiting PO / direct Blocked): `omi sync`; the Coordinator moves the Issue on from there.
+      // A finished design goes "In review" (move) before the sync; the CLI never sets Done.
+      const review =
+        v2 && mode === "design" && ctx.state === "COMPLETED"
+          ? lifecycleReview({ cwd: deps.cwd, gh, state: deps.state }, issue)
+          : undefined;
       const engine = v2 ? lifecycleSync({ cwd: deps.cwd, gh, state: deps.state }) : undefined;
       const status = v2
         ? null
@@ -110,6 +152,7 @@ export function taskAnalyze(deps: AgentRunDeps, issue: number): RunResult {
         round: ctx.round,
         status,
         ...(move ? { move } : {}),
+        ...(review ? { review } : {}),
         ...(engine ? { engine } : {}),
         ...blockedBy(ctx.state, evidenceOf(run.id)),
       };

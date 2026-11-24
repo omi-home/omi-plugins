@@ -22,7 +22,7 @@ import { runSetup } from "../adapters/setup.ts";
 import { branchName, ensureTaskWorkspace, git, type Workspace } from "../adapters/worktree.ts";
 import type { RunRow } from "../domain/run.ts";
 import { commandEnvFor, START_LEASE_MS, step, type TaskDeps } from "./common.ts";
-import { readyGates, startGates, typeOf } from "./gates.ts";
+import { readyGates, runTypeOf, startGates } from "./gates.ts";
 
 export interface StartResult {
   run: RunRow;
@@ -53,7 +53,7 @@ export function taskStart(deps: TaskDeps, issue: number): StartResult {
           checks,
         });
       }
-      const type = typeOf(ticket) as IssueType; // gates passed: exactly one valid type
+      const type = runTypeOf(ticket, config) as IssueType; // gates passed: exactly one valid type
       let run =
         liveRun(db, ref) ??
         createRun(db, { id: `${issue}-${randomUUID().slice(0, 8)}`, issue: ref, workflow: type });

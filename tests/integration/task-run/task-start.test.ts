@@ -357,10 +357,10 @@ test("legacy: task start writes Status itself and never calls the engine", () =>
   assert.ok(gh.mutations.length > 0);
 });
 
-test("v2: task start is refused by the start gate (no worktree, no write); lifecycleStart is tested in tests/unit/github/lifecycle.test.ts", () => {
+test("v2: task start of a non-executable type (Bug) is refused by the start gate (no worktree, no write); the executable types are tested in tests/unit/task-run/plan-v2.test.ts", () => {
   const { root } = repo(true, "v2");
   const issues = tree();
-  (issues[5] as FakeIssue).ticket = { issueType: { name: "DevTask" } };
+  (issues[5] as FakeIssue).ticket = { issueType: { name: "Bug" } };
   const gh = fakeGh(issues);
   assert.equal(
     code(() => taskStart({ cwd: root, gh: gh.run }, 5)),

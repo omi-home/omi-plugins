@@ -20,6 +20,7 @@ import {
   type Ticket,
   validateTicket,
 } from "../../ticket/adapters/ticket.ts";
+import { isExecutableV2, RUN_TYPE_OF_V2 } from "../domain/plan.ts";
 import type { TaskDeps } from "./common.ts";
 
 /** Types that own a branch + worktree. Containers and Release (develop → main) do not. */
@@ -33,7 +34,7 @@ const EXECUTABLE: readonly IssueType[] = [
 
 export const typeOf = (t: Ticket) => labelType(t.labels.nodes);
 /** Native type of a model v2 Issue; undefined when absent or unknown (the type gate reports it). */
-const typeOfV2 = (t: Ticket): IssueTypeV2 | undefined => {
+export const typeOfV2 = (t: Ticket): IssueTypeV2 | undefined => {
   try {
     return readIssueType(t, "v2") as IssueTypeV2;
   } catch {
@@ -131,21 +132,36 @@ function readyGatesV2(t: Ticket, config: OmiConfig, gh: GhRunner): Check[] {
   return checks;
 }
 
+/** Legacy type a run is recorded under: the `type:*` label, or under v2 the mapped native type. */
+export function runTypeOf(t: Ticket, config: OmiConfig): IssueType | undefined {
+  if (workflowModel(config) !== "v2") return typeOf(t);
+  const native = typeOfV2(t);
+  return isExecutableV2(native) ? RUN_TYPE_OF_V2[native] : undefined;
+}
+
 /**
- * Ticket gates plus "may this Issue own a worktree" (spec §6: work happens on terminal tasks).
- * `forWork` false (`ticket validate`): under model v2 no start rule applies yet; true: a v2 start
- * is refused until the v2 engine (Feature-0039 / Feature-0040) can run it.
+ * Ticket gates plus "may this Issue own a run" (spec §6: work happens on terminal tasks).
+ * `forWork` false (`ticket validate`): no start rule applies; true: under v2 only DesignTask,
+ * DevTask and QATask run (DevTask-0132 #383), every other native type is refused.
  */
 export function startGates(t: Ticket, config: OmiConfig, forWork = true): Check[] {
   const checks = validateTicket(t, config);
   if (workflowModel(config) === "v2") {
-    if (forWork) {
-      checks.push({
-        name: "executable",
-        status: "fail",
-        code: "POLICY_VIOLATION",
-        detail: "task start and run are not available under github.model v2 yet",
-      });
+    const native = typeOfV2(t);
+    if (forWork && native) {
+      checks.push(
+        isExecutableV2(native)
+          ? { name: "executable", status: "pass", detail: native }
+          : {
+              name: "executable",
+              status: "fail",
+              code: "POLICY_VIOLATION",
+              detail:
+                native === "Bug"
+                  ? "a Bug is fixed through a child DevTask and a child QATask: create one and run it"
+                  : `${native} issues are not run by \`omi task run\`; only DesignTask, DevTask and QATask are`,
+            },
+      );
     }
     return checks;
   }

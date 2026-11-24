@@ -26,10 +26,10 @@ import {
   type SliceDeps,
 } from "../application/slice.ts";
 import { PROJECT_STATUS } from "../domain/fsm.ts";
-import { planWorkflow, type WorkflowPlan } from "../domain/plan.ts";
+import { isExecutableV2, planWorkflow, type WorkflowPlan } from "../domain/plan.ts";
 import type { RunRow } from "../domain/run.ts";
 import { commandEnvFor, type ReportDeps, RUN_LEASE_MS, type TaskDeps } from "./common.ts";
-import { typeOf } from "./gates.ts";
+import { typeOf, typeOfV2 } from "./gates.ts";
 import { harnessOf, taskRunPorts } from "./ports.ts";
 import { taskStart } from "./start.ts";
 
@@ -40,6 +40,8 @@ export interface RunResult {
   status: StatusChange | null;
   /** github.model v2: the `omi sync` that replaced the direct Status write. */
   engine?: EngineOutcome;
+  /** github.model v2, a DesignTask: the `omi move <n> "In review"` after the design section was written. */
+  review?: EngineOutcome;
   /** github.model v2, `task analyze`: the `omi move <n> "In progress"` made before the agents ran. */
   move?: EngineOutcome;
   /** A read-only QATask run: the verdict; on PASSED the Issue is closed and `task finalize` follows. */
@@ -83,6 +85,10 @@ export function taskRun(deps: AgentRunDeps, issue: number): RunResult {
     ticket.parent && ticket.parent.repository.nameWithOwner.toLowerCase() === repoName
       ? ticket.parent.number
       : undefined;
+  if (plan.kind === "design") {
+    // The read-only design run lives in analyze.ts (`taskRunByType`), the `omi task run` entry.
+    throw new OmiError("INTERNAL", `#${issue}: a DesignTask must be run through taskRunByType`);
+  }
   if (plan.kind !== "delivery" && plan.kind !== "qa") {
     throw new OmiError("POLICY_VIOLATION", `${plan.workflow}: use \`omi task analyze ${issue}\``);
   }
@@ -167,17 +173,32 @@ export const blockedBy = (state: WorkflowContext["state"], evidenceDir: string) 
 
 /** Workflow plan from the Issue's type and labels, plus its parent's type (Bug → Bug Resolution). */
 export function planFor(config: OmiConfig, ticket: Ticket, gh: GhRunner): WorkflowPlan {
-  const type = typeOf(ticket);
-  if (!type) throw new OmiError("TICKET_INVALID", `#${ticket.number} has no single type:* label`);
   const repoName = `${config.github.owner}/${config.github.repo}`;
   const parent = ticket.parent;
-  const parentType =
-    parent && parent.repository.nameWithOwner.toLowerCase() === repoName.toLowerCase()
-      ? (typeOf(fetchTicket(config, parent.number, gh)) ?? null)
-      : null;
+  const inRepo = parent && parent.repository.nameWithOwner.toLowerCase() === repoName.toLowerCase();
+  const labels = ticket.labels.nodes.map((l) => l.name);
+  if (isV2(config)) {
+    const native = typeOfV2(ticket);
+    // The three executable native types; any other native type with a legacy `type:*` label keeps
+    // its legacy analysis plan (`task analyze`), the rest is refused by planWorkflow.
+    if (isExecutableV2(native) || !typeOf(ticket)) {
+      if (!native)
+        throw new OmiError("TICKET_INVALID", `#${ticket.number} has no native issue type`);
+      const parentType = inRepo ? (typeOfV2(fetchTicket(config, parent.number, gh)) ?? null) : null;
+      return planWorkflow({
+        type: native,
+        labels,
+        parentType,
+        qaDesignLabel: config.qa.designLabel,
+      });
+    }
+  }
+  const type = typeOf(ticket);
+  if (!type) throw new OmiError("TICKET_INVALID", `#${ticket.number} has no single type:* label`);
+  const parentType = inRepo ? (typeOf(fetchTicket(config, parent.number, gh)) ?? null) : null;
   return planWorkflow({
     type,
-    labels: ticket.labels.nodes.map((l) => l.name),
+    labels,
     parentType,
     qaDesignLabel: config.qa.designLabel,
   });

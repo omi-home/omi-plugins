@@ -50,10 +50,9 @@ import { ERROR_CODES, OmiError } from "../shared/errors/errors.ts";
 import { PLUGIN_ROOT } from "../shared/plugin-paths.ts";
 import { redact, redactDeep } from "../shared/redact.ts";
 import { CONFIG_FILE, locate } from "../shared/workspace.ts";
-import { taskAnalyze } from "../task-run/cli/analyze.ts";
+import { taskAnalyze, taskRunByType } from "../task-run/cli/analyze.ts";
 import { ticketValidate } from "../task-run/cli/gates.ts";
 import { openRunIssues } from "../task-run/cli/open-run-issues.ts";
-import { taskRun } from "../task-run/cli/run.ts";
 import { skillList } from "../task-run/cli/skills.ts";
 import { taskStart } from "../task-run/cli/start.ts";
 import {
@@ -121,6 +120,12 @@ Commands:
                          \`task finalize\` (no PR); FAILED stops Blocked with proposed Bug bodies
                          (\`Found in: QATask #n · TC-…\`) for the Coordinator; after the fix merged,
                          \`task unblock\` and \`task run\` again gives Run #k+1.
+                         github.model v2 picks the workflow by native issue type: DesignTask → UI/UX
+                         Designer (read-only, writes section design into the body, then \`omi move <n>
+                         "In review"\`; no commit, no PR; the Coordinator approves, the CLI never
+                         sets Done); DevTask (also with label spike) → Software Engineer → checks →
+                         review; QATask → QA Engineer. Bug, UserStory, Epic, Doc, ADR are refused (a
+                         Bug is fixed through a child DevTask + QATask).
   task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
                          write their sections into the Issue body, then Waiting PO. No worktree. Only
                          this command plans the BA; the Architect runs here and on task run's review
@@ -817,7 +822,7 @@ export function main(argv: string[], cwd = process.cwd(), io: CliIo = {}): CliRe
         return ok(st, lines(human));
       }
       case "task run": {
-        const r = taskRun({ cwd, reports: stepReports, pick: pickFlags(values) }, issue);
+        const r = taskRunByType({ cwd, reports: stepReports, pick: pickFlags(values) }, issue);
         // A QATask that PASSED has no PR: its Issue is closed, so finalize (noCode) cleans up and rolls up.
         const fin =
           r.qa?.verdict === "PASSED"
