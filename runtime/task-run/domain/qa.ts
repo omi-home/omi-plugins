@@ -122,6 +122,27 @@ export function missingAutoTests(table: TestCase[], testSources: string[]): stri
     .map((c) => c.id);
 }
 
+/** What the QA Engineer is told about test case ids (the VerifyResult/TestCase schema regex). */
+export const TC_FORMAT_NOTE =
+  "Test case id format: TC-<issue>-NN, i.e. `TC-` + the number of the parent Issue + `-` + at least two digits (regex ^TC-\\d+-\\d{2,}$), e.g. TC-8-01. Any other id makes the whole result invalid.";
+
+/** Cases of a Verify that are `blocked` while none failed: the suite is green, a person must unblock them. */
+export const blockedOnly = (r: VerifyResult): string[] =>
+  r.cases.some((c) => c.result === "fail")
+    ? []
+    : r.cases.filter((c) => c.result === "blocked").map((c) => c.id);
+
+/**
+ * The "Regression proof" section of a checks report comment (DevTask-0140 #404), or undefined when
+ * the comment has none. The section ends at the next report heading.
+ */
+export function regressionProofOf(body: string): string | undefined {
+  const m = /### Regression proof\r?\n[\s\S]*?(?=\r?\n### Logs \(retained artifacts\)|$)/.exec(
+    body,
+  );
+  return m ? m[0].trim() : undefined;
+}
+
 /** The JSON a QA Engineer puts in its `qa` section, with or without a code fence. */
 export function jsonOf(markdown: string): unknown {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(markdown);

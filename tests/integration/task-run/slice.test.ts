@@ -939,6 +939,24 @@ test("DevTask-0140: the test fails before the fix and passes on HEAD: a Regressi
   assert.match(readFileSync(join(s.deps.evidenceDir, after), "utf8"), /fixed/);
 });
 
+test("TC-420-06: the manual QA step of a Bug's DevTask gets the mode note and this round's Regression proof", () => {
+  const s = setup(
+    TC_TEST,
+    delivery({ workflow: "Bug Resolution", regressionTest: true, manualQa: true }),
+    ":memory:",
+    {},
+    { regression: FAKE_PROOF.regression },
+  );
+  git(s.target.worktree, "update-ref", "refs/remotes/origin/develop", s.target.baseSha);
+  mkdirSync(join(s.target.worktree, "shared-dir"));
+  writeFileSync(join(s.target.worktree, "shared-dir", "keep.txt"), "k");
+  assert.equal(runSlice(s.deps, { ...s.target, parent: 8 }).state, "PR_PENDING");
+  const qa = s.agents.launches.find((l) => isRole(l, "qa-engineer"));
+  assert.match(qa?.stdin ?? "", /Bug Resolution manual QA — there is no TC table/);
+  assert.match(qa?.stdin ?? "", /### Regression proof/);
+  assert.match(qa?.stdin ?? "", /\| before fix `[0-9a-f]{8}` \| 1 \| fail \(expected\) \|/);
+});
+
 test("ARC-004: a TC file name with shell syntax is REG-001 and the regression command never runs", () => {
   const s = proofSetup(
     { testFile: { implement: "test('TC-8-01: greets', () => {})\n" }, testName: "a$b.test.ts" },
