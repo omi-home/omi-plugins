@@ -1152,9 +1152,10 @@ export function runSlice(d: SliceDeps, t: SliceTarget): WorkflowContext {
         proof = regression.proof;
         checkedHead = gate.findings.length ? null : git(["rev-parse", "HEAD"], t.worktree);
         if (gate.findings.length) {
-          advance({ type: "CHECKS_FAILED" });
-          // The engineer fixes the checks and still owes the review findings that are open.
+          // Findings first, like the other branches: a crash between the two never leaves a new
+          // state with stale findings. The engineer still owes the review findings that are open.
           setFindings(carryOpen(gate.findings, open.findings));
+          advance({ type: "CHECKS_FAILED" });
           needDev = true;
           break;
         }

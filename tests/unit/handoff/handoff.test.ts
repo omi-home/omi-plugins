@@ -455,7 +455,7 @@ test("acceptStepResult: invalid status, wrong identity, junk and oversized outpu
   assert.equal(code(result({ status: "RUNNING" })), "CONTRACT_INVALID");
   assert.equal(code(result({ status: "BLOCKED" })), "CONTRACT_INVALID"); // needs blockerReason
   assert.equal(code(result({ role: "code-reviewer" })), "OWNERSHIP_MISMATCH");
-  assert.equal(code(result({ round: 2 })), "OWNERSHIP_MISMATCH");
+  assert.equal(code(result({ round: 2 })), "CONTRACT_INVALID");
   assert.equal(code(result({ issue: { repository: "o/r", number: 1 } })), "OWNERSHIP_MISMATCH");
   assert.equal(code(result({ extra: true })), "CONTRACT_INVALID");
   assert.equal(code("I think it went well"), "CONTRACT_INVALID");
@@ -476,6 +476,84 @@ test("extractJson: fixed order, objects only, braces in strings ignored", () => 
   assert.deepEqual(extractJson(`\`\`\`\nls\n\`\`\`\n\`\`\`\n${j(a)}\n\`\`\``), a);
   assert.throws(() => extractJson("no json here"), { code: "CONTRACT_INVALID" });
   assert.throws(() => extractJson("[1,2]"), { code: "CONTRACT_INVALID" });
+});
+
+test("step result: null optional fields count as absent, unknown and required ones stay refused (#445)", () => {
+  const { dir, base } = repo();
+  const p = buildTaskPacket(input(dir, base));
+  mkdirSync(join(dir, "src"), { recursive: true });
+  writeFileSync(join(dir, "src", "n.ts"), "a");
+  const accept = (extra: Record<string, unknown>) => acceptStepResult(p, result(extra));
+  assert.equal(accept({ blockerReason: null, nextAction: null }).status, "PASSED");
+  assert.equal(
+    accept({ status: "FAILED", blockerReason: null, nextAction: null }).status,
+    "FAILED",
+  );
+  assert.equal(accept({ commitSha: null, usage: null, findings: null }).findings.length, 0);
+  assert.equal(
+    codeOf(() => accept({ status: "BLOCKED", blockerReason: null })),
+    "CONTRACT_INVALID",
+  );
+  assert.equal(
+    codeOf(() => accept({ extra: null })),
+    "CONTRACT_INVALID",
+  );
+  assert.equal(
+    codeOf(() => accept({ summary: null })),
+    "CONTRACT_INVALID",
+  );
+});
+
+test("step result: round/attempt filled from the packet, a different value refused naming the field (#445)", () => {
+  const { dir, base } = repo();
+  const p = buildTaskPacket(input(dir, base));
+  mkdirSync(join(dir, "src"), { recursive: true });
+  writeFileSync(join(dir, "src", "r.ts"), "a");
+  const o = JSON.parse(result()) as Record<string, unknown>;
+  const { round: _r, attempt: _a, ...bare } = o;
+  const accepted = acceptStepResult(p, JSON.stringify(bare));
+  assert.equal(accepted.round, 1);
+  assert.equal(accepted.attempt, 1);
+  assert.throws(
+    () => acceptStepResult(p, result({ attempt: 3 })),
+    (e: unknown) => {
+      const err = e as { code: string; message: string };
+      return err.code === "CONTRACT_INVALID" && /attempt/.test(err.message);
+    },
+  );
+});
+
+test("step result: an over-long finding expected (1500 chars) is cut, not refused (#445)", () => {
+  const { dir, base } = repo();
+  const p = buildTaskPacket(input(dir, base));
+  mkdirSync(join(dir, "src"), { recursive: true });
+  writeFileSync(join(dir, "src", "e.ts"), "a");
+  const f = { id: "CR-001", severity: "low", observed: "o", expected: "e".repeat(1500) };
+  const { result: r, warnings } = acceptStepResultWithWarnings(p, result({ findings: [f] }));
+  assert.equal(r.findings[0]?.expected.length, 1000);
+  assert.deepEqual(warnings, ["findings.0.expected: 1500 chars, cut to 1000"]);
+});
+
+test("step result: a lone backslash in the last json fence is repaired with a warning; broken JSON reports the parse error (#445)", () => {
+  const { dir, base } = repo();
+  const p = buildTaskPacket(input(dir, base));
+  mkdirSync(join(dir, "src"), { recursive: true });
+  writeFileSync(join(dir, "src", "b.ts"), "a");
+  const raw = result({ summary: "PLACEHOLDER" }).replace("PLACEHOLDER", "C:\\Users\\<user> ok");
+  assert.throws(() => JSON.parse(raw));
+  const fixed = acceptStepResultWithWarnings(p, `Done.\n\`\`\`json\n${raw}\n\`\`\`\n`);
+  assert.equal(fixed.result.summary, "C:\\Users\\<user> ok");
+  assert.equal(fixed.warnings.length, 1);
+  // Truly broken: the error names the parse problem, never another object / schema version.
+  const other = result({ summary: "earlier object" });
+  const broken = `${other}\n\`\`\`json\n{"schemaVersion": 1, "summary": }\n\`\`\``;
+  assert.throws(
+    () => acceptStepResult(p, broken),
+    (e: unknown) => {
+      const err = e as { code: string; message: string };
+      return err.code === "CONTRACT_INVALID" && /not valid JSON/.test(err.message);
+    },
+  );
 });
 
 const config = parseConfig({ github: { owner: "o", repo: "r", projectNumber: 2 } });
