@@ -255,3 +255,42 @@ test("a label differing only in case is renamed; the approved plan matches after
   assert.ok(!state.labels.some((l) => l.name === "Security"));
   assert.throws(() => approvedActions({ actions: [], foreign: [], extra: 1 }), /--approved-plan/);
 });
+
+test("TC-432-01: the real `plan --output json` envelope (ok:false, protocolVersion) is applied; bare data too", () => {
+  const state = seed();
+  state.labels.push({ name: "ui", color: "000000", description: "stale" });
+  const gh = fakeRepo(state);
+  const plan = repoPlan(config(), gh.run);
+  const env = JSON.parse(
+    JSON.stringify({ ok: false, command: "github repo plan", protocolVersion: 1, data: plan }),
+  );
+  assert.deepEqual(approvedActions(env), approvedActions(plan));
+  assert.deepEqual(approvedActions(JSON.parse(JSON.stringify(plan))).length, plan.actions.length);
+  repoApply(config(), approvedActions(env), gh.run);
+  assert.throws(
+    () => repoApply(config(), [], fakeRepo(seedWithStaleLabel()).run),
+    /changed since it was approved/,
+  );
+});
+
+function seedWithStaleLabel() {
+  const s = seed();
+  s.labels.push({ name: "ui", color: "000000", description: "stale" });
+  return s;
+}
+
+test("TC-432-02: another command's envelope or a stray field is rejected naming the field", () => {
+  assert.throws(
+    () => approvedActions({ ok: true, command: "doctor", data: { actions: [], foreign: [] } }),
+    /command/,
+  );
+  assert.throws(
+    () =>
+      approvedActions({
+        ok: false,
+        command: "github repo plan",
+        data: { actions: [], foreign: [], x: 1 },
+      }),
+    /data/,
+  );
+});

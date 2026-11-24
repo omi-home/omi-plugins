@@ -220,14 +220,39 @@ function protectionBody(cur: Protection | null, enable: Rule[]) {
 
 const PlanFile = z.strictObject({ actions: z.array(z.unknown()), foreign: z.array(z.string()) });
 const ApprovedPlan = z.union([
-  z.strictObject({ ok: z.boolean(), command: z.literal("github repo plan"), data: PlanFile }),
+  z.strictObject({
+    ok: z.boolean(),
+    command: z.literal("github repo plan"),
+    protocolVersion: z.union([z.number(), z.string()]).optional(),
+    data: PlanFile,
+  }),
   PlanFile,
 ]);
 
 /** The plan inside `omi github repo plan --output json` (the envelope or its `data`). */
 export function approvedActions(json: unknown): unknown[] {
-  const r = parseContract(ApprovedPlan, json, "--approved-plan");
-  return "data" in r ? r.data.actions : r.actions;
+  const r = ApprovedPlan.safeParse(json);
+  if (!r.success) {
+    const isEnvelope = typeof json === "object" && json !== null && "data" in json;
+    // Report the branch the file was meant for, so the paths name the real culprit.
+    const err = isEnvelope
+      ? z
+          .strictObject({
+            ok: z.boolean(),
+            command: z.literal("github repo plan"),
+            protocolVersion: z.union([z.number(), z.string()]).optional(),
+            data: PlanFile,
+          })
+          .safeParse(json)
+      : PlanFile.safeParse(json);
+    const issues = (err.success ? r.error : err.error).issues.map((i) => ({
+      path: i.path.join("."),
+      message: i.message,
+    }));
+    const text = issues.map((i) => `${i.path || "(root)"}: ${i.message}`).join("; ");
+    throw new OmiError("CONTRACT_INVALID", `--approved-plan: invalid (${text})`, { issues });
+  }
+  return "data" in r.data ? r.data.data.actions : r.data.actions;
 }
 
 /**
