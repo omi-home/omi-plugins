@@ -5,7 +5,7 @@
 // tip (nothing unpushed is ever deleted) stops the cleanup (CLEANUP_FAILED) and every remaining
 // resource is kept for reconciliation.
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { MergeReceipt } from "../../release/adapters/merge.ts";
 import {
@@ -52,6 +52,20 @@ export interface CleanupOptions {
 const LEASE_MS = 10 * 60_000;
 /** What OMI writes into a task workspace root next to the clone (role files, config dir). */
 export const GENERATED = [".claude", ".omi-home", "AGENTS.md", "REPORT.md"];
+
+/**
+ * Bug #410: the agent host writes an empty `result.json` (`{}`) into its cwd, the task workspace
+ * root, at the start of a step. OMI cannot stop it, so that exact stub is a known file; a
+ * `result.json` with any other content (or a symlink) is still unknown and blocks the cleanup.
+ */
+function isToolStub(path: string, name: string): boolean {
+  if (name !== "result.json") return false;
+  try {
+    return lstatSync(path).isFile() && readFileSync(path, "utf8").trim() === "{}";
+  } catch {
+    return false;
+  }
+}
 
 export const pidAlive = (pid: number): boolean => {
   try {
@@ -226,7 +240,7 @@ function steps(db: Db, o: CleanupOptions, issue: IssueRef): CleanupResult {
         failed("verify-clean-worktree", "clone has uncommitted or untracked files");
       }
       const extra = readdirSync(root).filter(
-        (f) => f !== basename(clone) && !GENERATED.includes(f),
+        (f) => f !== basename(clone) && !GENERATED.includes(f) && !isToolStub(join(root, f), f),
       );
       if (extra.length) {
         failed("verify-clean-worktree", `task workspace holds unknown files: ${extra.join(", ")}`);
