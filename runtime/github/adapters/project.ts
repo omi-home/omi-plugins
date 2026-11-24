@@ -36,7 +36,7 @@ const FieldData = z.strictObject({
 
 const ITEM_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){ issue(number:$number){
-    number
+    number state stateReason
     parent{ number repository{ name owner{login} } }
     projectItems(first:50,includeArchived:false){ nodes{ id
       project{ number owner{... on Organization{login} ... on User{login}} }
@@ -50,6 +50,8 @@ const ItemData = z.strictObject({
       issue: z
         .strictObject({
           number: z.int(),
+          state: z.string().optional(),
+          stateReason: z.string().nullish(),
           parent: z
             .strictObject({
               number: z.int(),
@@ -143,7 +145,25 @@ export function projectItem(config: OmiConfig, at: At, run: GhRunner) {
         number: found.parent.number,
       }
     : null;
-  return { item, from: item?.fieldValueByName?.name ?? null, parent };
+  const from = item?.fieldValueByName?.name ?? null;
+  // Closed as not planned / duplicate, or already Cancelled: a cancelled task is never finished.
+  const cancelled =
+    from === "Cancelled" ||
+    (found?.state === "CLOSED" &&
+      (found.stateReason === "NOT_PLANNED" || found.stateReason === "DUPLICATE"));
+  return { item, from, parent, cancelled };
+}
+
+/** Message when `issue` is cancelled (Status Cancelled or closed not planned): finalize keeps its Status. */
+export function cancelledKept(
+  config: OmiConfig,
+  issue: number,
+  run: GhRunner = spawnGh,
+): string | undefined {
+  const at: At = { owner: config.github.owner, repo: config.github.repo, number: issue };
+  return projectItem(config, at, run).cancelled
+    ? `${at.owner}/${at.repo}#${issue}: Status giữ Cancelled (Issue đóng not planned); không roll-up parent`
+    : undefined;
 }
 
 /** Sets one Project item's Status (option ID read from GitHub through `f`). */
@@ -318,6 +338,8 @@ export function markFinished(
   issue: number,
   run: GhRunner = spawnGh,
 ): { changes: FinishChange[]; held?: string } {
+  const kept = cancelledKept(config, issue, run);
+  if (kept) return { changes: [], held: kept };
   const field = statusField(config, run);
   field.option("Done");
   field.option("In Review");

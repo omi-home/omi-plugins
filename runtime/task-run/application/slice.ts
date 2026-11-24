@@ -1376,6 +1376,7 @@ const RestSubIssue = z.looseObject({
   body: z.string().nullable(),
   labels: z.array(z.union([z.string(), z.looseObject({ name: z.string() })])),
   state: z.string().optional(),
+  state_reason: z.string().nullish(),
   type: z.looseObject({ name: z.string() }).nullish(),
 });
 
@@ -1394,7 +1395,12 @@ function bugProofNotes(d: SliceDeps, repository: string, bug: number): string[] 
     );
     const fixes = parseContract(z.array(z.array(RestSubIssue)), pages, "list sub-issues")
       .flat()
-      .filter((s) => s.state === "closed" && /^(DevTask|dev-task)$/.test(s.type?.name ?? ""))
+      .filter(
+        (s) =>
+          s.state === "closed" &&
+          s.state_reason === "completed" &&
+          /^(DevTask|dev-task)$/.test(s.type?.name ?? ""),
+      )
       .slice(0, MAX_PROOF_TASKS);
     const notes = fixes.flatMap((s) => {
       const proofs = trustedComments(d, { repository, number: s.number })

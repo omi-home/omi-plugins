@@ -425,7 +425,7 @@ test("TC-420-04: the suite-failed proposal stays for checks that really fail", (
   assert.match(r.qa?.proposals[0] ?? "", /Automated suite failed on/);
 });
 
-test("TC-420-05: a Bug's Retest packet carries the Regression proof of the merged DevTask Fix", () => {
+test("TC-420-05 / TC-415-03: a Bug's Retest packet carries the Regression proof of the merged DevTask Fix, not of one closed not planned", () => {
   const s = setup(
     [{ qa: { cases: [{ id: "TC-8-01", result: "pass" }], defects: [], manualRegression: [] } }],
     {
@@ -434,8 +434,23 @@ test("TC-420-05: a Bug's Retest packet carries the Regression proof of the merge
     },
   );
   s.gh.siblings.push(
-    { number: 11, body: "", labels: [], state: "closed", type: { name: "DevTask" } },
+    {
+      number: 11,
+      body: "",
+      labels: [],
+      state: "closed",
+      state_reason: "completed",
+      type: { name: "DevTask" },
+    },
     { number: 12, body: "", labels: [], state: "open", type: { name: "DevTask" } },
+    {
+      number: 13,
+      body: "",
+      labels: [],
+      state: "closed",
+      state_reason: "not_planned",
+      type: { name: "DevTask" },
+    },
   );
   s.gh.comments.push({
     id: 100,
@@ -448,6 +463,7 @@ test("TC-420-05: a Bug's Retest packet carries the Regression proof of the merge
   assert.match(stdin, /Regression proof of DevTask Fix #11 \(merged\)/);
   assert.match(stdin, /PROOF-MARKER-420/);
   assert.doesNotMatch(stdin, /DevTask Fix #12/);
+  assert.doesNotMatch(stdin, /DevTask Fix #13/); // TC-415-03: closed not planned is not a merged fix
   assert.doesNotMatch(stdin, /Logs \(retained artifacts\)/);
   assert.match(stdin, /Bug Retest/);
 });
