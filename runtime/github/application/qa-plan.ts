@@ -26,7 +26,8 @@ export const planTitle = (target: number, kind: PlanKind) =>
   ({
     "test-design": `Test design #${target}`,
     verify: `Verify #${target}`,
-    fix: `Fix #${target}`,
+    // Never a GitHub closing keyword (fix/close/resolve…) before `#n`: the squash commit would close the Bug (Bug-0017 #426).
+    fix: `Sửa Bug #${target}`,
     retest: `Retest #${target}`,
   })[kind];
 
