@@ -195,6 +195,8 @@ function fakeGh(f: Fake): GhRunner {
       repository: {
         issue: {
           number: n,
+          state: f.open.has(n) ? "OPEN" : "CLOSED",
+          stateReason: f.open.has(n) ? null : (f.reason?.[n] ?? "COMPLETED"),
           parent: parent
             ? { number: parent, repository: { name: "repo", owner: { login: "o" } } }
             : null,
@@ -432,6 +434,32 @@ test("cleanup fails (dirty worktree): CLEANUP_FAILED, Blocked, FAILED report; fi
   assert.equal(s.f.comments.length, 1);
   assert.match(s.f.comments[0]?.body ?? "", /\| Status \| PASSED \|/);
   assert.equal(s.f.status[5], "Done");
+});
+
+test("TC-415-01: cleanup succeeds on an Issue closed not planned: Status stays Cancelled, no roll-up", () => {
+  const s = merged();
+  s.f.status[5] = "Cancelled";
+  s.f.reason = { 5: "NOT_PLANNED" };
+  const before = { ...s.f.status };
+  const r = taskFinalize({ cwd: s.repo, gh: s.gh }, 5);
+  assert.equal(r.run.state, "COMPLETED");
+  assert.deepEqual(r.status, []);
+  assert.match(r.held ?? "", /giữ Cancelled/);
+  assert.deepEqual(s.f.status, before);
+  assert.deepEqual(s.f.open, new Set([3, 2, 4]));
+});
+
+test("TC-415-02: cleanup fails on an Issue closed not planned: Status stays Cancelled, not Blocked", () => {
+  const s = merged();
+  s.f.status[5] = "Cancelled";
+  s.f.reason = { 5: "NOT_PLANNED" };
+  writeFileSync(join(s.wt, "scratch.txt"), "x\n");
+  const r = taskFinalize({ cwd: s.repo, gh: s.gh }, 5);
+  assert.equal(r.run.state, "CLEANUP_FAILED");
+  assert.deepEqual(r.status, []);
+  assert.match(r.held ?? "", /giữ Cancelled/);
+  assert.equal(s.f.status[5], "Cancelled");
+  assert.match(s.f.comments[0]?.body ?? "", /\| Status \| FAILED \|[\s\S]*CLN-001/);
 });
 
 // ---- DevTask-0128 #373: github.model v2 goes through the state engine, legacy never does ----

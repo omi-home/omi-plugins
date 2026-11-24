@@ -7,7 +7,12 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { markFinished, type StatusChange, setStatus } from "../../github/adapters/project.ts";
+import {
+  cancelledKept,
+  markFinished,
+  type StatusChange,
+  setStatus,
+} from "../../github/adapters/project.ts";
 import { type EngineOutcome, isV2, lifecycleSync } from "../../github/cli/lifecycle.ts";
 import { type MergeReceipt, prFacts, receiptOf } from "../../release/adapters/merge.ts";
 import { closingIssues, markedPrimaries } from "../../release/adapters/pr.ts";
@@ -240,10 +245,18 @@ export function taskFinalize(
         run = advanceRun(db, runId, { type: "CLEANUP_ERROR" }).run;
         // v2 has no Cleanup failed status (Blocked needs a blocker): the run state and the cleanup
         // comment carry it, and the Project Status is left to the engine.
-        const blocked = isV2(config)
-          ? null
-          : setStatus(config, issue, PROJECT_STATUS.CLEANUP_FAILED, gh);
-        return { run, receipt: receipt ?? null, cleanup, report, status: blocked ? [blocked] : [] };
+        // A cancelled Issue (closed not planned / Status Cancelled) keeps its Status.
+        const kept = isV2(config) ? undefined : cancelledKept(config, issue, gh);
+        const blocked =
+          isV2(config) || kept ? null : setStatus(config, issue, PROJECT_STATUS.CLEANUP_FAILED, gh);
+        return {
+          run,
+          receipt: receipt ?? null,
+          cleanup,
+          report,
+          status: blocked ? [blocked] : [],
+          ...(kept ? { held: kept } : {}),
+        };
       }
       run = advanceRun(db, runId, { type: "CLEANUP_SUCCEEDED" }).run;
       // COMPLETED is recorded first; a failure below is repaired by rerunning finalize.
