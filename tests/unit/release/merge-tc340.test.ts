@@ -38,6 +38,7 @@ function ghWith(workflowText: string | null): GhRunner {
             baseRefName: "develop",
             headRefName: "feature/5-x",
             headRefOid: TIP,
+            title: "DevTask-0005-Task 5",
             body: prBody("o/r", 5),
             mergeCommit: null,
             labels: { nodes: [] },

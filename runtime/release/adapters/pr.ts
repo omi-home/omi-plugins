@@ -15,6 +15,7 @@ export const PullRequest = z.strictObject({
   headRefName: z.string(),
   headRefOid: z.string(),
   body: z.string(),
+  title: z.string(),
 });
 export type PullRequest = z.infer<typeof PullRequest>;
 
@@ -23,7 +24,7 @@ export const sleepSync = (ms: number): void => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
 
-const PR_FIELDS = "id number url baseRefName headRefName headRefOid body";
+const PR_FIELDS = "id number url baseRefName headRefName headRefOid body title";
 
 /** Marker naming the primary Issue in the PR body: the fallback link when base ≠ default. */
 export const primaryMarker = (repository: string, issue: number) =>
@@ -38,6 +39,42 @@ export function prBody(repository: string, issue: number, extra = ""): string {
 /** Every primary Issue the body names; more than one is a dual-primary PR. */
 export const markedPrimaries = (body: string): string[] =>
   [...body.matchAll(/<!-- omi:pr-primary=([\w.-]+\/[\w.-]+#\d+) -->/g)].map((m) => m[1] as string);
+
+const CLOSING_REF =
+  /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s*(?:https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:issues|pull)\/(\d+)|(?:([\w.-]+\/[\w.-]+))?#(\d+))/gi;
+
+/**
+ * GitHub closing keywords in `text` that point at an Issue other than `primary`
+ * (`owner/repo#n`). Squash-merging them into the default branch would close that Issue
+ * (Bug-0017 #426); `Closes #<primary>` stays valid.
+ */
+export function foreignClosingRefs(text: string, primary: string): string[] {
+  const slash = primary.indexOf("#");
+  const repository = primary.slice(0, slash);
+  const out: string[] = [];
+  for (const m of text.matchAll(CLOSING_REF)) {
+    const repo = m[1] ?? m[3] ?? repository;
+    const ref = `${repo}#${m[2] ?? m[4]}`;
+    if (ref.toLowerCase() !== primary.toLowerCase() && !out.includes(ref)) out.push(ref);
+  }
+  return out;
+}
+
+/** Check `pr-foreign-close` over the PR title and body. */
+export function foreignCloseCheck(pr: { title?: string; body: string }, primary: string): Check {
+  const refs = [
+    ...new Set([
+      ...foreignClosingRefs(pr.title ?? "", primary),
+      ...foreignClosingRefs(pr.body, primary),
+    ]),
+  ];
+  return refs.length
+    ? fail(
+        "pr-foreign-close",
+        `title/body has a closing keyword for ${refs.join(", ")}: only ${primary} may be closed`,
+      )
+    : pass("pr-foreign-close", "no closing keyword for another Issue");
+}
 
 export interface RepoFacts {
   id: string;

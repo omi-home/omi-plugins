@@ -8,7 +8,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { titleType } from "../../../runtime/github/application/hierarchy.ts";
-import { type PullRequest, prBody, validatePr } from "../../../runtime/release/adapters/pr.ts";
+import {
+  foreignClosingRefs,
+  type PullRequest,
+  prBody,
+  validatePr,
+} from "../../../runtime/release/adapters/pr.ts";
 import { prCreate, prMerge, prValidate } from "../../../runtime/release/cli/pr.ts";
 import type { IssueType } from "../../../runtime/shared/contracts.ts";
 import type { GhRunner } from "../../../runtime/shared/github/client.ts";
@@ -48,7 +53,7 @@ interface Fake {
   staleLookups?: number;
   /** Merge-gate view of the task PR (T4.2); merged by `mergePullRequest`. */
   merge?: Record<string, unknown>;
-  mergeSent?: { id: string; oid: string; method: string }[];
+  mergeSent?: { id: string; oid: string; method: string; h: string; b: string }[];
   /** Native issue type (model v2). */
   nativeType?: string;
 }
@@ -92,6 +97,8 @@ function fakeGh(f: Fake) {
         id: vars.id ?? "",
         oid: vars.oid ?? "",
         method: /mergeMethod:(\w+)/.exec(query)?.[1] ?? "",
+        h: vars.h ?? "",
+        b: vars.b ?? "",
       });
       Object.assign(f.merge ?? {}, {
         state: "MERGED",
@@ -116,6 +123,7 @@ function fakeGh(f: Fake) {
         headRefName: vars.h ?? "",
         headRefOid: git(join(root, "..", "origin.git"), "rev-parse", `refs/heads/${vars.h}`),
         body: vars.body ?? "",
+        title: vars.t ?? "",
       };
       f.open = [pr];
       return ok({ createPullRequest: { pullRequest: pr } });
@@ -258,6 +266,7 @@ test("an existing PR with the wrong base is refused", () => {
       headRefName: s.branch,
       headRefOid: git(s.wt, "rev-parse", "HEAD"),
       body: prBody("o/repo", 5),
+      title: "DevTask-0005-Task 5",
     },
   ];
   assert.equal(
@@ -413,6 +422,7 @@ function mergeable(s: ReturnType<typeof started>, f: Fake, patch: Record<string,
     headRefName: s.branch,
     headRefOid: git(s.wt, "rev-parse", "HEAD"),
     body: prBody("o/repo", 5),
+    title: "DevTask-0005-Task 5",
     mergeCommit: null,
     labels: { nodes: [] },
     commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
@@ -431,9 +441,58 @@ test("pr merge: squash pinned to the validated head, receipt returned", () => {
   );
   const r = prMerge({ cwd: s.root, gh: s.gh.run }, 5);
   const tip = git(s.wt, "rev-parse", "HEAD");
-  assert.deepEqual(f.mergeSent, [{ id: "PR_m", oid: tip, method: "SQUASH" }]);
+  assert.deepEqual(f.mergeSent, [
+    {
+      id: "PR_m",
+      oid: tip,
+      method: "SQUASH",
+      h: "DevTask-0005-Task 5 (#60)",
+      b: "Closes #5",
+    },
+  ]);
   assert.equal(r.receipt.headSha, tip);
   assert.equal(r.receipt.mergeCommit, "c".repeat(40));
+});
+
+test("TC-426-05: pr create refuses a title closing another Issue before creating the PR", () => {
+  const s = started({ issues: { 5: "dev-task" } });
+  let err: { code?: string; message?: string } = {};
+  try {
+    prCreate({ cwd: s.root, gh: s.gh.run, sleep: noSleep, title: "DevTask-0147-Fix #410" }, 5);
+  } catch (e) {
+    err = e as typeof err;
+  }
+  assert.equal(err.code, "POLICY_VIOLATION");
+  assert.match(err.message ?? "", /pr-foreign-close/);
+  assert.deepEqual(s.gh.created, []);
+  assert.deepEqual(s.gh.statuses, []);
+});
+
+test("TC-426-06: pr merge refuses a live PR whose title/body was edited to close another Issue", () => {
+  for (const patch of [
+    { title: "DevTask-0005-Fixes #410" },
+    { body: `${prBody("o/repo", 5)}\n\nResolves o/repo#410` },
+  ]) {
+    const f: Fake = { issues: { 5: "dev-task" } };
+    const s = started(f);
+    mergeable(s, f, patch);
+    assert.equal(
+      code(() => prMerge({ cwd: s.root, gh: s.gh.run }, 5)),
+      "POLICY_VIOLATION",
+    );
+    assert.equal(f.mergeSent, undefined);
+  }
+});
+
+test("TC-426-07: the squash message OMI sends closes only the primary Issue", () => {
+  const f: Fake = { issues: { 5: "dev-task" } };
+  const s = started(f);
+  mergeable(s, f);
+  prMerge({ cwd: s.root, gh: s.gh.run }, 5);
+  const sent = f.mergeSent?.[0];
+  assert.ok(sent);
+  assert.deepEqual(foreignClosingRefs(`${sent.h}\n${sent.b}`, "o/repo#5"), []);
+  assert.match(sent.b, /Closes #5/);
 });
 
 test("pr merge: unresolved check or local tip ahead of the PR refuses without merging", () => {

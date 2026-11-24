@@ -8,7 +8,7 @@ import type { OmiConfig } from "../../shared/config.ts";
 import type { Check } from "../../shared/contracts.ts";
 import { OmiError } from "../../shared/errors/errors.ts";
 import { type GhRunner, graphql, spawnGh } from "../../shared/github/client.ts";
-import { markedPrimaries } from "./pr.ts";
+import { foreignCloseCheck, markedPrimaries } from "./pr.ts";
 
 const MergeMethod = z.enum(["SQUASH", "MERGE", "REBASE"]);
 type MergeMethod = z.infer<typeof MergeMethod>;
@@ -27,6 +27,7 @@ const PrNode = z.strictObject({
   headRefName: z.string(),
   headRefOid: z.string(),
   body: z.string(),
+  title: z.string(),
   mergeCommit: z.strictObject({ oid: z.string() }).nullable(),
   labels: z.strictObject({ nodes: z.array(z.strictObject({ name: z.string() })) }),
   commits: z.strictObject({
@@ -46,7 +47,7 @@ const PrNode = z.strictObject({
 type PrNode = z.infer<typeof PrNode>;
 
 const PR_FIELDS = `id number url state isDraft merged mergedAt mergeable reviewDecision baseRefName
-  headRefName headRefOid body mergeCommit{oid} labels(first:30){nodes{name}}
+  headRefName headRefOid body title mergeCommit{oid} labels(first:30){nodes{name}}
   commits(last:1){nodes{commit{statusCheckRollup{state}}}}`;
 
 const Facts = z.strictObject({
@@ -255,6 +256,7 @@ export function mergeEligibility(
       ? pass("pr-primary", want.primary)
       : fail("pr-primary", marked.length ? `body names ${marked.join(", ")}` : "no primary marker"),
   );
+  checks.push(foreignCloseCheck(pr, want.primary));
   if (want.localTip !== undefined) {
     checks.push(
       pr.headRefOid === want.localTip
@@ -337,13 +339,15 @@ const Merged = z.strictObject({
  * push between validate and merge can never be merged unchecked.
  */
 export function mergePr(
-  o: { prId: string; method: MergeMethod; headOid: string },
+  o: { prId: string; method: MergeMethod; headOid: string; headline: string; body: string },
   run: GhRunner = spawnGh,
 ): void {
+  // Explicit message: GitHub's default squash body would paste every branch commit message,
+  // any of which could carry a closing keyword for another Issue (Bug-0017 #426).
   const r = graphql(
-    `mutation($id:ID!,$oid:GitObjectID!){mergePullRequest(input:{pullRequestId:$id,
-      mergeMethod:${o.method},expectedHeadOid:$oid}){pullRequest{merged}}}`,
-    { id: o.prId, oid: o.headOid },
+    `mutation($id:ID!,$oid:GitObjectID!,$h:String!,$b:String!){mergePullRequest(input:{pullRequestId:$id,
+      mergeMethod:${o.method},expectedHeadOid:$oid,commitHeadline:$h,commitBody:$b}){pullRequest{merged}}}`,
+    { id: o.prId, oid: o.headOid, h: o.headline, b: o.body },
     Merged,
     "pull request merge",
     run,
