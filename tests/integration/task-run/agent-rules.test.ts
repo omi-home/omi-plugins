@@ -84,7 +84,9 @@ test("architecture contract rules are loaded into the role AGENTS.md (ARC-001, n
 
 const GIT_ESCAPE = "OMI: agents run git only on paths inside their task workspace.";
 // Inside an agent run OMI_REPO names the agent's repo: the hook tests must not depend on it (#399).
+// The same holds for CLAUDE_PROJECT_DIR (the agent's workspace): the hook defaults read both (#445).
 delete process.env.OMI_REPO;
+delete process.env.CLAUDE_PROJECT_DIR;
 const ws = realpathSync.native(mkdtempSync(join(tmpdir(), "omi-agent-ws-")));
 const call = (tool_name: string, tool_input: HookInput["tool_input"]) =>
   agentPreToolUse({ cwd: ws, tool_name, tool_input }, ws);
@@ -326,7 +328,7 @@ test("bin/omi hook agent-pre-tool-use: exit 2 + reason; CLAUDE_PROJECT_DIR is th
     spawnSync(process.execPath, [bin, "hook", "agent-pre-tool-use"], {
       input: JSON.stringify(input),
       encoding: "utf8",
-      env: { ...process.env, CLAUDE_PROJECT_DIR: ws },
+      env: { ...process.env, CLAUDE_PROJECT_DIR: ws, OMI_REPO: "" },
     });
   const r = run({ cwd: ws, tool_name: "Bash", tool_input: { command: "git -C app push" } });
   assert.equal(r.status, 2);

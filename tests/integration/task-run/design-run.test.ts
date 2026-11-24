@@ -255,6 +255,7 @@ test("TC-383-23: a v2 DevTask/QATask is not run read-only; a Bug is refused with
     const packets: TaskPacket[] = [];
     // The runner is injected: reaching it (or a gate on the type's own rules) proves taskRun was taken,
     // never the design path (which would have produced a `design` section and a move).
+    let thrown: { code?: string; message?: string } | undefined;
     try {
       taskRunByType(
         {
@@ -266,9 +267,18 @@ test("TC-383-23: a v2 DevTask/QATask is not run read-only; a Bug is refused with
         },
         3,
       );
-    } catch {
-      // DoR / setup of the fake repo may refuse: not the design path either way
+    } catch (e) {
+      thrown = e as { code?: string; message?: string };
     }
+    // Only `taskRun` explains itself this way; the read-only run refuses a delivery/qa plan with
+    // POLICY_VIOLATION "<workflow>: use `omi task run <n>`" (#445, CR-003 of #383).
+    const readOnlyRefusal =
+      thrown?.code === "POLICY_VIOLATION" && /use `omi task run/.test(thrown.message ?? "");
+    assert.ok(!readOnlyRefusal, `${type}: routed to the read-only run: ${thrown?.message}`);
+    // Either an agent ran with the type's own role, or `taskRun` stopped on its own gate: never a swallowed pass.
+    const role = type === "QATask" ? "qa-engineer" : "software-engineer";
+    for (const p of packets) assert.equal(p.role, role, type);
+    assert.ok(packets.length > 0 || thrown, `${type}: neither an agent run nor a refusal`);
     assert.ok(!(s.w.bodies.get(3) ?? "").includes("omi:section=design"), type);
     assert.notEqual(s.project.byNumber(3).status, "In review", type);
   }

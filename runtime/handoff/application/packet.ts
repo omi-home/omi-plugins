@@ -243,9 +243,79 @@ function balancedEnd(text: string, start: number): number {
  * the text (braces inside strings ignored). Only objects are accepted.
  */
 export function extractJson(raw: string): unknown {
+  return extractJsonWithWarnings(raw).value;
+}
+
+/** Doubles every backslash inside a JSON string that does not start a valid escape. */
+function escapeLoneBackslashes(json: string): string {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < json.length; i++) {
+    const c = json[i] as string;
+    if (!inString) {
+      if (c === '"') inString = true;
+      out += c;
+    } else if (c === '"') {
+      inString = false;
+      out += c;
+    } else if (c === "\\") {
+      const next = json[i + 1] ?? "";
+      if (next === "\\" || next === '"') {
+        out += c + next;
+        i++;
+      } else if (
+        /[/bfnrt]/.test(next) ||
+        (next === "u" && /^[0-9a-fA-F]{4}$/.test(json.slice(i + 2, i + 6)))
+      ) {
+        out += c;
+      } else {
+        out += "\\\\";
+      }
+    } else out += c;
+  }
+  return out;
+}
+
+/**
+ * Like `extractJson`, plus the warnings raised. When the last ```json fence is not valid JSON,
+ * a repair of lone backslashes is tried (warning); if that fails too, the parse error is
+ * reported: never another object of the output.
+ */
+export function extractJsonWithWarnings(raw: string): { value: unknown; warnings: string[] } {
   const text = raw.trim();
   const whole = parseObject(text);
-  if (whole) return whole;
+  if (whole) return { value: whole, warnings: [] };
+  const fences = [...text.matchAll(/```json[ \t]*\r?\n([\s\S]*?)```/g)];
+  const lastFence = fences.at(-1)?.[1];
+  if (lastFence !== undefined) {
+    const fence = lastFence;
+    let parseError = "";
+    try {
+      const v: unknown = JSON.parse(fence);
+      if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+        return { value: v, warnings: [] };
+      }
+    } catch (e) {
+      parseError = e instanceof Error ? e.message : String(e);
+      try {
+        const v: unknown = JSON.parse(escapeLoneBackslashes(fence));
+        if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+          return {
+            value: v,
+            warnings: ["step result: unescaped backslash(es) in the JSON fence were doubled"],
+          };
+        }
+      } catch {
+        // fall through to the original parse error
+      }
+    }
+    if (parseError) {
+      throw new OmiError(
+        "CONTRACT_INVALID",
+        `step result: the last \`\`\`json block is not valid JSON: ${redact(parseError).slice(0, 300)}`,
+      );
+    }
+  }
   const lastBlock = (re: RegExp) =>
     [...text.matchAll(re)]
       .map((m) => parseObject(m[1] ?? ""))
@@ -253,7 +323,7 @@ export function extractJson(raw: string): unknown {
       .at(-1);
   const found =
     lastBlock(/```json[ \t]*\r?\n([\s\S]*?)```/g) ?? lastBlock(/```[ \t]*\r?\n([\s\S]*?)```/g);
-  if (found) return found;
+  if (found) return { value: found, warnings: [] };
   let last: unknown;
   for (let i = text.indexOf("{"); i !== -1; i = text.indexOf("{", i + 1)) {
     const end = balancedEnd(text, i);
@@ -263,7 +333,7 @@ export function extractJson(raw: string): unknown {
       i = end - 1;
     }
   }
-  if (last) return last;
+  if (last) return { value: last, warnings: [] };
   throw new OmiError("CONTRACT_INVALID", "step result: output is not a JSON object");
 }
 
@@ -344,6 +414,55 @@ function cutOverlong(input: unknown): { fixed: unknown; warnings: string[] } | u
   return { fixed, warnings };
 }
 
+/** Optional step-result fields; `null` means absent. Unknown fields are left for the contract. */
+const NULLABLE_TOP = [
+  "changedFiles",
+  "commitSha",
+  "evidencePaths",
+  "findings",
+  "blockerReason",
+  "nextAction",
+  "sectionUpdates",
+  "usage",
+] as const;
+const NULLABLE_FINDING = ["path", "line"] as const;
+
+/**
+ * Before the contract: `null` optional fields count as absent; `round`/`attempt` the agent left
+ * out are filled from the packet, a different value is refused naming the field.
+ */
+function normalizeResult(packet: TaskPacket, input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const out = { ...(input as Record<string, unknown>) };
+  for (const k of NULLABLE_TOP) if (out[k] === null) delete out[k];
+  if (Array.isArray(out.findings)) {
+    out.findings = out.findings.map((f: unknown) => {
+      if (!f || typeof f !== "object" || Array.isArray(f)) return f;
+      const copy = { ...(f as Record<string, unknown>) };
+      for (const k of NULLABLE_FINDING) if (copy[k] === null) delete copy[k];
+      return copy;
+    });
+  }
+  const issues: { path: string; message: string }[] = [];
+  for (const k of ["round", "attempt"] as const) {
+    if (out[k] === undefined || out[k] === null) out[k] = packet[k];
+    else if (out[k] !== packet[k]) {
+      issues.push({
+        path: k,
+        message: `${k} must be ${packet[k]} (the packet's), got ${String(out[k])}`,
+      });
+    }
+  }
+  if (issues.length) {
+    throw new OmiError(
+      "CONTRACT_INVALID",
+      `step result does not answer this packet: ${issues.map((i) => i.path).join(", ")}`,
+      { issues },
+    );
+  }
+  return out;
+}
+
 /** Like `acceptStepResult`, also returning the warnings the runtime raised (fields it cut). */
 export function acceptStepResultWithWarnings(
   packet: TaskPacket,
@@ -355,14 +474,15 @@ export function acceptStepResultWithWarnings(
       `step result: ${raw.length} chars exceeds the ${MAX_RESULT_CHARS} limit`,
     );
   }
-  const parsed = extractJson(raw);
+  const extracted = extractJsonWithWarnings(raw);
+  const parsed = normalizeResult(packet, extracted.value);
   const cutDown = cutOverlong(parsed);
   const r = parseContract(StepResult, cutDown ? cutDown.fixed : parsed, "step result");
-  const warnings = cutDown?.warnings ?? [];
+  const warnings = [...extracted.warnings, ...(cutDown?.warnings ?? [])];
 
-  const mismatch: string[] = (
-    ["workflowRunId", "stepId", "round", "attempt", "role"] as const
-  ).filter((k) => r[k] !== packet[k]);
+  const mismatch: string[] = (["workflowRunId", "stepId", "role"] as const).filter(
+    (k) => r[k] !== packet[k],
+  );
   if (r.issue.repository !== packet.issue.repository || r.issue.number !== packet.issue.number) {
     mismatch.push("issue");
   }
