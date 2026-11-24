@@ -22,7 +22,7 @@ import { runSetup } from "../adapters/setup.ts";
 import { branchName, ensureTaskWorkspace, git, type Workspace } from "../adapters/worktree.ts";
 import type { RunRow } from "../domain/run.ts";
 import { commandEnvFor, START_LEASE_MS, step, type TaskDeps } from "./common.ts";
-import { readyGates, startGates, typeOf } from "./gates.ts";
+import { readyGates, runTypeOf, startGates, typeOfV2 } from "./gates.ts";
 
 export interface StartResult {
   run: RunRow;
@@ -45,6 +45,12 @@ export function taskStart(deps: TaskDeps, issue: number): StartResult {
     acquireLease(db, { key: lease, holder: session, ttlMs: START_LEASE_MS });
     try {
       const ticket = fetchTicket(config, issue, gh);
+      if (typeOfV2(ticket) === "DesignTask" && isV2(config)) {
+        throw new OmiError(
+          "POLICY_VIOLATION",
+          `DesignTask runs read-only without a worktree: use \`omi task run ${issue}\``,
+        );
+      }
       const ready = readyGates(ticket, config, gh);
       const checks = [...startGates(ticket, config), ...ready.checks];
       const bad = checks.find((c) => c.status === "fail");
@@ -53,7 +59,7 @@ export function taskStart(deps: TaskDeps, issue: number): StartResult {
           checks,
         });
       }
-      const type = typeOf(ticket) as IssueType; // gates passed: exactly one valid type
+      const type = runTypeOf(ticket, config) as IssueType; // gates passed: exactly one valid type
       let run =
         liveRun(db, ref) ??
         createRun(db, { id: `${issue}-${randomUUID().slice(0, 8)}`, issue: ref, workflow: type });

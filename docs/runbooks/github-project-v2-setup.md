@@ -113,4 +113,15 @@ Trạng thái riêng của legacy bị bỏ có chủ đích ở v2:
 | `Waiting PO` (hết round review, PR `risk:high`, analyze xong) | không ghi Status; run vẫn chuyển WAITING_PO, Coordinator đưa lên `Awaiting PO` bằng `omi move` |
 | `Cleanup failed` / `Blocked` do agent | không ghi Status; run giữ CLEANUP_FAILED/BLOCKED và report trên Issue; Coordinator dùng `omi move <n> Blocked --on <m>` khi có blocker |
 
-Lưu ý: `task start/run`, `pr create/merge` vẫn bị gate từ chối ở v2 cho tới khi agent pack 5 role (Feature-0040) hoàn tất; nhánh v2 của chúng đã có và dùng engine.
+### Workflow theo issue type (DevTask-0132 #383)
+
+Ở v2, `task start` / `task run` chọn workflow theo **issue type native** (không cần Assignee/Role); Definition of Ready v2 vẫn áp dụng:
+
+| Issue type | Workflow |
+|---|---|
+| `DesignTask` | UIUX Designer, chỉ đọc: ghi section `design` (marker `omi:section=design`) vào body rồi `omi move <n> "In review"`; không commit, không PR. Coordinator duyệt (Done) hoặc chuyển `Awaiting PO` khi có `needs-po`; CLI không tự Done |
+| `DevTask` (kể cả label `spike`) | Software-Engineer → checks → review → `PR_PENDING` (review trên PR là task kế tiếp) |
+| `QATask` | QA-Engineer với packet hiện có (bảng TC, `Run #k` là task kế tiếp) |
+| `Bug`, `UserStory`, `Epic`, `Doc`, `ADR` | `task start`/`task run` từ chối (`POLICY_VIOLATION`). Bug được sửa qua DevTask con + QATask con |
+
+`DesignTask` chạy qua `omi task run <n>`; kết quả có thêm trường `review` (lệnh `omi move` sang `In review`) cạnh `engine`. `task analyze` vẫn dùng cho Feature/Story theo type legacy.

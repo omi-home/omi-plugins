@@ -1309,7 +1309,14 @@ export function runAnalysis(
       // An open question (BLOCKED) or a failed analysis: the PO decides before anyone continues.
       return advanceRun(d.db, t.run.id, { type: "ESCALATE_TO_PO" }).context;
     }
-    for (const u of r.sectionUpdates) d.writeSection(u.section, u.markdown);
+    if (t.plan.workflow === "Design") {
+      // A design run needs exactly the `design` section; without it the Issue must not move on.
+      const design = r.sectionUpdates.find((u) => u.section === "design");
+      if (!design) return advanceRun(d.db, t.run.id, { type: "ESCALATE_TO_PO" }).context;
+      d.writeSection("design", design.markdown);
+    } else {
+      for (const u of r.sectionUpdates) d.writeSection(u.section, u.markdown);
+    }
     ctx = runContext(d.db, t.run.id);
   }
   return advanceRun(d.db, t.run.id, { type: "ANALYSIS_COMPLETED" }).context;

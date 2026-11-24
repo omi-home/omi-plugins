@@ -34,6 +34,12 @@ export function lifecycleStart(deps: LifecycleDeps, issue: number): EngineOutcom
   return { command: "move", data: r.data };
 }
 
+/** v2 DesignTask: `omi move <issue> "In review"` once the design section is in the body. */
+export function lifecycleReview(deps: LifecycleDeps, issue: number): EngineOutcome {
+  const r = issueMove(issue, "In review", {}, engine(deps));
+  return { command: "move", data: r.data };
+}
+
 /** v2: `omi sync`, which applies In review / Done / roll-up. */
 export function lifecycleSync(deps: LifecycleDeps): EngineOutcome {
   return { command: "sync", data: projectSync({}, engine(deps)).data };

@@ -60,6 +60,12 @@ Commands:
                          \`task finalize\` (no PR); FAILED stops Blocked with proposed Bug bodies
                          (\`Found in: QATask #n · TC-…\`) for the Coordinator; after the fix merged,
                          \`task unblock\` and \`task run\` again gives Run #k+1.
+                         github.model v2 picks the workflow by native issue type: DesignTask → UI/UX
+                         Designer (read-only, writes section design into the body, then \`omi move <n>
+                         "In review"\`; no commit, no PR; the Coordinator approves, the CLI never
+                         sets Done); DevTask (also with label spike) → Software Engineer → checks →
+                         review; QATask → QA Engineer. Bug, UserStory, Epic, Doc, ADR are refused (a
+                         Bug is fixed through a child DevTask + QATask).
   task analyze <n>       Feature / Change Request / FR / NFR #n: BA (→ UI/UX with label ui) (→ Architect)
                          write their sections into the Issue body, then Waiting PO. No worktree. Only
                          this command plans the BA; the Architect runs here and on task run's review
